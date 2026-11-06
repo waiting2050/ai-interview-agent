@@ -8,9 +8,45 @@ Go 1.25 + [cloudwego/eino](https://github.com/cloudwego/eino) + PostgreSQL + Red
 > 设计单一事实源：[docs/development-plan.md](docs/development-plan.md)；关键取舍：[docs/design-rationale.md](docs/design-rationale.md)。
 > PostgreSQL 是唯一运行期事实源；Redis 只做跨进程会话锁；内存实现仅用于单测。
 
-![面试进行中](docs/screenshots/m13-stepper-desktop.png)
+## 一条视觉主线
 
-![复盘报告](docs/screenshots/demo-r3-report.png)
+以下截图来自同一场 heuristic 演示（不调用模型），1440 宽、1.5x，按求职顺序排列。前两屏是左侧设置栏里的规则版结果，后四屏是面试主区、报告区与复习面板。
+
+### 简历诊断
+
+![简历诊断](docs/screenshots/flow-r4-resume-diagnosis.png)
+
+本地规则给出 69 分（3 档）与初筛 77 / 技术 64：A–E 维度逐项扣分、分段得分，并把 R03 / R14 / R18 三条问题与「差 → 好」改写示例摆在一起。
+
+### JD 匹配
+
+![JD 匹配](docs/screenshots/flow-r4-jd-match.png)
+
+同一份简历对上「Go 后端开发工程师（订单履约方向）」：匹配度 77，绿色是已覆盖技能、红色是可观测性 / 性能优化缺口，并复用领域包生成 5 题题纲。
+
+### 面试进行中
+
+![面试进行中](docs/screenshots/flow-r4-interview.png)
+
+SSE 已连接，进度停在第 1 / 3 题；题纲进度条出现「追问 1 / 上限 1」支线，当前问题就是由第 1 题触发的追问。
+
+### 单题评分依据
+
+![单题评分依据](docs/screenshots/flow-r4-rationale.png)
+
+第一题 40 分：维度分 × 权重表、加权公式、加分 / 扣分、证据摘录、缺失要点与 `follow_up` 决策理由全部展开可见。
+
+### 复盘报告
+
+![复盘报告](docs/screenshots/flow-r4-report.png)
+
+5 题收尾后总分 60.0（及格）：维度雷达、逐题趋势与 SM-2 遗忘曲线预测；报告由确定性拼装，不依赖模型可用性。
+
+### 间隔复习
+
+![间隔复习](docs/screenshots/flow-r4-review.png)
+
+报告提交的同一事务生成复习卡；这里第 1 / 10 张（本地库含此前演示累计的到期卡），正面问题、参考答案折叠与 0–5 自评按钮同屏。自评 4 后写回 EF 2.50 / 间隔 1 天 / 次日到期。
 
 ## 三分钟跑起来
 
