@@ -9,6 +9,22 @@
     ["structure", "表达结构"],
     ["evidence_credibility", "经历可信度"],
   ];
+  // Mirrors internal/domain/evaluation. Weights are shown, not just applied.
+  const WEIGHTS = {
+    correctness: 0.30,
+    depth: 0.25,
+    engineering_judgment: 0.20,
+    structure: 0.15,
+    evidence_credibility: 0.10,
+  };
+  const BONUS_CAP = 8;
+  const PENALTY_CAP = -10;
+  const DIM_LABEL = Object.fromEntries(DIMENSIONS);
+  const EMPTY_STATE_HTML =
+    '<div class="empty-state" id="empty-state">' +
+    '<div class="empty-icon">🎤</div>' +
+    "<p>左侧填写岗位信息并开始，首题会通过 SSE 实时推送。</p>" +
+    "</div>";
   const EVENT_TYPES = [
     "session.created", "session.started", "session.phase", "session.aborted", "session.completed",
     "session.failed", "question.asked", "answer.received", "evaluation.completed",
@@ -25,6 +41,13 @@
     streamClosed: false,
     reportLoaded: false,
     canFinish: false,
+    config: null,
+    role: "",
+    startedAt: null,
+    primaryAsked: 0,
+    followupsUsed: 0,
+    timer: null,
+    lastEvalCard: null,
   };
 
   const threadEl = $("thread");
@@ -245,6 +268,62 @@
     return "待提升";
   }
 
+  function formatDuration(totalSeconds) {
+    const seconds = Math.max(0, Math.floor(totalSeconds));
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    const pad = (n) => String(n).padStart(2, "0");
+    return h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+  }
+
+  function setProgress() {
+    const cfg = state.config || {};
+    $("prog-question").textContent = state.primaryAsked;
+    $("prog-total").textContent = cfg.max_primary_questions || 0;
+    $("prog-followups").textContent = state.followupsUsed;
+    $("prog-followup-limit").textContent = cfg.max_total_followups || 0;
+    if (state.startedAt) {
+      $("prog-elapsed").textContent = formatDuration((Date.now() - new Date(state.startedAt).getTime()) / 1000);
+    }
+  }
+
+  function stopElapsedTimer() {
+    if (state.timer) {
+      clearInterval(state.timer);
+      state.timer = null;
+    }
+  }
+
+  function startElapsedTimer(iso) {
+    state.startedAt = iso || new Date().toISOString();
+    stopElapsedTimer();
+    state.timer = setInterval(setProgress, 1000);
+    setProgress();
+    renderSessionSummary();
+  }
+
+  function renderSessionSummary() {
+    const cfg = state.config || {};
+    $("sum-role").textContent = state.role || "-";
+    $("sum-questions").textContent = `${cfg.max_primary_questions || "?"} 道主问题`;
+    $("sum-followups").textContent =
+      `每题最多 ${cfg.max_followups_per_question == null ? "?" : cfg.max_followups_per_question} 次` +
+      ` · 总预算 ${cfg.max_total_followups == null ? "?" : cfg.max_total_followups} 次`;
+    $("sum-started").textContent = state.startedAt
+      ? new Date(state.startedAt).toLocaleTimeString("zh-CN", { hour12: false })
+      : "等待开始…";
+  }
+
+  function decisionActionLabel(action) {
+    switch (action) {
+      case "followup": return "深挖追问";
+      case "next_question": return "进入下一题";
+      case "finish": return "题纲完成，准备收尾";
+      default: return action || "决策";
+    }
+  }
+
   function reasonLabel(code) {
     switch (code) {
       case "model_output_invalid": return "模型输出无法解析";
@@ -395,8 +474,11 @@
   }
 
   const HANDLERS = {
-    "session.started": () => {
+    "session.started": (p, env) => {
       setStatus("面试进行中", "running");
+      if (env && env.occurred_at) {
+        startElapsedTimer(env.occurred_at);
+      }
     },
     "session.phase": (p) => {
       const status = p.status || "";
@@ -443,6 +525,8 @@
     },
     "session.completed": () => {
       closeStream();
+      setProgress();
+      stopElapsedTimer();
       setStatus("面试已完成", "ok");
       $("phase-text").textContent = "报告已生成";
       answerBox.hidden = true;
@@ -465,8 +549,13 @@
     state.pendingTurn = p.turn_id;
     removeThinking();
     const followup = Boolean(p.is_followup);
+    if (!followup) {
+      state.primaryAsked += 1;
+    }
+    setProgress();
+    const total = state.config && state.config.max_primary_questions ? state.config.max_primary_questions : "?";
     const el = card("card-question");
-    el.appendChild(cardHead(`第 ${p.seq || "?"} 题`, [
+    el.appendChild(cardHead(followup ? "追问" : `第 ${state.primaryAsked} / 共 ${total} 题`, [
       { text: followup ? "追问" : "主问题", kind: followup ? "followup" : "primary" },
       { text: `深度 ${p.depth || 1}` },
     ]));
@@ -483,7 +572,9 @@
     appendCard(el);
 
     answerBox.hidden = false;
-    $("answer-context").textContent = `当前待答：第 ${p.seq || "?"} 题${followup ? "（追问）" : ""} · turn ${String(p.turn_id).slice(0, 8)}`;
+    $("answer-context").textContent =
+      `当前待答：${followup ? "追问" : `主问题 ${state.primaryAsked} / 共 ${state.config && state.config.max_primary_questions ? state.config.max_primary_questions : "?"} 题`}` +
+      ` · turn ${String(p.turn_id).slice(0, 8)}`;
     answerInput.disabled = false;
     answerInput.value = "";
     submitBtn.disabled = false;
@@ -521,6 +612,122 @@
     return grid;
   }
 
+  function normalizeScoreData(src) {
+    const scores = src.scores || {};
+    const base = Number(src.base_score != null ? src.base_score : 0);
+    const bonusList = src.bonus || [];
+    const penaltyList = src.penalty || [];
+    const bonus = src.bonus_points != null
+      ? Number(src.bonus_points)
+      : Math.min(BONUS_CAP, bonusList.reduce((sum, item) => sum + Number(item.points || 0), 0));
+    const rawPenalty = src.penalty_points != null
+      ? Number(src.penalty_points)
+      : penaltyList.reduce((sum, item) => sum + Number(item.points || 0), 0);
+    const penalty = Math.max(PENALTY_CAP, rawPenalty);
+    const total = src.total_score != null
+      ? Number(src.total_score)
+      : src.score != null
+        ? Number(src.score)
+        : Math.max(0, Math.min(100, base + bonus + penalty));
+    return { scores, base, bonus, penalty, total, bonusList, penaltyList };
+  }
+
+  function humanScoreLine(d) {
+    const values = DIMENSIONS.map(([key]) => d.scores[key]);
+    const filled = values.filter((v) => v != null);
+    const allEqual = filled.length === DIMENSIONS.length && filled.every((v) => v === filled[0]);
+    let line;
+    if (allEqual) {
+      line = `五维均 ${filled[0]} 分 → ${filled[0]}/5×100 = ${d.base.toFixed(1)}`;
+    } else {
+      line = `五维 ${values.map((v) => (v == null ? "-" : v)).join("/")}，按 0.30 / 0.25 / 0.20 / 0.15 / 0.10 权重折算 → base ${d.base.toFixed(1)}`;
+    }
+    if (d.bonus === 0 && d.penalty === 0) {
+      line += "，无加分扣分。";
+    } else {
+      line += `，加分 +${d.bonus.toFixed(1)}、扣分 ${d.penalty.toFixed(1)} → total ${d.total.toFixed(1)}。`;
+    }
+    return line;
+  }
+
+  function scoreTableHtml(d) {
+    const rows = DIMENSIONS.map(([key, label]) => {
+      const raw = d.scores[key];
+      if (raw == null) {
+        return "";
+      }
+      const weight = WEIGHTS[key] || 0;
+      const contribution = Number(raw) / 5 * weight * 100;
+      return `<tr><td>${escapeHtml(label)}</td><td class="num">${raw} / 5</td>` +
+        `<td class="num">${weight.toFixed(2)}</td><td class="num">${contribution.toFixed(1)}</td></tr>`;
+    }).join("");
+    return `<table class="calc-table"><thead><tr><th>维度</th><th class="num">原始分</th>` +
+      `<th class="num">权重</th><th class="num">贡献值</th></tr></thead><tbody>${rows}</tbody></table>` +
+      `<div class="formula">base = Σ(维度分 / 5 × 权重) × 100 = ${d.base.toFixed(1)}</div>`;
+  }
+
+  function adjustmentListHtml(list, kind) {
+    if (!list || list.length === 0) {
+      return `<p class="decision-note">无${kind === "bonus" ? "加分" : "扣分"}条目。</p>`;
+    }
+    const items = list.map((item) => {
+      const points = Number(item.points || 0);
+      const label = points > 0 ? `+${points}` : String(points);
+      return `<li><span class="pts">${escapeHtml(item.type || kind)} ${label}</span> · 「${escapeHtml(item.quote || "")}」` +
+        `${item.reason ? " · " + escapeHtml(item.reason) : ""}</li>`;
+    }).join("");
+    return `<ul class="adjust-list">${items}</ul>`;
+  }
+
+  function rationaleBodyHtml(src, withDecision) {
+    const d = normalizeScoreData(src);
+    const evidence = src.evidence || [];
+    const missing = src.missing_points || [];
+    const followup = src.followup;
+    const evidenceHtml = evidence.length > 0
+      ? `<ul class="evidence-list">${evidence.map((e) =>
+        `<li>「${escapeHtml(e.quote || "")}」<span class="dim-tag">支持：${escapeHtml(DIM_LABEL[e.dimension] || e.dimension || "未标注")}</span>` +
+        `${e.reason ? "<br>" + escapeHtml(e.reason) : ""}</li>`).join("")}</ul>`
+      : '<p class="decision-note">本轮没有可展示的证据摘录。</p>';
+    const missingHtml = missing.length > 0
+      ? `<ul class="missing-list">${missing.map((m) => `<li>${escapeHtml(m)}</li>`).join("")}</ul>`
+      : '<p class="decision-note">关键点已覆盖。</p>';
+    const followupHtml = followup
+      ? `<div class="calc-label">本轮追问建议</div><p class="decision-note">${
+        followup.needed
+          ? `需要追问 · 目标：${escapeHtml(followup.target || "未指定")}${followup.reason ? " · " + escapeHtml(followup.reason) : ""}`
+          : "不需要追问。"
+      }</p>`
+      : "";
+    return `
+      <div class="calc-label">维度分 × 权重</div>
+      ${scoreTableHtml(d)}
+      <div class="calc-label">加分 / 扣分</div>
+      <p class="decision-note">加分合计 +${d.bonus.toFixed(1)}（上限 +${BONUS_CAP}），扣分合计 ${d.penalty.toFixed(1)}（下限 ${PENALTY_CAP}）。</p>
+      ${adjustmentListHtml(d.bonusList, "bonus")}
+      ${adjustmentListHtml(d.penaltyList, "penalty")}
+      <div class="formula">total = base + bonus + penalty = ${d.base.toFixed(1)} + ${d.bonus.toFixed(1)} + ${d.penalty.toFixed(1)} = ${d.total.toFixed(1)}</div>
+      <div class="calc-label">证据摘录</div>
+      ${evidenceHtml}
+      <div class="calc-label">缺失要点</div>
+      ${missingHtml}
+      ${withDecision === false ? "" : `<div class="calc-label">决策与理由</div>
+      <p class="decision-note" id="decision-${escapeHtml(src.turn_id || "")}">决策尚未返回，评估完成后会在这里显示动作与理由。</p>`}
+      ${followupHtml}
+    `;
+  }
+
+  function rationaleElement(src, withDecision) {
+    const d = normalizeScoreData(src);
+    const details = document.createElement("details");
+    details.className = "rationale";
+    details.innerHTML =
+      `<summary><span class="rationale-title">评分依据</span>` +
+      `<span class="human-line">${escapeHtml(humanScoreLine(d))}</span></summary>` +
+      `<div class="rationale-body">${rationaleBodyHtml(src, withDecision)}</div>`;
+    return details;
+  }
+
   function onEvaluation(p) {
     removeThinking();
     const el = card("card-eval");
@@ -538,6 +745,8 @@
     row.appendChild(band);
     el.appendChild(row);
     el.appendChild(dimensionGrid(p.scores));
+    el.appendChild(rationaleElement(p));
+    state.lastEvalCard = el;
 
     const missing = p.missing_points || [];
     if (missing.length > 0) {
@@ -579,7 +788,15 @@
   }
 
   function onDecision(p) {
-    const actionLabel = { followup: "深挖追问", next_question: "进入下一题", finish: "题纲完成，准备收尾" }[p.action] || p.action || "决策";
+    const actionLabel = decisionActionLabel(p.action);
+    if (typeof p.followups_used === "number") {
+      state.followupsUsed = p.followups_used;
+      setProgress();
+    }
+    const note = p.turn_id ? $(`decision-${p.turn_id}`) : null;
+    if (note) {
+      note.textContent = `${actionLabel}：${p.reason || "未提供理由"}`;
+    }
     const el = card("card-event");
     el.appendChild(cardHead("评估决策", [{ text: actionLabel }]));
     if (p.reason) {
@@ -697,6 +914,42 @@
     }
   }
 
+  function questionReviewElement(q) {
+    const details = document.createElement("details");
+    details.className = "q-review";
+    const kind = q.kind === "followup" ? "追问" : "主问题";
+    const score = Number(q.score || 0);
+    const head = document.createElement("summary");
+    head.innerHTML =
+      `<span>第 ${q.seq} 题 · ${escapeHtml(q.topic || "未命名主题")}</span>` +
+      `<span class="chip">${kind}</span>` +
+      `<span class="q-score">${score.toFixed(1)} 分${q.degraded ? "（降级）" : ""}</span>`;
+    details.appendChild(head);
+
+    const body = document.createElement("div");
+    body.className = "md";
+    let html = "";
+    if (q.question) {
+      html += `<blockquote>${escapeHtml(q.question)}</blockquote>`;
+    }
+    if (q.comment) {
+      html += `<p>${escapeHtml(q.comment)}</p>`;
+    }
+    if (q.strong_points && q.strong_points.length > 0) {
+      html += `<p><strong>亮点：</strong>${escapeHtml(q.strong_points.join("；"))}</p>`;
+    }
+    if (q.missing_points && q.missing_points.length > 0) {
+      html += `<p><strong>待补：</strong>${escapeHtml(q.missing_points.join("；"))}</p>`;
+    }
+    body.innerHTML = html;
+    details.appendChild(body);
+
+    if (!q.degraded) {
+      details.appendChild(rationaleElement(q, false));
+    }
+    return details;
+  }
+
   function renderReport(dto) {
     const structured = dto.structured || {};
     reportPanel.hidden = false;
@@ -713,17 +966,22 @@
 
     reportSections.innerHTML = "";
     const sections = structured.sections || [];
+    const questions = structured.questions || [];
     if (sections.length > 0) {
       sections.forEach((section) => {
         const wrap = document.createElement("div");
         wrap.className = "report-section";
         const title = document.createElement("h3");
         title.textContent = section.title || `第 ${(section.index || 0) + 1} 段`;
-        const md = document.createElement("div");
-        md.className = "md";
-        md.innerHTML = renderMarkdown(section.markdown || "");
         wrap.appendChild(title);
-        wrap.appendChild(md);
+        if (Number(section.index) === 2 && questions.length > 0) {
+          questions.forEach((q) => wrap.appendChild(questionReviewElement(q)));
+        } else {
+          const md = document.createElement("div");
+          md.className = "md";
+          md.innerHTML = renderMarkdown(section.markdown || "");
+          wrap.appendChild(md);
+        }
         reportSections.appendChild(wrap);
       });
     } else if (dto.markdown) {
@@ -740,14 +998,30 @@
 
   // ---------- actions ----------
 
-  function setSetupDisabled(disabled) {
+  function setSetupBusy(busy) {
     ["target-role", "jd-text", "resume-text", "candidate-name", "max-primary", "max-followups"].forEach((id) => {
-      $(id).disabled = disabled;
+      $(id).disabled = busy;
     });
-    const btn = $("start-btn");
-    btn.disabled = disabled;
-    if (disabled) {
-      btn.textContent = "会话已创建";
+    $("start-btn").disabled = busy;
+  }
+
+  async function startSessionRun() {
+    try {
+      await withLockRetry(() => api(`/v1/sessions/${state.sessionId}/start`, {
+        method: "POST",
+        headers: { "Idempotency-Key": `demo-start-${state.sessionId}` },
+        body: "{}",
+      }));
+      setStatus("已入队，等待首题…", "running");
+      $("phase-text").textContent = "准备出题";
+      showThinking("正在生成首题…");
+    } catch (err) {
+      showNotice("error", "启动失败：" + humanError(err), {
+        key: "start-error",
+        actionLabel: "重试启动",
+        onAction: startSessionRun,
+      });
+      setStatus("启动失败", "error");
     }
   }
 
@@ -768,7 +1042,7 @@
     $("setup-error").hidden = true;
     const primary = Number($("max-primary").value);
     const followups = Number($("max-followups").value);
-    setSetupDisabled(true);
+    setSetupBusy(true);
     setStatus("正在创建会话…", "running");
 
     try {
@@ -791,25 +1065,74 @@
         }),
       });
       state.sessionId = created.session_id;
+      state.config = created.config || {
+        max_primary_questions: primary,
+        max_followups_per_question: followups,
+        max_total_followups: Math.max(primary, primary * followups),
+      };
+      state.role = role;
+      state.primaryAsked = 0;
+      state.followupsUsed = 0;
       $("session-meta").hidden = false;
       $("session-id").textContent = state.sessionId;
       $("empty-state")?.remove();
+      $("setup-block").hidden = true;
+      $("session-summary").hidden = false;
+      $("progress-strip").hidden = false;
+      startElapsedTimer(created.created_at);
       finishBar.hidden = false;
       connectEvents();
-      await withLockRetry(() => api(`/v1/sessions/${state.sessionId}/start`, {
-        method: "POST",
-        headers: { "Idempotency-Key": `demo-start-${state.sessionId}` },
-        body: "{}",
-      }));
-      setStatus("已入队，等待首题…", "running");
-      $("phase-text").textContent = "准备出题";
-      showThinking("正在生成首题…");
     } catch (err) {
       $("setup-error").hidden = false;
       $("setup-error").textContent = humanError(err);
       setStatus("启动失败", "error");
-      setSetupDisabled(Boolean(state.sessionId));
+      setSetupBusy(false);
+      return;
     }
+    await startSessionRun();
+  }
+
+  function restartInterview() {
+    closeStream();
+    stopElapsedTimer();
+    state.sessionId = null;
+    state.pendingTurn = null;
+    state.seen = new Set();
+    state.busy = false;
+    state.streamClosed = false;
+    state.reportLoaded = false;
+    state.canFinish = false;
+    state.config = null;
+    state.role = "";
+    state.startedAt = null;
+    state.primaryAsked = 0;
+    state.followupsUsed = 0;
+    state.lastEvalCard = null;
+
+    threadEl.innerHTML = EMPTY_STATE_HTML;
+    noticesEl.innerHTML = "";
+    answerBox.hidden = true;
+    answerInput.value = "";
+    answerInput.disabled = false;
+    submitBtn.disabled = false;
+    finishBar.hidden = true;
+    finishBtn.disabled = false;
+    finishBtn.classList.remove("pulse");
+    reportPanel.hidden = true;
+    reportMeta.innerHTML = "";
+    reportSections.innerHTML = "";
+    reportStatus.textContent = "正在生成…";
+    $("session-meta").hidden = true;
+    $("session-id").textContent = "";
+    $("progress-strip").hidden = true;
+    $("session-summary").hidden = true;
+    $("setup-block").hidden = false;
+    $("setup-error").hidden = true;
+    $("setup-error").textContent = "";
+    setSetupBusy(false);
+    setStatus("未开始", "idle");
+    $("phase-text").textContent = "创建会话后这里显示阶段";
+    setSSE("SSE 未连接", "idle");
   }
 
   async function submitAnswer() {
@@ -898,6 +1221,7 @@
   // ---------- wiring ----------
 
   $("setup-form").addEventListener("submit", startInterview);
+  $("restart-btn").addEventListener("click", restartInterview);
   submitBtn.addEventListener("click", submitAnswer);
   finishBtn.addEventListener("click", finishInterview);
   answerInput.addEventListener("keydown", (event) => {

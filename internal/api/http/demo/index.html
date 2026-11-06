@@ -23,9 +23,10 @@
 
 <main class="layout">
   <aside class="panel setup-panel">
-    <h2>开始一场面试</h2>
-    <p class="hint">不填 API Key 也能完整跑通：服务端会退化为确定性 heuristic 模型。</p>
-    <form id="setup-form" autocomplete="off">
+    <div id="setup-block">
+      <h2>开始一场面试</h2>
+      <p class="hint">不填 API Key 也能完整跑通：服务端会退化为确定性 heuristic 模型。</p>
+      <form id="setup-form" autocomplete="off">
       <label>
         目标岗位 <span class="req">*</span>
         <input id="target-role" type="text" required placeholder="例如：Go 后端开发工程师" value="Go 后端开发工程师">
@@ -60,16 +61,29 @@
         </label>
       </div>
       <button id="start-btn" class="primary" type="submit">创建会话并开始</button>
-    </form>
-    <p id="setup-error" class="form-error" hidden></p>
-    <div class="steps">
-      <h3>演示三步走</h3>
+      </form>
+      <p id="setup-error" class="form-error" hidden></p>
+    </div>
+
+    <div id="session-summary" class="session-summary" hidden>
+      <h2>当前会话</h2>
+      <dl>
+        <div><dt>目标岗位</dt><dd id="sum-role">-</dd></div>
+        <div><dt>主问题</dt><dd id="sum-questions">-</dd></div>
+        <div><dt>追问预算</dt><dd id="sum-followups">-</dd></div>
+        <div><dt>开始时间</dt><dd id="sum-started">-</dd></div>
+      </dl>
+      <button id="restart-btn" class="secondary" type="button">重开一场</button>
+    </div>
+
+    <details class="steps">
+      <summary>演示三步</summary>
       <ol>
         <li>填岗位与 JD，点「创建会话并开始」。</li>
         <li>按首题作答并提交，实时看到评分与追问。</li>
         <li>点「结束面试」，等待五段报告生成。</li>
       </ol>
-    </div>
+    </details>
   </aside>
 
   <section class="panel main-panel">
@@ -81,6 +95,11 @@
     </div>
     <div id="session-meta" class="session-meta" hidden>
       <code id="session-id"></code>
+    </div>
+    <div id="progress-strip" class="progress-strip" hidden>
+      <span class="prog-item">第 <b id="prog-question">0</b> / 共 <b id="prog-total">0</b> 题</span>
+      <span class="prog-item">追问已用 <b id="prog-followups">0</b> / 上限 <b id="prog-followup-limit">0</b></span>
+      <span class="prog-item">已用时长 <b id="prog-elapsed">00:00</b></span>
     </div>
 
     <div id="notices" class="notices" aria-live="polite"></div>
