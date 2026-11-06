@@ -174,7 +174,10 @@
     reviewOpen: {},
     reportCost: null,
     sampleMode: false,
+    // M13 staged progress. topics/followups are indexed by plan item (0-based).
+    stepper: { total: 0, done: 0, current: 0, topics: [], followups: [], lastCurrent: 0 },
   };
+  let stepperSig = "";
 
   const noticesEl = $("notices");
   const emptyState = $("empty-state");
@@ -198,6 +201,10 @@
   const reportSections = $("report-sections");
   const runInfo = $("run-info");
   const runInfoBody = $("run-info-body");
+  const stepperEl = $("stepper");
+  const stepperTrack = $("stepper-track");
+  const stepperCompact = $("stepper-compact");
+  const stepperHint = $("stepper-hint");
 
   let uid = 0;
 
@@ -482,6 +489,141 @@
     if (state.startedAt) {
       $("prog-elapsed").textContent = formatDuration((Date.now() - new Date(state.startedAt).getTime()) / 1000);
     }
+    renderStepper();
+  }
+
+  // ---------- M13 staged progress stepper ----------
+
+  function stepperTotal() {
+    const cfg = state.config || {};
+    return Number(cfg.max_primary_questions || 0) || Number(state.stepper.total || 0);
+  }
+
+  function resetStepper(total) {
+    const count = Number(total || 0);
+    state.stepper = {
+      total: count,
+      done: 0,
+      current: count > 0 ? 1 : 0,
+      topics: [],
+      followups: [],
+      lastCurrent: 0,
+    };
+    stepperSig = "";
+  }
+
+  function completeStepper() {
+    const total = stepperTotal();
+    if (total <= 0) {
+      return;
+    }
+    state.stepper.total = total;
+    state.stepper.done = total;
+    state.stepper.current = 0;
+  }
+
+  function notePrimaryQuestion(index, topic) {
+    const s = state.stepper;
+    s.total = stepperTotal() || s.total;
+    s.done = Math.max(s.done, index - 1);
+    s.current = index;
+    if (topic) {
+      s.topics[index - 1] = topic;
+    }
+  }
+
+  function noteFollowupQuestion(index) {
+    const s = state.stepper;
+    if (!index || index < 1) {
+      return;
+    }
+    s.followups[index - 1] = (s.followups[index - 1] || 0) + 1;
+  }
+
+  // Renders one node per plan item. Done nodes get a check, the current node is
+  // highlighted, planned nodes stay grey. Follow-ups hang off the current node
+  // as a dashed branch instead of becoming their own level.
+  function renderStepper() {
+    const total = stepperTotal();
+    if (!(state.sessionId || state.sampleMode) || total <= 0) {
+      stepperEl.hidden = true;
+      return;
+    }
+    stepperEl.hidden = false;
+
+    const s = state.stepper;
+    const done = Math.min(s.done, total);
+    const allDone = done >= total;
+    const current = allDone ? 0 : Math.min(Math.max(s.current, 1), total);
+    const sig = [total, done, current, s.topics.join("|"), s.followups.join(",")].join("#");
+    if (sig === stepperSig) {
+      return;
+    }
+    stepperSig = sig;
+
+    const followupCap = (state.config && state.config.max_followups_per_question) || 1;
+    stepperHint.textContent = `已完成 ${done} / ${total} 关`;
+
+    stepperTrack.innerHTML = "";
+    let focusNode = null;
+    for (let i = 1; i <= total; i++) {
+      const isDone = i <= done;
+      const isCurrent = !allDone && i === current;
+      const node = document.createElement("div");
+      node.className = "step-node " + (isDone ? "done" : isCurrent ? "active" : "todo");
+      node.setAttribute("role", "listitem");
+
+      const main = document.createElement("div");
+      main.className = "step-main";
+      const dot = document.createElement("span");
+      dot.className = "step-dot";
+      dot.setAttribute("aria-hidden", "true");
+      dot.textContent = isDone ? "✓" : String(i);
+      const copy = document.createElement("span");
+      copy.className = "step-copy";
+      const topic = document.createElement("b");
+      topic.className = "step-topic";
+      const topicText = s.topics[i - 1] || "";
+      topic.textContent = topicText ? truncateText(topicText, 12) : `第 ${i} 关`;
+      topic.title = topicText || `第 ${i} 关`;
+      const stateText = document.createElement("span");
+      stateText.className = "step-state";
+      stateText.textContent = isDone ? "已完成" : isCurrent ? "作答中" : "未开始";
+      copy.appendChild(topic);
+      copy.appendChild(stateText);
+      main.appendChild(dot);
+      main.appendChild(copy);
+      node.appendChild(main);
+
+      const used = s.followups[i - 1] || 0;
+      if (isCurrent && used > 0) {
+        const branch = document.createElement("div");
+        branch.className = "step-branch";
+        branch.textContent = `↳ 追问 ${used} / 上限 ${followupCap}`;
+        node.appendChild(branch);
+        stateText.textContent = "追问中";
+      }
+
+      stepperTrack.appendChild(node);
+      if (isCurrent) {
+        focusNode = node;
+      }
+    }
+
+    const remaining = allDone ? 0 : Math.max(0, total - Math.max(current, done));
+    stepperCompact.innerHTML = allDone
+      ? `<span class="compact-main">全部 ${total} 关已完成</span>`
+      : `<span class="compact-main">第 ${current} 关 / 共 ${total} 关</span>` +
+        `<span class="compact-rest">剩余 ${remaining} 关</span>`;
+
+    if (focusNode && current !== s.lastCurrent) {
+      s.lastCurrent = current;
+      requestAnimationFrame(() => {
+        if (focusNode.isConnected) {
+          focusNode.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
+        }
+      });
+    }
   }
 
   function stopElapsedTimer() {
@@ -722,6 +864,7 @@
     },
     "session.completed": () => {
       closeStream();
+      completeStepper();
       setProgress();
       stopElapsedTimer();
       setStatus("面试已完成", "ok");
@@ -750,6 +893,9 @@
     const followup = Boolean(p.is_followup);
     if (!followup) {
       state.primaryAsked += 1;
+      notePrimaryQuestion(state.primaryAsked, p.topic);
+    } else {
+      noteFollowupQuestion(state.stepper.current || state.primaryAsked);
     }
     setProgress();
     const total = state.config && state.config.max_primary_questions ? state.config.max_primary_questions : "?";
@@ -1067,6 +1213,8 @@
       return;
     }
     state.canFinish = true;
+    completeStepper();
+    setProgress();
     finishBtn.classList.add("pulse");
     answerBox.hidden = true;
     showNotice("ok", "题纲已完成，点击「结束面试并生成报告」查看五段报告。", { key: "finish-ready" });
@@ -1421,6 +1569,8 @@
     state.config = { max_primary_questions: 3, max_followups_per_question: 1, max_total_followups: 2 };
     state.primaryAsked = 3;
     state.followupsUsed = 0;
+    resetStepper(3);
+    state.stepper.topics = SAMPLE_QUESTIONS.map((q) => q.topic);
     state.startedAt = "2026-11-06T12:40:00Z";
     state.historyCount = SAMPLE_QUESTIONS.length - 1;
     state.reportLoaded = true;
@@ -1814,6 +1964,7 @@
       state.role = role;
       state.primaryAsked = 0;
       state.followupsUsed = 0;
+      resetStepper(state.config.max_primary_questions || primary);
       $("session-meta").hidden = false;
       $("session-id").textContent = state.sessionId;
       hideEmptyState();
@@ -1852,6 +2003,10 @@
     state.startedAt = null;
     state.primaryAsked = 0;
     state.followupsUsed = 0;
+    resetStepper(0);
+    stepperEl.hidden = true;
+    stepperHint.textContent = "";
+    stepperCompact.textContent = "";
     state.lastEvalCard = null;
     state.eventCount = 0;
     state.historyCount = 0;

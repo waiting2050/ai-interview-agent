@@ -132,3 +132,26 @@ func TestHeuristicModelProducesValidEvaluation(t *testing.T) {
 		t.Fatalf("unexpected evidence dimension: %+v", out.Result.Evidence[0])
 	}
 }
+
+// Uncovered expected points must stay in missing_points. If they are also cited
+// as evidence, the coverage gate treats them as covered and the follow-up never
+// fires.
+func TestHeuristicUncoveredPointsSuggestFollowupWithoutClaimingCoverage(t *testing.T) {
+	in := evalInput("用定时任务扫表补发消息。")
+	in.ExpectedPoints = []string{"幂等键", "本地消息表"}
+	out, err := NewEvaluator(NewHeuristicClient(), "fake-heuristic").Evaluate(context.Background(), in)
+	if err != nil {
+		t.Fatalf("evaluate: %v", err)
+	}
+	if !out.Result.Followup.Needed {
+		t.Fatalf("expected a follow-up suggestion, got %+v", out.Result.Followup)
+	}
+	if len(out.Result.MissingPoints) == 0 {
+		t.Fatal("uncovered expected points must be reported as missing")
+	}
+	for _, e := range out.Result.Evidence {
+		if strings.Contains(e.Reason, "覆盖：") {
+			t.Fatalf("uncovered point must not be recorded as covered: %+v", e)
+		}
+	}
+}

@@ -198,13 +198,15 @@ func heuristicJSON(answer string, expected []string) string {
 				Target: "请补充：" + expected[0],
 				Reason: "回答没有覆盖本题的期望要点",
 			}
-			for _, point := range expected {
-				evidence = append(evidence, evaluation.Evidence{
-					Dimension: evaluation.DimensionCorrectness,
-					Quote:     quote,
-					Reason:    "缺失：" + point,
-				})
-			}
+			// Uncovered points belong in missing_points, not evidence: marking
+			// them as evidence would make coveredAllPoints treat them as covered
+			// and silently skip the follow-up. Keep one quote-backed evidence so
+			// the suggestion passes the "has evidence" gate.
+			evidence = append(evidence, evaluation.Evidence{
+				Dimension: evaluation.DimensionCorrectness,
+				Quote:     quote,
+				Reason:    "回答原文片段",
+			})
 		}
 	}
 

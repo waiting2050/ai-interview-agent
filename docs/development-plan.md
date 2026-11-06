@@ -1088,6 +1088,9 @@ data: {"event_id":43,"session_id":"01H...","run_id":"01H...","type":"question.as
 - 内容：题纲节点横向排布，已完成打勾、当前高亮、未开始灰显；追问显示为当前节点的支线（层级缩进或小分叉标记，虚线连接）。
 - 交互：答完推进使用 CSS transition 过渡，当前关卡自动滚动到可见位置；窄屏折叠为「当前关卡 + 剩余 x 关」。
 - 验收：主问题推进、追问支线、窄屏折叠三种状态均有可见差异；不引入前端框架或构建链。
+- 实现说明：会话接口不回传完整题纲，节点数取 `config.max_primary_questions`，主题在 `question.asked` 到达后回填；追问不新增关卡，而是在当前节点下方以虚线支线计数。未新增 API，也未引入构建链。
+- 顺带修复：heuristic 评估曾把未覆盖的期望点写进 `evidence.reason`（「缺失：…」），使 `coveredAllPoints` 误判为已覆盖、追问永不触发；现改为缺口只进 `missing_points`，evidence 只引用回答原文，并由 `TestHeuristicUncoveredPointsSuggestFollowupWithoutClaimingCoverage` 锁定。
+- 验证结果（2026-11-06，heuristic，`127.0.0.1:18080`）：主问题推进后第 1 关打勾、第 2 关高亮、第 3 关灰显；短答触发追问时当前节点显示「↳ 追问 1 / 上限 1」支线；390px 宽折叠为「第 1 关 / 共 3 关 · 剩余 2 关」。截图：[推进后](screenshots/m13-stepper-desktop.png) / [追问支线](screenshots/m13-stepper-followup.png) / [全部完成](screenshots/m13-stepper-all-done.png) / [窄屏折叠](screenshots/m13-stepper-mobile.png)。
 
 ### M14 领域包机制：外置题纲与可配置维度（计划，M9 后可并行做加载器骨架）
 

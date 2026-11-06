@@ -221,7 +221,10 @@ func TestAnswerFlowWithPostgres(t *testing.T) {
 		t.Fatalf("first turn expected points = %+v", firstTurn.ExpectedPoints)
 	}
 
-	answer := "我在订单系统里用本地消息表和定时补偿保证最终一致性，压测峰值 1.2 万 TPS。"
+	// A substantive answer (>=120 runes) makes the heuristic evaluator treat all
+	// expected points as covered, so the flow advances instead of asking a
+	// follow-up; the assertions below are about persistence, not follow-up policy.
+	answer := "调度器用 GMP 模型：G 是协程，M 是系统线程，P 是本地运行队列；阻塞系统调用会让 M 让出 P，网络轮询由 netpoller 接管；channel 用环形缓冲加锁或原子操作，select 随机轮询避免饥饿。压测时把 GOMAXPROCS 调到 16，P99 从 220ms 降到 90ms，goroutine 泄漏用 pprof 定位到未关闭的 ticker。"
 	result, err := svc.Answer(ctx, app.AnswerCommand{
 		SessionID:      sess.ID,
 		TurnID:         started.PendingTurnID,
