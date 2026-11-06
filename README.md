@@ -4,13 +4,13 @@
 
 Go 1.25 + [cloudwego/eino](https://github.com/cloudwego/eino) + PostgreSQL + Redis。面试主链路可接任意 OpenAI 兼容模型；没有 key 时自动回退确定性 `heuristic`，演示与测试不依赖外部服务。简历解析、简历诊断、JD 匹配、申请材料包与复习排程是**本地规则实现，不调用模型**。
 
-> 已实现：M0–M9、M11–M16，以及演示页视觉轮次 R2–R4。
-> 设计单一事实源：[docs/development-plan.md](docs/development-plan.md)；关键取舍：[docs/design-rationale.md](docs/design-rationale.md)。
+> 已实现：M0–M9、M11–M16，以及演示页视觉轮次 R2–R5。
+> 设计单一事实源：[docs/development-plan.md](docs/development-plan.md)；关键取舍：[docs/design-rationale.md](docs/design-rationale.md)；按模块拆解、含 10 分钟演示脚本与已知不足：[docs/project-walkthrough.md](docs/project-walkthrough.md)。
 > PostgreSQL 是唯一运行期事实源；Redis 只做跨进程会话锁；内存实现仅用于单测。
 
 ## 一条视觉主线
 
-以下截图来自同一场 heuristic 演示（不调用模型），1440 宽、1.5x，按求职顺序排列。前两屏是规则版结果整宽展示在主面板（左侧栏只保留简历 / JD 输入入口），后四屏是面试主区、报告区与复习面板。
+以下截图均为 1440 宽、1.5x，按求职顺序排列。前两屏来自同一份简历的规则版演示（不调用模型），结果整宽展示在主面板，左侧栏只保留简历 / JD 输入入口；后四屏来自一场真实 `deepseek-chat` 会话（4 道题：3 主问题 + 1 追问），**面试与报告文字由 deepseek-chat 生成；评分由确定性公式计算**（维度分 × 权重 + 加减分），不依赖模型。
 
 ### 简历诊断
 
@@ -26,27 +26,27 @@ Go 1.25 + [cloudwego/eino](https://github.com/cloudwego/eino) + PostgreSQL + Red
 
 ### 面试进行中
 
-![面试进行中](docs/screenshots/flow-r4-interview.png)
+![面试进行中](docs/screenshots/flow-r5-interview.png)
 
-SSE 已连接，进度停在第 1 / 3 题；题纲进度条出现「追问 1 / 上限 1」支线，当前问题就是由第 1 题触发的追问。
+SSE 已连接，进度停在第 1 / 3 题；题纲进度条出现「追问 1 / 上限 3」支线，当前问题就是由第 1 题触发的追问。本场使用真实 `deepseek-chat`，首屏即可看到已用时长与事件流。
 
 ### 单题评分依据
 
-![单题评分依据](docs/screenshots/flow-r4-rationale.png)
+![单题评分依据](docs/screenshots/flow-r5-rationale.png)
 
-第一题 40 分：维度分 × 权重表、加权公式、加分 / 扣分、证据摘录、缺失要点与 `follow_up` 决策理由全部展开可见。
+第一题 17.0 分：维度分 × 权重表、加权公式、加分 / 扣分、证据摘录、缺失要点与 `follow_up` 决策理由全部展开。分数由确定性公式计算，模型只提供维度分与点评。
 
 ### 复盘报告
 
-![复盘报告](docs/screenshots/flow-r4-report.png)
+![复盘报告](docs/screenshots/flow-r5-report.png)
 
-5 题收尾后总分 60.0（及格）：维度雷达、逐题趋势与 SM-2 遗忘曲线预测；报告由确定性拼装，不依赖模型可用性。
+4 题收尾后总分 27.5（待提升）：维度雷达、逐题趋势与 SM-2 遗忘曲线预测。本次报告因模型输出未通过校验而**降级为确定性拼装**（页面黄色提示 `report_output_invalid`），面试与报告文字仍由 `deepseek-chat` 生成，评分不依赖降级结果。
 
 ### 间隔复习
 
-![间隔复习](docs/screenshots/flow-r4-review.png)
+![间隔复习](docs/screenshots/flow-r5-review.png)
 
-报告提交的同一事务生成复习卡；这里第 1 / 10 张（本地库含此前演示累计的到期卡），正面问题、参考答案折叠与 0–5 自评按钮同屏。自评 4 后写回 EF 2.50 / 间隔 1 天 / 次日到期。
+报告提交的同一事务生成复习卡；这里今日到期第 1 / 13 张，正面问题、参考答案折叠与 0–5 自评按钮同屏。自评 4 后写回 EF 2.50 / 间隔 1 天 / 次日到期。
 
 ## 三分钟跑起来
 
