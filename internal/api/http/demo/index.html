@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI 面试教练 · 最小演示</title>
+  <link rel="stylesheet" href="/demo/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">AI</span>
+    <div>
+      <h1>AI 面试教练</h1>
+      <p class="subtitle">结构化面试 · 实时评估 · 五段报告</p>
+    </div>
+  </div>
+  <div class="topbar-meta">
+    <a href="/metrics" target="_blank" rel="noreferrer">指标 /metrics</a>
+    <span id="model-hint" class="pill muted">heuristic 模式可直接演示</span>
+  </div>
+</header>
+
+<main class="layout">
+  <aside class="panel setup-panel">
+    <h2>开始一场面试</h2>
+    <p class="hint">不填 API Key 也能完整跑通：服务端会退化为确定性 heuristic 模型。</p>
+    <form id="setup-form" autocomplete="off">
+      <label>
+        目标岗位 <span class="req">*</span>
+        <input id="target-role" type="text" required placeholder="例如：Go 后端开发工程师" value="Go 后端开发工程师">
+      </label>
+      <label>
+        职位描述 JD <span class="req">*</span>
+        <textarea id="jd-text" rows="5" required placeholder="粘贴岗位职责与要求">负责高并发订单系统设计，要求熟悉 Go、分布式事务、消息队列、MySQL/Redis，有可观测性与性能优化经验。</textarea>
+      </label>
+      <label>
+        简历文本（可选）
+        <textarea id="resume-text" rows="4" placeholder="例如：3 年 Go 经验，负责订单履约链路，做过本地消息表与 Redis 缓存">3 年 Go 后端经验，负责订单履约与库存链路，用本地消息表保证最终一致性，做过 Redis 缓存与限流。</textarea>
+      </label>
+      <label>
+        候选人称呼（可选）
+        <input id="candidate-name" type="text" placeholder="例如：张三">
+      </label>
+      <div class="form-row">
+        <label>
+          主问题数量
+          <select id="max-primary">
+            <option value="3" selected>3（演示推荐）</option>
+            <option value="5">5</option>
+            <option value="8">8（完整）</option>
+          </select>
+        </label>
+        <label>
+          每题目追问上限
+          <select id="max-followups">
+            <option value="1" selected>1</option>
+            <option value="2">2</option>
+          </select>
+        </label>
+      </div>
+      <button id="start-btn" class="primary" type="submit">创建会话并开始</button>
+    </form>
+    <p id="setup-error" class="form-error" hidden></p>
+    <div class="steps">
+      <h3>演示三步走</h3>
+      <ol>
+        <li>填岗位与 JD，点「创建会话并开始」。</li>
+        <li>按首题作答并提交，实时看到评分与追问。</li>
+        <li>点「结束面试」，等待五段报告生成。</li>
+      </ol>
+    </div>
+  </aside>
+
+  <section class="panel main-panel">
+    <div class="statusbar">
+      <span id="status-badge" class="badge idle">未开始</span>
+      <span id="phase-text" class="muted">创建会话后这里显示阶段</span>
+      <span class="spacer"></span>
+      <span id="sse-badge" class="pill idle" title="EventSource 连接状态">SSE 未连接</span>
+    </div>
+    <div id="session-meta" class="session-meta" hidden>
+      <code id="session-id"></code>
+    </div>
+
+    <div id="notices" class="notices" aria-live="polite"></div>
+    <div id="thread" class="thread">
+      <div class="empty-state" id="empty-state">
+        <div class="empty-icon">🎤</div>
+        <p>左侧填写岗位信息并开始，首题会通过 SSE 实时推送。</p>
+      </div>
+    </div>
+
+    <div id="answer-box" class="answer-box" hidden>
+      <div id="answer-context" class="answer-context"></div>
+      <textarea id="answer-input" rows="5" placeholder="用 STAR 结构作答：背景 → 方案 → 取舍 → 结果与量化指标"></textarea>
+      <div class="answer-actions">
+        <button id="submit-answer" class="primary" type="button">提交作答</button>
+        <span id="answer-tip" class="muted">提交后评估通过 SSE 实时返回</span>
+      </div>
+    </div>
+
+    <div id="finish-bar" class="finish-bar" hidden>
+      <button id="finish-btn" class="secondary" type="button">结束面试并生成报告</button>
+      <span class="muted">随时可以收尾，未作答的题目按现有记录汇总。</span>
+    </div>
+  </section>
+</main>
+
+<section id="report-panel" class="panel report-panel" hidden>
+  <div class="report-head">
+    <h2>面试报告</h2>
+    <div id="report-status" class="muted">正在生成…</div>
+  </div>
+  <div id="report-meta" class="report-meta"></div>
+  <div id="report-sections" class="report-sections"></div>
+</section>
+
+<footer class="footer">
+  <span>最小可视化演示 · 静态资源由 Go 服务直接提供 · 无前端构建</span>
+</footer>
+
+<script src="/demo/app.js"></script>
+</body>
+</html>
