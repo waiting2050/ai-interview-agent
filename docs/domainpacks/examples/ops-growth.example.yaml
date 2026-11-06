@@ -60,6 +60,17 @@ topics:
       - 显著性、置信区间与多重比较
     source: curated
 
+  - id: growth-review
+    direction: review
+    topic: 活动复盘与归因
+    objective: 说明一次活动结束后如何判断真实增量
+    difficulty: senior
+    expected_points:
+      - 目标、实际与差异的拆解
+      - 自然增长与活动增量的区分
+      - 下一步验证动作与负责人
+    source: curated
+
 lexicon:
   skills:
     - 数据分析

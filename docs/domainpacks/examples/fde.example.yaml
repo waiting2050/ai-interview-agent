@@ -1,0 +1,98 @@
+# 示例包：FDE（Forward Deployed Engineer，不会被加载）
+#
+# 与售前 / 运营示例一样，只展示「同一套加载器如何表达非技术岗位」。
+# 复制到 domainpacks/fde/manifest.yaml 并把 id 改成 fde 后才会生效。
+
+id: fde
+name: FDE 现场交付工程师
+version: "0.1"
+
+rubric:
+  dimensions:
+    - key: onsite_debugging
+      name: 现场排障
+      weight: 0.25
+      anchor: 能否从现象、时间线与最小复现收敛到根因
+    - key: integration
+      name: 集成联调
+      weight: 0.25
+      anchor: 接口契约、鉴权、幂等与重试是否说清
+    - key: rollout_rollback
+      name: 灰度与回滚
+      weight: 0.2
+      anchor: 是否有分批策略、观察窗口与回滚触发条件
+    - key: expectation_management
+      name: 预期管理
+      weight: 0.2
+      anchor: 能否说明能做什么、不能做什么、何时给结论
+    - key: credibility
+      name: 可信度
+      weight: 0.1
+      anchor: 是否有可核验的日志、指标或明确的不确定性说明
+
+directions:
+  - id: onsite
+    label: 现场排障与联调
+    keywords: [fde, 现场, 排障, 联调, 客户环境]
+  - id: delivery
+    label: 灰度与交付
+    keywords: [灰度, 回滚, 交付, runbook, 事故]
+
+topics:
+  - id: fde-diagnosis
+    direction: onsite
+    topic: 现场问题定位与最小复现
+    objective: 从「客户说很慢」收敛到可验证的根因假设
+    difficulty: mid
+    expected_points:
+      - 现象、影响面与时间线
+      - 最小复现步骤与环境差异
+      - 日志 / 指标先看什么、如何排除噪声
+    source: curated
+
+  - id: fde-integration
+    direction: onsite
+    topic: 集成联调与幂等重试
+    objective: 说明跨团队接口如何联调并对失败重试兜底
+    difficulty: senior
+    expected_points:
+      - 接口契约与鉴权边界
+      - 幂等键与重试策略
+      - 数据兼容与双写校验
+    source: curated
+
+  - id: fde-rollout
+    direction: delivery
+    topic: 灰度发布与回滚
+    objective: 说明一次高风险变更如何分批上线并随时可退
+    difficulty: senior
+    expected_points:
+      - 分批策略与观察窗口
+      - 回滚触发条件与演练
+      - 客户侧的沟通与停机窗口
+    source: curated
+
+  - id: fde-incident
+    direction: delivery
+    topic: 事故沟通与预期管理
+    objective: 在事故中同步影响面、临时方案与长期修复
+    difficulty: senior
+    expected_points:
+      - 影响面与当前结论的边界
+      - 临时方案与长期修复的时间点
+      - 明确下一次同步时间
+    source: curated
+
+lexicon:
+  skills:
+    - 现场排障
+    - 集成联调
+    - 客户沟通
+  tools:
+    - 日志平台
+    - 指标看板
+    - runbook
+  keywords:
+    - FDE
+    - 交付
+    - 灰度

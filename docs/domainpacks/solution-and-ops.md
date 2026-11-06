@@ -1,12 +1,15 @@
 # 非技术领域包设计：售前 / FDE / 运营
 
-现有三个运行时包是技术岗：`go-backend`、`java-backend`、`ai-agent`。加载器本身与岗位类型无关，只要 manifest 里有 `rubric`、`directions`、`topics`、`lexicon` 就能跑。本文件记录非技术岗位的考点与维度设计，示例 manifest 放在 `docs/domainpacks/examples/`，**不会**被加载，也不出现在下拉列表。
+现有三个运行时包是技术岗：`go-backend`、`java-backend`、`ai-agent`。加载器本身与岗位类型无关，只要 manifest 里有 `rubric`、`directions`、`topics`、`lexicon` 就能跑。本文件记录非技术岗位的考点与维度设计，示例 manifest 放在 `docs/domainpacks/examples/`（`solution-presales` / `fde` / `ops-growth`），**不会**被加载，也不出现在下拉列表。
+
+这份文档 + 三份示例 manifest 构成「售前 / 运营引子包」：给非技术岗位的候选人与售前同学一个可直接演示、可复制启用的起点，但不把未审核内容放进评分链路。
 
 ## 为什么用示例包而不是直接上线
 
 - 非技术岗位的「正确答案」更依赖公司上下文，先把维度与考点写清楚，再决定是否转成运行时包。
 - 示例包放在 `docs/` 下，`embed` 规则 `domainpacks/*/manifest.yaml` 不会扫到，避免未审核内容进入评分链路。
 - 评分链路只读本地包，不联网；这与 `design-rationale.md` 的「本地骨架是评分唯一依据」一致。
+- 示例仍受加载器校验：`go test ./internal/domain/domainpack` 会逐份解析并试装载，防止文档与 manifest 漂移。
 
 ## 售前解决方案
 
@@ -34,6 +37,8 @@
 10. **复盘与沉淀**：赢单/丢单归因；可复用资产；下一步动作。
 
 ## FDE（Forward Deployed Engineer）
+
+示例：`docs/domainpacks/examples/fde.example.yaml`。
 
 维度：现场排障 0.25 / 集成联调 0.25 / 灰度与回滚 0.20 / 预期管理 0.20 / 可信度 0.10。
 
@@ -70,3 +75,5 @@
 ## 接入方式
 
 把示例复制到 `domainpacks/<id>/manifest.yaml`，改 `id` 与目录一致，补足至少 10 个考点（每考点 3 条 expected_points），启动校验通过后即可在 `/v1/domains` 与会话创建里使用。评分维度、报告维度与前端雷达图都会自动跟随包配置，不需要改代码。
+
+启用前先跑 `go test ./internal/domain/domainpack`，它会逐份解析示例并模拟装载；示例本身只有 2–4 个考点，够验证格式，不够跑完一场面试，正式启用前仍需按上面的考点清单补齐。
