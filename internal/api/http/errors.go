@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/waiting2050/ai-interview-agent/internal/app"
+	"github.com/waiting2050/ai-interview-agent/internal/domain/resume"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/session"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/reqctx"
 	"github.com/waiting2050/ai-interview-agent/internal/ports"
@@ -91,6 +92,29 @@ func (h *handlers) writeError(w http.ResponseWriter, r *http.Request, err error)
 		body.Code = "state_conflict"
 		body.Message = "会话状态已变化，请刷新后重试"
 		writeJSON(w, http.StatusConflict, body)
+
+	case errors.Is(err, resume.ErrUnsupportedFileType):
+		body.Code = "unsupported_file_type"
+		body.Message = "仅支持 PDF / DOCX / TXT / MD 简历文件"
+		body.Details = map[string]any{"allowed_formats": []string{"pdf", "docx", "txt", "md"}}
+		writeJSON(w, http.StatusBadRequest, body)
+
+	case errors.Is(err, resume.ErrImageRequiresOCR):
+		body.Code = "image_requires_ocr"
+		body.Message = "PNG/JPG 简历需要 OCR 或多模态识别，本期尚未启用；请改用 PDF / DOCX / TXT / MD，或直接粘贴文本"
+		writeJSON(w, http.StatusBadRequest, body)
+
+	case errors.Is(err, resume.ErrFileTooLarge):
+		body.Code = "file_too_large"
+		body.Message = "简历文件超过 5 MB 上限"
+		body.Details = map[string]any{"max_bytes": resume.MaxDocumentSize}
+		writeJSON(w, http.StatusRequestEntityTooLarge, body)
+
+	case errors.Is(err, resume.ErrExtractFailed):
+		body.Code = "parse_failed"
+		body.Message = "无法从文件中提取文本，请改用粘贴文本或换一份文件（扫描版 PDF 需 OCR，尚未启用）"
+		body.Details = map[string]any{"fallback": "manual_text"}
+		writeJSON(w, http.StatusUnprocessableEntity, body)
 
 	default:
 		h.deps.Logger.Error("http handler error", "request_id", body.RequestID, "error", err)

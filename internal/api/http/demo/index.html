@@ -34,6 +34,22 @@
         职位描述 JD <span class="req">*</span>
         <textarea id="jd-text" rows="5" required placeholder="粘贴岗位职责与要求">负责高并发订单系统设计，要求熟悉 Go、分布式事务、消息队列、MySQL/Redis，有可观测性与性能优化经验。</textarea>
       </label>
+      <div class="field">
+        <span class="field-label">简历附件（可选）</span>
+        <div id="resume-drop" class="dropzone" role="button" tabindex="0" aria-describedby="resume-drop-hint">
+          <input id="resume-file" class="resume-file-input" type="file" accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg" tabindex="-1">
+          <div class="dropzone-main">
+            <span class="dropzone-icon" aria-hidden="true">⇧</span>
+            <div>
+              <b>拖拽简历到这里</b>，或点击选择文件
+              <p id="resume-drop-hint" class="muted">PDF / DOCX / TXT / MD · ≤ 5 MB · 本地解析，不调用模型</p>
+              <p class="muted upload-note">PNG / JPG 需 OCR / 多模态，尚未启用</p>
+            </div>
+          </div>
+          <div id="resume-upload-state" class="upload-state" hidden></div>
+        </div>
+        <div id="resume-profile" class="resume-profile" hidden></div>
+      </div>
       <label>
         简历文本（可选）
         <textarea id="resume-text" rows="4" placeholder="例如：3 年 Go 经验，负责订单履约链路，做过本地消息表与 Redis 缓存">3 年 Go 后端经验，负责订单履约与库存链路，用本地消息表保证最终一致性，做过 Redis 缓存与限流。</textarea>

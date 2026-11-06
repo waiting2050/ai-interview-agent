@@ -34,6 +34,7 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("GET /metrics", h.metrics)
 	mux.HandleFunc("GET /demo", h.demoPage)
 	mux.Handle("GET /demo/", demoStatic())
+	mux.HandleFunc("POST /v1/resume/parse", h.parseResume)
 	mux.HandleFunc("POST /v1/sessions", h.createSession)
 	mux.HandleFunc("GET /v1/sessions/{id}", h.getSession)
 	mux.HandleFunc("POST /v1/sessions/{id}/start", h.startSession)

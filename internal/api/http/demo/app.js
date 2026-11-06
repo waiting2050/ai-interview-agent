@@ -1454,6 +1454,119 @@
   }
 
 
+  // ---------- resume attachment (local parsing only) ----------
+
+  const RESUME_MAX_BYTES = 5 * 1024 * 1024;
+  const RESUME_TEXT_FORMATS = [".pdf", ".docx", ".txt", ".md"];
+  const RESUME_IMAGE_FORMATS = [".png", ".jpg", ".jpeg"];
+
+  function formatBytes(n) {
+    if (n >= 1024 * 1024) return (n / (1024 * 1024)).toFixed(1) + " MB";
+    if (n >= 1024) return Math.round(n / 1024) + " KB";
+    return n + " B";
+  }
+
+  function resumeExt(name) {
+    const raw = String(name || "");
+    const i = raw.lastIndexOf(".");
+    return i >= 0 ? raw.slice(i).toLowerCase() : "";
+  }
+
+  function setUploadState(kind, html) {
+    const el = $("resume-upload-state");
+    if (!kind) {
+      el.hidden = true;
+      el.className = "upload-state";
+      el.innerHTML = "";
+      return;
+    }
+    el.hidden = false;
+    el.className = "upload-state " + kind;
+    el.innerHTML = html;
+  }
+
+  function renderResumeProfile(doc) {
+    const box = $("resume-profile");
+    const profile = (doc && doc.profile) || {};
+    const skills = Array.isArray(profile.skills) ? profile.skills : [];
+    const projects = Array.isArray(profile.projects) ? profile.projects : [];
+    const skillsHtml = skills.length
+      ? skills.slice(0, 12).map((s) => `<span class="chip">${escapeHtml(s)}</span>`).join("")
+      : '<span class="muted">未识别</span>';
+    let projectHtml = '<span class="muted">未识别</span>';
+    if (projects.length) {
+      projectHtml = projects.slice(0, 3).map((p) => escapeHtml(truncateText(p.name || "未命名项目", 22))).join(" · ");
+      if (projects.length > 3) {
+        projectHtml += ` 等 ${projects.length} 个`;
+      }
+    }
+    box.hidden = false;
+    box.innerHTML =
+      '<div class="profile-head">结构化画像<span class="tag">本地解析 · 未调用模型</span></div>' +
+      '<dl class="profile-list">' +
+      `<div class="profile-row"><dt>年限</dt><dd>${profile.years ? profile.years + " 年" : '<span class="muted">未识别</span>'}</dd></div>` +
+      `<div class="profile-row"><dt>技能</dt><dd>${skillsHtml}</dd></div>` +
+      `<div class="profile-row"><dt>项目</dt><dd>${projectHtml}</dd></div>` +
+      "</dl>";
+  }
+
+  async function handleResumeFile(file) {
+    if (!file) {
+      return;
+    }
+    const ext = resumeExt(file.name);
+    if (RESUME_IMAGE_FORMATS.includes(ext)) {
+      setUploadState("error",
+        "<b>需 OCR / 多模态，尚未启用</b><span>PNG / JPG 无法本地解析；请改用 PDF / DOCX / TXT / MD，或直接在下方粘贴简历文本。</span>");
+      return;
+    }
+    if (!RESUME_TEXT_FORMATS.includes(ext)) {
+      setUploadState("error",
+        `<b>不支持的文件类型</b><span>${escapeHtml(ext || "无扩展名")} 不在白名单内，仅支持 PDF / DOCX / TXT / MD。</span>`);
+      return;
+    }
+    if (file.size > RESUME_MAX_BYTES) {
+      setUploadState("error",
+        `<b>文件超过 5 MB</b><span>当前 ${formatBytes(file.size)}；请压缩后重试，或直接在下方粘贴简历文本。</span>`);
+      return;
+    }
+
+    setUploadState("parsing", `<b>正在本地解析</b><span>${escapeHtml(file.name)} · ${formatBytes(file.size)}</span>`);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/v1/resume/parse", { method: "POST", body: form });
+      let body = null;
+      try {
+        body = await res.json();
+      } catch (ignored) {
+        body = null;
+      }
+      if (!res.ok) {
+        const err = new Error((body && body.message) || `HTTP ${res.status}`);
+        err.status = res.status;
+        err.body = body;
+        throw err;
+      }
+      $("resume-text").value = body.text || "";
+      renderResumeProfile(body);
+      setUploadState("ok",
+        `<b>解析成功</b><span>${escapeHtml(body.filename)} · ${Number(body.chars || 0).toLocaleString()} 字` +
+        `${body.truncated ? " · 已截断" : ""} · 已回填下方文本</span>`);
+    } catch (err) {
+      $("resume-profile").hidden = true;
+      setUploadState("error",
+        `<b>解析失败，可手动降级</b><span>${escapeHtml(humanError(err))}</span>` +
+        "<span>请在下方直接粘贴简历文本，面试流程不受影响。</span>");
+    }
+  }
+
+  function resetResumeUpload() {
+    setUploadState(null);
+    $("resume-profile").hidden = true;
+    $("resume-profile").innerHTML = "";
+  }
+
   function setSetupBusy(busy) {
     ["target-role", "jd-text", "resume-text", "candidate-name", "max-primary", "max-followups"].forEach((id) => {
       $(id).disabled = busy;
@@ -1607,6 +1720,7 @@
     $("setup-block").hidden = false;
     $("setup-error").hidden = true;
     $("setup-error").textContent = "";
+    resetResumeUpload();
     $("restart-btn").textContent = "重开一场";
     setSetupBusy(false);
     setStatus("未开始", "idle");
@@ -1703,6 +1817,44 @@
   $("setup-form").addEventListener("submit", startInterview);
   $("restart-btn").addEventListener("click", restartInterview);
   $("sample-btn").addEventListener("click", loadSample);
+
+  const resumeDrop = $("resume-drop");
+  const resumeFile = $("resume-file");
+  resumeDrop.addEventListener("click", () => resumeFile.click());
+  // The hidden input's click bubbles back up to the dropzone; stop it so
+  // opening the picker cannot re-trigger itself.
+  resumeFile.addEventListener("click", (event) => event.stopPropagation());
+  resumeDrop.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      resumeFile.click();
+    }
+  });
+  resumeFile.addEventListener("change", () => {
+    const file = resumeFile.files && resumeFile.files[0];
+    resumeFile.value = "";
+    if (file) {
+      handleResumeFile(file);
+    }
+  });
+  ["dragenter", "dragover"].forEach((type) => {
+    resumeDrop.addEventListener(type, (event) => {
+      event.preventDefault();
+      resumeDrop.classList.add("dragging");
+    });
+  });
+  ["dragleave", "drop"].forEach((type) => {
+    resumeDrop.addEventListener(type, (event) => {
+      event.preventDefault();
+      resumeDrop.classList.remove("dragging");
+    });
+  });
+  resumeDrop.addEventListener("drop", (event) => {
+    const file = event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0];
+    if (file) {
+      handleResumeFile(file);
+    }
+  });
   submitBtn.addEventListener("click", submitAnswer);
   finishBtn.addEventListener("click", finishInterview);
   document.addEventListener("toggle", refreshClamps, true);

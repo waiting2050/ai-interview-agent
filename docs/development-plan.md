@@ -1042,13 +1042,15 @@ data: {"event_id":43,"session_id":"01H...","run_id":"01H...","type":"question.as
 - 验收：`go run ./cmd/server` 后浏览器打开 `/demo`，不借助 curl 完成一场面试并看到报告；断线刷新页面后带 `Last-Event-ID` 续播；页面只读事件，不直接改状态。
 - 验证结果（2026-11-06，heuristic，`HTTP_ADDR=127.0.0.1:18080`）：3 主问题全部作答，逐题显示总分 80、五维 4/5、决策与下一题；收尾后报告 `status=completed`、`overall_score=80`、五段齐全（总评 / 分维度表现 / 逐题点评 / 最需要补的 3 个点 / 下一步练习建议）。`go test ./...` 与 `go test -tags=integration -count=1 ./...` 全绿。
 
-### M9 简历附件上传与本地解析（计划）
+### M9 简历附件上传与本地解析（已完成）
 
 - 理由：纯文本粘贴对真实候选人摩擦太大，附件是简历入口的最低可用形态；解析必须在本地完成，不把简历送到模型。
-- 内容：新增 `multipart/form-data` 简历上传接口，支持 PDF / DOCX / TXT / MD；5MB 上限、MIME + 扩展名白名单；解析失败返回明确错误并允许前端降级到手动粘贴文本；PNG/JPG 明确返回「图片解析需 OCR/多模态，尚未启用」，接口与数据模型预留图片分支。
-- 解析边界：DOCX 用标准库 `archive/zip` + `encoding/xml` 读 `word/document.xml`；PDF 引入纯 Go 解析库；解析成功统一交给 `resume.Parse` 生成画像，不调用模型。
-- 前端：上传框支持拖拽、类型/体积即时提示、解析中与失败状态；成功后把解析文本回填到简历输入区。
-- 验收：单测覆盖类型白名单拒绝、超限拒绝、解析失败降级、成功解析进画像；`go test ./...` 全绿。
+- 内容：新增 `POST /v1/resume/parse`（`multipart/form-data`，字段 `file`），支持 PDF / DOCX / TXT / MD；5MB 上限、扩展名白名单；解析失败返回 `422 parse_failed` 并允许前端降级到手动粘贴文本；PNG/JPG 返回 `400 image_requires_ocr`（「需 OCR/多模态，尚未启用」），接口与数据模型预留图片分支。
+- 解析边界：TXT/MD 按 UTF-8 读取，非 UTF-8 回落 GB18030；DOCX 用标准库 `archive/zip` + `encoding/xml` 读 `word/document.xml`；PDF 用纯 Go 的 `rsc.io/pdf` 逐页提取并按基线重建换行/空格，扫描件与不支持字体编码的 PDF 明确报解析失败；解析成功统一交给 `resume.Parse` 生成画像，不调用模型（响应带 `model_called=false`）。
+- 错误码：`unsupported_file_type` / `image_requires_ocr`（400）、`file_too_large`（413）、`parse_failed`（422，`details.fallback=manual_text`）、`invalid_upload`（400）。
+- 前端：上传区支持拖拽与键盘选择、类型/体积即时提示、解析中/失败状态；成功后把解析文本回填到简历输入区，并回显结构化画像（年限 / 技能 / 项目），角标标注「本地解析 · 未调用模型」；失败时提示改为手动粘贴。
+- 验收：单测覆盖类型拒绝（未知扩展名、PNG/JPG）、超限拒绝、DOCX 解析失败降级、TXT/MD/DOCX/PDF 解析成功入画像、缺少 file 字段；`go test ./...` 全绿。
+- 验证结果（2026-11-06，heuristic，`localhost:8080`）：真实上传 TXT（417 B）返回 200，画像 `years=5`、技能 5 项、项目 2 条；上传损坏 DOCX 返回 422 `parse_failed`，前端显示「解析失败，可手动降级」并保留手动粘贴入口。截图：[成功](screenshots/m9-resume-success.png) / [失败](screenshots/m9-resume-failure.png)。
 
 ### M10 配置推算与助手占位（计划）
 
