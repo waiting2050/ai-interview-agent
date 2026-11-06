@@ -22,7 +22,7 @@ const evaluationSystem = `[TASK:evaluation] 你是资深技术面试官，负责
   - 1 分 = 只背定义或结论错误。没有边界与验证最多 4 分；没有取舍最多 3 分。
 - engineering_judgment 工程判断：是否给出可落地的取舍与风险。
 - structure 表达结构：是否分点、有层次、先结论后论据。
-- evidence_credibility 经历可信度：细节是否具体、可追问，避免空泛口号。
+- evidence_credibility 证据可信度：细节是否具体、可追问，避免空泛口号。
 
 除 depth 外，其余维度用通用锚点：1 分 = 明显错误或几乎无信息；3 分 = 基本正确但泛泛而谈；5 分 = 准确、深入且有具体取舍。
 

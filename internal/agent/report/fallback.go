@@ -29,6 +29,7 @@ func Fallback(ev tools.Bundle, now time.Time) domain.Report {
 		SessionID:     overview.SessionID,
 		GeneratedAt:   now,
 		OverallScore:  overview.OverallScore,
+		PlanItems:     overview.PlanItems,
 		ScoreBand:     domain.Band(overview.OverallScore),
 		ToolCalls:     ev.Calls,
 		ToolBreakdown: ev.ToolBreakdown,
@@ -260,7 +261,7 @@ func dimensionLabel(dimension string) string {
 	case "structure":
 		return "表达结构"
 	case "evidence_credibility":
-		return "经历可信度"
+		return "证据可信度"
 	default:
 		return dimension
 	}

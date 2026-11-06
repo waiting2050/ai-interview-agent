@@ -16,7 +16,6 @@
     </div>
   </div>
   <div class="topbar-meta">
-    <a href="/metrics" target="_blank" rel="noreferrer">指标 /metrics</a>
     <span id="model-hint" class="pill muted">heuristic 模式可直接演示</span>
   </div>
 </header>
@@ -63,6 +62,7 @@
       <button id="start-btn" class="primary" type="submit">创建会话并开始</button>
       </form>
       <p id="setup-error" class="form-error" hidden></p>
+      <button id="sample-btn" class="link-btn" type="button">载入演示样例（3 题 · 82 / 68 / 74）</button>
     </div>
 
     <div id="session-summary" class="session-summary" hidden>
@@ -73,7 +73,7 @@
         <div><dt>追问预算</dt><dd id="sum-followups">-</dd></div>
         <div><dt>开始时间</dt><dd id="sum-started">-</dd></div>
       </dl>
-      <button id="restart-btn" class="secondary" type="button">重开一场</button>
+      <button id="restart-btn" class="ghost" type="button">重开一场</button>
     </div>
 
     <details class="steps">

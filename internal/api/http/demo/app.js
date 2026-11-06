@@ -7,7 +7,7 @@
     ["depth", "深度"],
     ["engineering_judgment", "工程判断"],
     ["structure", "表达结构"],
-    ["evidence_credibility", "经历可信度"],
+    ["evidence_credibility", "证据可信度"],
   ];
   // Mirrors internal/domain/evaluation. Weights are shown, not just applied.
   const WEIGHTS = {
@@ -26,6 +26,131 @@
     "evaluation.degraded", "decision.made", "run.started", "run.succeeded", "run.failed",
     "run.interrupted", "report.started", "report.section", "report.tool_calls", "report.completed",
   ];
+
+  // ---------- built-in sample data ----------
+  // Deterministic, hand-written data for screenshots and the "sample=1" mode.
+  // It never touches the API and never calls a model. Scores follow the same
+  // arithmetic as the real evaluator: base = Σ(维度分/5 × 权重) × 100,
+  // total = base + bonus + penalty.
+  const SAMPLE_QUESTIONS = [
+    {
+      turn_id: "sample-turn-1",
+      seq: 1,
+      topic: "订单幂等与最终一致性",
+      kind: "primary",
+      depth: 1,
+      question: "你在简历里提到用本地消息表保证订单与库存的最终一致性。请讲讲这条链路的完整设计，以及如何避免重复扣减？",
+      score: 82,
+      scores: { correctness: 5, depth: 4, engineering_judgment: 4, structure: 3, evidence_credibility: 3 },
+      base_score: 81,
+      bonus: [{ type: "量化结果", quote: "P99 从 320ms 降到 180ms，重复扣减率从 0.8% 降到 0.02%", points: 1, reason: "有上线前后的指标对比" }],
+      penalty: [],
+      comment: "链路讲得完整，幂等键与本地消息表的关系清楚；但补偿失败后的告警与人工介入流程只提了一句。",
+      strong_points: ["幂等键设计明确", "能解释最终一致性窗口"],
+      missing_points: ["补偿失败后的兜底流程", "消息堆积时的限流策略"],
+      evidence: [
+        { turn_id: "sample-turn-1", dimension: "correctness", quote: "用订单号 + 业务类型做唯一幂等键，先落本地消息表再投递 MQ", reason: "核心机制表述准确" },
+        { turn_id: "sample-turn-1", dimension: "evidence_credibility", quote: "上线后重复扣减率从 0.8% 降到 0.02%", reason: "有线上指标支撑" },
+      ],
+    },
+    {
+      turn_id: "sample-turn-2",
+      seq: 2,
+      topic: "缓存与数据库一致性",
+      kind: "primary",
+      depth: 1,
+      question: "库存查询接入 Redis 缓存后，如何保证缓存与数据库的一致性？请对比你考虑过的几种方案。",
+      score: 68,
+      scores: { correctness: 4, depth: 3, engineering_judgment: 3, structure: 3, evidence_credibility: 3 },
+      base_score: 66,
+      bonus: [{ type: "方案对比", quote: "对比了先删缓存再更新库、延迟双删与订阅 binlog 三种方案", points: 2, reason: "主动给出取舍" }],
+      penalty: [],
+      comment: "方案对比有意识，但删除缓存失败后的重试与并发读写窗口没有讲清，深度不足。",
+      strong_points: ["能列出三种常见方案"],
+      missing_points: ["删除失败的重试机制", "并发读写下的时序分析"],
+      evidence: [
+        { turn_id: "sample-turn-2", dimension: "engineering_judgment", quote: "延迟双删对业务侵入小，但一致性窗口依赖延迟估计", reason: "指出了方案代价" },
+        { turn_id: "sample-turn-2", dimension: "depth", quote: "binlog 订阅可以做到准实时，但组件成本更高", reason: "有成本视角" },
+      ],
+    },
+    {
+      turn_id: "sample-turn-3",
+      seq: 3,
+      topic: "线上超时排查与可观测性",
+      kind: "primary",
+      depth: 1,
+      question: "如果线上订单链路突然出现大量超时，你会按什么顺序排查？如何用指标定位到具体环节？",
+      score: 74,
+      scores: { correctness: 4, depth: 4, engineering_judgment: 4, structure: 2, evidence_credibility: 4 },
+      base_score: 74,
+      bonus: [],
+      penalty: [],
+      comment: "排查顺序基本正确，指标也说得具体；但回答发散，先讲了三天前的故障复盘才回到方法，结论不够靠前。",
+      strong_points: ["排查顺序合理", "能给出关键指标"],
+      missing_points: ["缺少结论先行的表达结构"],
+      evidence: [
+        { turn_id: "sample-turn-3", dimension: "correctness", quote: "先看入口 QPS 与错误率，再按网关、订单、库存逐层下钻", reason: "排查路径可执行" },
+        { turn_id: "sample-turn-3", dimension: "structure", quote: "先讲了一次历史故障的来龙去脉，两分钟后才给出排查顺序", reason: "结论没有先行" },
+      ],
+    },
+  ];
+
+  const SAMPLE_REPORT = {
+    schema_version: 1,
+    session_id: "sample-demo",
+    generated_at: "2026-11-06T12:40:00Z",
+    degraded: false,
+    overall_score: 74.7,
+    plan_items: 3,
+    score_band: "良好",
+    verdict: "本次完成 3 道主问题，综合 74.7 分。正确性稳定（86.7），表达结构（53.3）与证据可信度（66.7）是主要短板：第 3 题排查思路正确，但结论没有先行；第 2 题的方案对比缺少失败分支与量化验证。",
+    dimensions: [
+      { dimension: "correctness", score: 86.7, weight: 0.3, comment: "三次作答结论都正确，核心机制表述准确。" },
+      { dimension: "depth", score: 73.3, weight: 0.25, comment: "能讲到实现细节，但异常分支与边界条件展开不足。" },
+      { dimension: "engineering_judgment", score: 73.3, weight: 0.2, comment: "有方案对比意识，成本与回滚常被略过。" },
+      { dimension: "structure", score: 53.3, weight: 0.15, comment: "第 3 题发散，缺少「结论先行」的表达结构。" },
+      { dimension: "evidence_credibility", score: 66.7, weight: 0.1, comment: "部分判断有线上数据支撑，个别仍是主观经验。" },
+    ],
+    questions: SAMPLE_QUESTIONS,
+    improvements: [
+      "回答先给结论，再展开依据，避免用故障复盘开场",
+      "补上补偿失败、删缓存失败等异常分支的兜底设计",
+      "为性能优化补齐压测方法与回滚方案",
+    ],
+    next_steps: [
+      "用「结论-依据-取舍-数据」四段式重答第 3 题并录音",
+      "整理一份缓存一致性方案对比表，标注每种方案的失败处理",
+      "准备一次线上超时排查演练，明确每一步看哪些指标",
+    ],
+    sections: [
+      {
+        index: 0,
+        title: "总评",
+        markdown: "**总评：良好（74.7 分）**\n\n本次完成 3 道主问题。正确性稳定（86.7），深度与工程判断在 73 分左右；表达结构只有 53.3，是拉开分差的主要维度。第 2、3 题都把结论埋在了背景叙述后面，导致信息密度下降。",
+      },
+      {
+        index: 1,
+        title: "分维度表现",
+        markdown: "| 维度 | 得分 | 说明 |\n| --- | --- | --- |\n| 正确性 | 86.7 | 结论准确，机制表述完整 |\n| 深度 | 73.3 | 有实现细节，异常分支不足 |\n| 工程判断 | 73.3 | 能对比方案，缺少成本量化 |\n| 表达结构 | 53.3 | 结论后置，叙述发散 |\n| 证据可信度 | 66.7 | 有数据，也有主观经验 |",
+      },
+      {
+        index: 2,
+        title: "逐题点评",
+        markdown: "三道题的得分分别为 82.0、68.0、74.0，逐题卡片刻在下方。",
+      },
+      {
+        index: 3,
+        title: "最需要补的 3 个点",
+        markdown: "1. 回答先给结论，再展开依据，避免用故障复盘开场\n2. 补上补偿失败、删缓存失败等异常分支的兜底设计\n3. 为性能优化补齐压测方法与回滚方案",
+      },
+      {
+        index: 4,
+        title: "下一步练习建议",
+        markdown: "1. 用「结论-依据-取舍-数据」四段式重答第 3 题并录音\n2. 整理一份缓存一致性方案对比表，标注每种方案的失败处理\n3. 准备一次线上超时排查演练，明确每一步看哪些指标",
+      },
+    ],
+  };
+
 
   const state = {
     sessionId: null,
@@ -48,6 +173,7 @@
     reportSectionsOpen: {},
     reviewOpen: {},
     reportCost: null,
+    sampleMode: false,
   };
 
   const noticesEl = $("notices");
@@ -860,8 +986,7 @@
     return `需要补强：${covered}，建议按「结论-原理-取舍-数据」重答。`;
   }
 
-  function onEvaluation(p) {
-    removeThinking();
+  function buildResultCard(p) {
     const d = normalizeScoreData(p);
     const el = card("card-eval result-card");
     const top = document.createElement("div");
@@ -876,6 +1001,12 @@
     grid.classList.add("compact");
     el.appendChild(grid);
     el.appendChild(rationaleElement(p));
+    return el;
+  }
+
+  function onEvaluation(p) {
+    removeThinking();
+    const el = buildResultCard(p);
     appendResult(el);
     state.lastEvalCard = el;
     submitBtn.disabled = true;
@@ -963,18 +1094,18 @@
   // ---------- report ----------
 
   function ringSvg(score) {
-    const size = 150;
-    const cx = 75;
-    const cy = 75;
-    const r = 58;
+    const size = 112;
+    const cx = 56;
+    const cy = 56;
+    const r = 43;
     const circ = 2 * Math.PI * r;
     const pct = Math.max(0, Math.min(100, Number(score || 0))) / 100;
     return `<svg viewBox="0 0 ${size} ${size}" width="${size}" role="img" aria-label="总分 ${score}">` +
-      `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#e6ecf5" stroke-width="12"/>` +
-      `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#3452e1" stroke-width="12" stroke-linecap="round" ` +
+      `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#e6ecf5" stroke-width="10"/>` +
+      `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#3452e1" stroke-width="10" stroke-linecap="round" ` +
       `stroke-dasharray="${(circ * pct).toFixed(1)} ${circ.toFixed(1)}" transform="rotate(-90 ${cx} ${cy})"/>` +
       `<text x="${cx}" y="${cy + 2}" text-anchor="middle" class="ring-value">${Number(score || 0).toFixed(1)}</text>` +
-      `<text x="${cx}" y="${cy + 26}" text-anchor="middle" class="ring-label">/ 100</text></svg>`;
+      `<text x="${cx}" y="${cy + 20}" text-anchor="middle" class="ring-label">/ 100</text></svg>`;
   }
 
   function radarSvg(dims) {
@@ -1006,7 +1137,7 @@
       return `<text x="${lx.toFixed(0)}" y="${ly.toFixed(0)}" text-anchor="middle" dominant-baseline="middle" ` +
         `font-size="13" fill="#5b6b82">${escapeHtml(label)}</text>`;
     }).join("");
-    return `<svg viewBox="0 0 ${size} 246" width="${size}" role="img" aria-label="维度雷达">${rings}${axes}${shape}${labels}</svg>`;
+    return `<svg viewBox="0 0 ${size} 246" width="100%" style="max-width:340px" role="img" aria-label="维度雷达">${rings}${axes}${shape}${labels}</svg>`;
   }
 
   function trendSvg(questions) {
@@ -1036,13 +1167,12 @@
   function renderReportHero(structured, questions) {
     const score = Number(structured.overall_score || 0);
     const total = questions.length;
-    const scored = questions.filter((q) => !q.degraded).length;
-    const coverage = total > 0 ? Math.round(scored / total * 100) : 0;
+    const plan = Number(structured.plan_items || 0) || total;
     const meta = [
       ["总分", score.toFixed(1), ""],
       ["等级", structured.score_band || bandLabel(score), ""],
       ["题数", `${total} 题`, ""],
-      ["覆盖率", `${coverage}%`, "有效评分题 / 总题数"],
+      ["题纲覆盖", `${total} / ${plan}`, "分母为本场题纲题目数"],
     ];
     reportMeta.innerHTML = meta.map(([label, value, tip]) =>
       `<div class="meta-box"${tip ? ` title="${escapeHtml(tip)}"` : ""}>${escapeHtml(label)}` +
@@ -1055,19 +1185,23 @@
   }
 
   function renderRunInfo(cost) {
-    if (!cost || (cost.model_calls == null && cost.total_tokens == null)) {
-      runInfo.hidden = true;
-      return;
-    }
     const parts = [];
-    if (cost.model_calls != null) parts.push(`模型调用 ${cost.model_calls} 次`);
-    if (cost.total_tokens != null) {
-      parts.push(`Token ${cost.total_tokens}（in ${cost.prompt_tokens || 0} / out ${cost.completion_tokens || 0}）`);
+    if (cost && cost.sample) {
+      parts.push("演示样例 · 未调用模型");
+    } else if (cost) {
+      if (cost.model_calls != null) parts.push(`模型调用 ${cost.model_calls} 次`);
+      if (cost.total_tokens != null) {
+        parts.push(`Token ${cost.total_tokens}（in ${cost.prompt_tokens || 0} / out ${cost.completion_tokens || 0}）`);
+      }
+      if (cost.tool_calls != null) parts.push(`工具调用 ${cost.tool_calls} 次`);
+      if (cost.model_name) parts.push(`模型 ${cost.model_name}`);
+      if (cost.prompt_version) parts.push(`Prompt ${cost.prompt_version}`);
     }
-    if (cost.tool_calls != null) parts.push(`工具调用 ${cost.tool_calls} 次`);
-    if (cost.model_name) parts.push(`模型 ${cost.model_name}`);
-    if (cost.prompt_version) parts.push(`Prompt ${cost.prompt_version}`);
-    runInfoBody.innerHTML = parts.map((text) => `<span>${escapeHtml(text)}</span>`).join("");
+    runInfoBody.innerHTML = parts.map((text) => {
+      return text.indexOf("<a ") === 0
+        ? `<span>${text}</span>`
+        : `<span>${escapeHtml(text)}</span>`;
+    }).join("") + '<span><a href="/metrics" target="_blank" rel="noreferrer">打开指标 /metrics</a></span>';
     runInfo.hidden = false;
   }
 
@@ -1190,20 +1324,30 @@
     return details;
   }
 
-  function renderReport(dto) {
+  function renderReport(dto, options) {
     const structured = dto.structured || {};
     const sections = structured.sections || [];
     const questions = structured.questions || [];
+    const scroll = !options || options.scroll !== false;
     reportPanel.hidden = false;
-    reportStatus.textContent = dto.degraded ? "已生成（降级拼装）" : "已生成";
+    reportStatus.textContent = dto.sample
+      ? "演示样例 · 已生成"
+      : dto.degraded ? "已生成（降级拼装）" : "已生成";
     renderReportHero(structured, questions);
-    renderRunInfo(Object.assign({}, structured, state.reportCost || {}));
+    renderRunInfo(dto.sample ? { sample: true } : Object.assign({}, structured, state.reportCost || {}));
 
     reportSections.innerHTML = "";
     if (sections.length > 0) {
       sections.forEach((section) => reportSections.appendChild(reportSectionElement(section, questions)));
     } else if (dto.markdown) {
       reportSections.appendChild(reportSectionElement({ index: 0, title: "报告全文", markdown: dto.markdown }, questions));
+    }
+    if (dto.sample) {
+      const banner = document.createElement("div");
+      banner.className = "notice warn";
+      banner.style.gridColumn = "1 / -1";
+      banner.innerHTML = "<strong>演示样例</strong> · 内置确定性数据（3 题 · 82 / 68 / 74），未调用模型，不属于任何真实会话。";
+      reportCharts.appendChild(banner);
     }
     if (dto.degraded) {
       const banner = document.createElement("div");
@@ -1213,10 +1357,103 @@
       reportCharts.appendChild(banner);
     }
     refreshClamps();
-    reportPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (scroll) {
+      reportPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   }
 
   // ---------- actions ----------
+
+  function sampleResultCard(q) {
+    const el = buildResultCard(q);
+    const flag = document.createElement("div");
+    flag.className = "sample-flag";
+    flag.textContent = "演示样例 · 未调用模型";
+    el.prepend(flag);
+    return el;
+  }
+
+  function sampleQuestionEl(q) {
+    const wrap = document.createElement("div");
+    wrap.className = "history-item";
+    const head = document.createElement("div");
+    head.className = "q-head";
+    head.innerHTML =
+      `<span class="chip primary">主问题</span>` +
+      `<span class="muted">第 ${q.seq} / 共 ${SAMPLE_QUESTIONS.length} 题</span>` +
+      `<span class="muted">主题：${escapeHtml(q.topic)}</span>`;
+    wrap.appendChild(head);
+    const text = document.createElement("div");
+    text.className = "q-text";
+    text.innerHTML = clampHtml(q.question, 3);
+    wrap.appendChild(text);
+    wrap.appendChild(sampleResultCard(q));
+    return wrap;
+  }
+
+  function renderSampleQuestion(q) {
+    hideEmptyState();
+    currentQuestionEl.innerHTML = "";
+    currentQuestionEl.hidden = false;
+    const head = document.createElement("div");
+    head.className = "q-head";
+    head.innerHTML =
+      `<span class="chip primary">主问题</span>` +
+      `<span class="muted">第 ${q.seq} / 共 ${SAMPLE_QUESTIONS.length} 题</span>` +
+      `<span class="muted">追问 0 / 2</span>` +
+      `<span class="muted">深度 ${q.depth}</span>`;
+    currentQuestionEl.appendChild(head);
+    const topic = document.createElement("div");
+    topic.className = "q-topic muted";
+    topic.textContent = "主题：" + q.topic;
+    currentQuestionEl.appendChild(topic);
+    const body = document.createElement("div");
+    body.className = "q-text";
+    body.innerHTML = clampHtml(q.question, 3);
+    currentQuestionEl.appendChild(body);
+    answerBox.hidden = true;
+  }
+
+  function loadSample() {
+    state.sampleMode = false;
+    restartInterview();
+    state.sampleMode = true;
+    state.role = "Go 后端开发工程师";
+    state.config = { max_primary_questions: 3, max_followups_per_question: 1, max_total_followups: 2 };
+    state.primaryAsked = 3;
+    state.followupsUsed = 0;
+    state.startedAt = "2026-11-06T12:40:00Z";
+    state.historyCount = SAMPLE_QUESTIONS.length - 1;
+    state.reportLoaded = true;
+
+    $("setup-block").hidden = true;
+    $("session-summary").hidden = false;
+    $("progress-strip").hidden = false;
+    $("restart-btn").textContent = "重新载入样例";
+    renderSessionSummary();
+    $("sum-role").textContent = "Go 后端开发工程师（样例）";
+    $("sum-started").textContent = "演示样例 · 12:40";
+    setProgress();
+    $("prog-elapsed").textContent = "12:40";
+
+    historyBlock.hidden = false;
+    historyBlock.open = true;
+    historyCountEl.textContent = String(state.historyCount);
+    [SAMPLE_QUESTIONS[1], SAMPLE_QUESTIONS[2]].forEach((q) => historyBody.appendChild(sampleQuestionEl(q)));
+
+    renderSampleQuestion(SAMPLE_QUESTIONS[0]);
+    resultSlotEl.appendChild(sampleResultCard(SAMPLE_QUESTIONS[0]));
+    showNotice("warn", "<strong>演示样例</strong> · 内置确定性数据（3 题 · 82 / 68 / 74），未调用模型，也不会写入真实会话。", { key: "sample" });
+
+    renderReport({ structured: SAMPLE_REPORT, sample: true }, { scroll: false });
+    window.scrollTo({ top: 0, behavior: "auto" });
+
+    setStatus("演示样例", "ok");
+    $("phase-text").textContent = "样例模式 · 未调用模型";
+    setSSE("样例模式", "idle");
+    refreshClamps();
+  }
+
 
   function setSetupBusy(busy) {
     ["target-role", "jd-text", "resume-text", "candidate-name", "max-primary", "max-followups"].forEach((id) => {
@@ -1313,6 +1550,10 @@
   }
 
   function restartInterview() {
+    if (state.sampleMode) {
+      loadSample();
+      return;
+    }
     closeStream();
     stopElapsedTimer();
     state.sessionId = null;
@@ -1366,6 +1607,7 @@
     $("setup-block").hidden = false;
     $("setup-error").hidden = true;
     $("setup-error").textContent = "";
+    $("restart-btn").textContent = "重开一场";
     setSetupBusy(false);
     setStatus("未开始", "idle");
     $("phase-text").textContent = "创建会话后这里显示阶段";
@@ -1460,6 +1702,7 @@
 
   $("setup-form").addEventListener("submit", startInterview);
   $("restart-btn").addEventListener("click", restartInterview);
+  $("sample-btn").addEventListener("click", loadSample);
   submitBtn.addEventListener("click", submitAnswer);
   finishBtn.addEventListener("click", finishInterview);
   document.addEventListener("toggle", refreshClamps, true);
@@ -1482,4 +1725,8 @@
       submitAnswer();
     }
   });
+
+  if (new URLSearchParams(location.search).get("sample") === "1") {
+    loadSample();
+  }
 })();

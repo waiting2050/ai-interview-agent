@@ -226,7 +226,27 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
 }
 .secondary:hover:not(:disabled) { background: #e3e9ff; }
 
+.ghost {
+  color: var(--brand);
+  background: #fff;
+  border: 1px solid var(--line-strong);
+  font-weight: 600;
+}
+.ghost:hover:not(:disabled) { background: #f4f6fb; border-color: #aebdd2; }
+
+.link-btn {
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.link-btn:hover { color: var(--brand); }
+
 .secondary.pulse { animation: pulse 1.4s ease-in-out infinite; }
+.ghost.pulse { animation: pulse 1.4s ease-in-out infinite; }
 @keyframes pulse {
   0%, 100% { box-shadow: 0 0 0 0 rgba(52, 82, 225, 0.25); }
   50% { box-shadow: 0 0 0 8px rgba(52, 82, 225, 0); }
@@ -700,7 +720,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
 
 .report-charts {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.28fr);
   gap: var(--space-4);
   margin-top: var(--space-4);
 }
@@ -723,9 +743,29 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
   color: var(--ink-soft);
 }
 .chart-card svg { max-width: 100%; height: auto; display: block; }
-.ring-value { font-size: 30px; font-weight: 800; fill: var(--ink); }
+.ring-value { font-size: 22px; font-weight: 800; fill: var(--ink); }
 .ring-label { font-size: 13px; fill: var(--muted); }
 .ring-caption { margin-top: 2px; font-size: var(--text-sm); color: var(--muted); }
+
+.sample-flag {
+  display: inline-block;
+  margin-bottom: 8px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+.sample-banner {
+  padding: var(--space-3) var(--space-4);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-md);
+  background: #fbfcfe;
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+}
+.sample-banner strong { color: var(--warn); }
 
 .report-sections {
   display: grid;

@@ -77,6 +77,7 @@ type Report struct {
 	Degraded      bool             `json:"degraded"`
 	ErrorCode     string           `json:"error_code,omitempty"`
 	OverallScore  float64          `json:"overall_score"`
+	PlanItems     int              `json:"plan_items"`
 	ScoreBand     string           `json:"score_band"`
 	Verdict       string           `json:"verdict"`
 	Dimensions    []DimensionScore `json:"dimensions"`
@@ -208,7 +209,7 @@ func dimensionLabel(d string) string {
 	case "structure":
 		return "表达结构"
 	case "evidence_credibility":
-		return "经历可信度"
+		return "证据可信度"
 	default:
 		return d
 	}
