@@ -368,6 +368,27 @@
     }
   }
 
+  // 诊断 / JD 结果固定显示在主面板，同一时间只展示一类结果。
+  function showAnalysisResult(kind) {
+    $("diagnose-result").hidden = kind !== "diagnosis";
+    $("jd-result").hidden = kind !== "jd";
+    hideEmptyState();
+  }
+
+  function hideAnalysisResults() {
+    $("diagnose-result").hidden = true;
+    $("jd-result").hidden = true;
+  }
+
+  function refreshAnalysisEmptyState() {
+    if (state.sessionId || state.sampleMode) {
+      return;
+    }
+    if ($("diagnose-result").hidden && $("jd-result").hidden) {
+      emptyState.hidden = false;
+    }
+  }
+
   function appendEventCard(el) {
     eventDetails.hidden = false;
     eventBody.appendChild(el);
@@ -1893,6 +1914,7 @@
       $("resume-text").value = body.text || "";
       diagnoseOverrides = {};
       $("diagnose-result").hidden = true;
+      refreshAnalysisEmptyState();
       setDiagnoseState(null);
       renderResumeProfile(body);
       setUploadState("ok",
@@ -1912,6 +1934,7 @@
     $("resume-profile").innerHTML = "";
     diagnoseOverrides = {};
     $("diagnose-result").hidden = true;
+    refreshAnalysisEmptyState();
     setDiagnoseState(null);
   }
 
@@ -1958,7 +1981,7 @@
 
     const scoreRing =
       `<div class="diag-ring ${tone}" style="--score:${Number(diag.overall_score) || 0}">` +
-      `<div class="diag-ring-inner"><b>${Number(diag.overall_score) || 0}</b><span>${escapeHtml(diag.band.name)}</span></div></div>`;
+      `<div class="diag-ring-inner"><b>${Number(diag.overall_score) || 0}</b><span>${diag.band.level} 档</span></div></div>`;
 
     const subScores =
       `<div class="diag-subscore"><b>${diag.screen_score.score}</b><span>初筛分 · HR 视角</span></div>` +
@@ -2034,11 +2057,10 @@
           `<span class="muted"> — ${escapeHtml(item.note)}</span></li>`).join("") + `</details>`
       : "";
 
-    box.hidden = false;
     box.innerHTML =
       `<div class="diag-head">${scoreRing}<div class="diag-head-main">` +
       `<div class="diag-badges">${subScores}</div>` +
-      `<p class="muted">${escapeHtml(diag.rules_summary)} · 不调用模型 · ${diag.rule_hits} 条自动命中</p>` +
+      `<p class="muted">${escapeHtml(diag.band.name)} · ${escapeHtml(diag.rules_summary)} · 不调用模型 · ${diag.rule_hits} 条自动命中</p>` +
       `<p class="diag-advice">${escapeHtml(diag.conflict_advice)}</p>` +
       `<ul class="diag-top">${top}</ul>` +
       `</div></div>` +
@@ -2049,13 +2071,14 @@
       confirmHtml +
       `<section class="diag-issues"><h4>问题列表（按严重度排序）</h4>${issueHtml}</section>` +
       manualHtml;
+    showAnalysisResult("diagnosis");
   }
 
   async function runResumeDiagnosis(extraOverrides) {
     const text = $("resume-text").value.trim();
     if (!text) {
       setDiagnoseState("error", "<b>没有可诊断的文本</b><span>请先上传简历或粘贴正文。</span>");
-      $("diagnose-result").hidden = true;
+      refreshAnalysisEmptyState();
       return;
     }
     diagnoseOverrides = Object.assign({}, diagnoseOverrides, extraOverrides || {});
@@ -2139,27 +2162,27 @@
           (item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>`
       : "";
 
-    box.hidden = false;
     box.innerHTML =
       `<div class="jd-head">${ring}<div class="jd-head-main">` +
       `<p class="jd-meta"><span>岗位：${escapeHtml(structured.role || "未识别")}</span>` +
       `${structured.company ? `<span>公司：${escapeHtml(structured.company)}</span>` : ""}` +
       `<span>经验：${escapeHtml(years)}</span><span>来源：${result.source_kind === "url" ? "公开链接" : "粘贴文本"}</span></p>` +
-      `<p class="muted">${escapeHtml(match.note || "")}</p>` +
-      `<div class="jd-chips">${jdChips(requiredMatched, "matched")}${jdChips(requiredMissing, "missing")}</div>` +
-      `<p class="muted">必备技能（红 = 简历未体现）</p>` +
-      `<div class="jd-chips">${jdChips(structured.nice_to_have, "nice")}</div>` +
-      `<p class="muted">加分项</p>` +
+      `<p class="diag-advice">${escapeHtml(match.note || "")}</p>` +
       `</div></div>` +
-      `<div class="jd-section"><h4>关键词命中</h4>` +
-      `<div class="jd-chips">${jdChips(match.matched_keywords, "matched")}</div>` +
-      `<div class="jd-chips">${jdChips(match.missing_keywords, "missing")}</div></div>` +
+      `<div class="jd-grid">` +
+      `<div class="jd-section"><h4>技能覆盖</h4>` +
+      `<p class="muted">必备技能（红 = 简历未体现）</p>` +
+      `<div class="jd-chips">${jdChips(requiredMatched, "matched")}${jdChips(requiredMissing, "missing")}</div>` +
+      `<p class="muted">加分项</p>` +
+      `<div class="jd-chips">${jdChips(structured.nice_to_have, "nice")}</div></div>` +
       `<div class="jd-section"><h4>该 JD 的面试题纲（复用领域包 Plan）</h4><ol class="jd-outline">${outlineHtml}</ol></div>` +
+      `</div>` +
       gapHtml +
       `<div class="jd-section"><h4>申请材料包（不代投）</h4>` +
       `<button type="button" class="secondary" data-jd-action="kit"${hasResume ? "" : " disabled"}>生成申请材料包</button>` +
       `${hasResume ? "" : '<span class="muted">先填写上方简历文本</span>'}</div>` +
       `<div id="jd-kit" class="jd-kit" hidden></div>`;
+    showAnalysisResult("jd");
   }
 
   async function runJDAnalysis() {
@@ -2167,7 +2190,7 @@
     const text = $("jd-text").value.trim();
     if (!url && !text) {
       setJDState("error", "<b>没有可解析的 JD</b><span>请粘贴 JD 文本，或输入公开岗位链接。</span>");
-      $("jd-result").hidden = true;
+      refreshAnalysisEmptyState();
       return;
     }
     const payload = {
@@ -2182,7 +2205,6 @@
     }
 
     jdState = { id: "", kitMarkdown: "" };
-    $("jd-result").hidden = true;
     setJDState("parsing",
       `<b>正在解析 JD</b><span>${url ? "抓取公开页面 · 遵守 robots.txt 与限速" : "解析粘贴文本"} · 不调用模型</span>`);
     try {
@@ -2373,6 +2395,7 @@
       resetStepper(state.config.max_primary_questions || primary);
       $("session-meta").hidden = false;
       $("session-id").textContent = state.sessionId;
+      hideAnalysisResults();
       hideEmptyState();
       $("setup-block").hidden = true;
       $("session-summary").hidden = false;
@@ -2455,6 +2478,7 @@
     $("setup-error").hidden = true;
     $("setup-error").textContent = "";
     resetResumeUpload();
+    hideAnalysisResults();
     $("restart-btn").textContent = "重开一场";
     setSetupBusy(false);
     setStatus("未开始", "idle");

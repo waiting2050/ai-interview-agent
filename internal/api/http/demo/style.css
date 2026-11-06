@@ -144,6 +144,17 @@ h1 {
 
 .setup-panel { position: sticky; top: var(--space-3); }
 
+/* 诊断 / JD 结果在主面板整宽展示，不再在侧栏里套小卡片 */
+.main-panel > .diagnose-result,
+.main-panel > .jd-result {
+  margin: var(--space-4) 0 0;
+  padding: var(--space-4) 0 0;
+  border: 0;
+  border-top: 1px solid var(--line-soft);
+  border-radius: 0;
+  background: none;
+}
+
 .setup-panel h2 {
   margin: 0 0 var(--space-2);
   font-size: var(--text-lg);
@@ -1413,6 +1424,8 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
 .jd-chip.matched { background: var(--ok-soft); color: var(--ok); }
 .jd-chip.missing { background: var(--danger-soft); color: var(--danger); }
 .jd-chip.nice { background: var(--warn-soft); color: var(--warn); }
+.jd-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: var(--space-4); margin-top: var(--space-4); align-items: start; }
+.jd-grid .jd-section { margin-top: 0; }
 .jd-outline { margin: 0; padding-left: 20px; }
 .jd-outline li { margin: 4px 0; }
 .jd-kit { margin-top: var(--space-3); border: 1px dashed var(--brand); border-radius: var(--radius-md); background: var(--panel); padding: var(--space-3); }
@@ -1439,6 +1452,9 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
 @media (max-width: 640px) {
   .stepper-viewport { display: none; }
   .stepper-compact { display: flex; }
+  .diag-grid, .jd-grid { grid-template-columns: 1fr; }
+  .main-panel > .diagnose-result .diag-head,
+  .main-panel > .jd-result .jd-head { gap: var(--space-3); }
 }
 
 @media (prefers-reduced-motion: reduce) {
