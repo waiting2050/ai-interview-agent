@@ -216,6 +216,11 @@
       .replace(/'/g, "&#39;");
   }
 
+  function truncateText(value, max) {
+    const chars = Array.from(String(value == null ? "" : value));
+    return chars.length > max ? chars.slice(0, max).join("") + "…" : chars.join("");
+  }
+
   function inline(text) {
     return escapeHtml(text)
       .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
@@ -1146,22 +1151,24 @@
       return '<p class="decision-note">暂无逐题数据。</p>';
     }
     const width = 880;
-    const height = 176;
-    const base = 132;
-    const top = 24;
-    const barW = 22;
-    const step = list.length > 1 ? (width - 120) / (list.length - 1) : 0;
-    const bars = list.map((q, i) => {
+    const labelW = 132;
+    const valueW = 64;
+    const rowH = 46;
+    const top = 12;
+    const barH = 18;
+    const plotW = width - labelW - valueW;
+    const height = top + list.length * rowH + 6;
+    const rows = list.map((q, i) => {
       const score = Math.max(0, Math.min(100, Number(q.score || 0)));
-      const h = (score / 100) * (base - top);
-      const x = list.length > 1 ? 60 + i * step - barW / 2 : width / 2 - barW / 2;
-      const y = base - h;
-      return `<rect x="${x}" y="${y}" width="${barW}" height="${h}" rx="3" fill="#8fa3c8"></rect>` +
-        `<text x="${x + barW / 2}" y="${y - 6}" text-anchor="middle" font-size="13" fill="#24324a">${score.toFixed(1)}</text>` +
-        `<text x="${x + barW / 2}" y="${base + 20}" text-anchor="middle" font-size="13" fill="#5b6b82">第${q.seq}题</text>`;
+      const cy = top + i * rowH + rowH / 2;
+      const w = Math.max(2, (score / 100) * plotW);
+      return `<text x="0" y="${cy - 2}" font-size="13" font-weight="600" fill="#24324a">第${q.seq}题</text>` +
+        `<text x="0" y="${cy + 15}" font-size="11" fill="#5b6b82">${escapeHtml(truncateText(q.topic || "", 12))}</text>` +
+        `<rect x="${labelW}" y="${cy - barH / 2}" width="${plotW}" height="${barH}" rx="4" fill="#edf1f7"/>` +
+        `<rect x="${labelW}" y="${cy - barH / 2}" width="${w}" height="${barH}" rx="4" fill="#8fa3c8"/>` +
+        `<text x="${labelW + w + 8}" y="${cy + 5}" font-size="13" fill="#24324a">${score.toFixed(1)}</text>`;
     }).join("");
-    return `<svg viewBox="0 0 ${width} ${height}" width="100%" role="img" aria-label="逐题得分趋势">` +
-      `<line x1="24" y1="${base}" x2="${width - 16}" y2="${base}" stroke="#c8d3e3"/>${bars}</svg>`;
+    return `<svg viewBox="0 0 ${width} ${height}" width="100%" role="img" aria-label="逐题得分趋势">${rows}</svg>`;
   }
 
   function renderReportHero(structured, questions) {
@@ -1330,9 +1337,8 @@
     const questions = structured.questions || [];
     const scroll = !options || options.scroll !== false;
     reportPanel.hidden = false;
-    reportStatus.textContent = dto.sample
-      ? "演示样例 · 已生成"
-      : dto.degraded ? "已生成（降级拼装）" : "已生成";
+    reportStatus.textContent = dto.degraded ? "已生成（降级拼装）" : "已生成";
+    $("report-sample-tag").hidden = !dto.sample;
     renderReportHero(structured, questions);
     renderRunInfo(dto.sample ? { sample: true } : Object.assign({}, structured, state.reportCost || {}));
 
@@ -1341,13 +1347,6 @@
       sections.forEach((section) => reportSections.appendChild(reportSectionElement(section, questions)));
     } else if (dto.markdown) {
       reportSections.appendChild(reportSectionElement({ index: 0, title: "报告全文", markdown: dto.markdown }, questions));
-    }
-    if (dto.sample) {
-      const banner = document.createElement("div");
-      banner.className = "notice warn";
-      banner.style.gridColumn = "1 / -1";
-      banner.innerHTML = "<strong>演示样例</strong> · 内置确定性数据（3 题 · 82 / 68 / 74），未调用模型，不属于任何真实会话。";
-      reportCharts.appendChild(banner);
     }
     if (dto.degraded) {
       const banner = document.createElement("div");
@@ -1366,10 +1365,10 @@
 
   function sampleResultCard(q) {
     const el = buildResultCard(q);
-    const flag = document.createElement("div");
-    flag.className = "sample-flag";
-    flag.textContent = "演示样例 · 未调用模型";
-    el.prepend(flag);
+    const tag = document.createElement("span");
+    tag.className = "sample-corner";
+    tag.textContent = "演示样例";
+    el.appendChild(tag);
     return el;
   }
 
@@ -1600,6 +1599,7 @@
     runInfoBody.innerHTML = "";
     reportSections.innerHTML = "";
     reportStatus.textContent = "正在生成…";
+    $("report-sample-tag").hidden = true;
     $("session-meta").hidden = true;
     $("session-id").textContent = "";
     $("progress-strip").hidden = true;
