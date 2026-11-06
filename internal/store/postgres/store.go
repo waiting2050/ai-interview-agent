@@ -101,5 +101,6 @@ func newRepositories(q querier) ports.Repositories {
 		Plans:       &planRepository{q: q},
 		Evaluations: &evaluationRepository{q: q},
 		Reports:     &reportRepository{q: q},
+		JDs:         &jdRepository{q: q},
 	}
 }

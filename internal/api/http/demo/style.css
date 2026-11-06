@@ -1390,6 +1390,33 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
 .diag-confirm-row select { width: auto; min-width: 130px; }
 .diag-type-select { font: inherit; padding: 4px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--panel); }
 
+/* ---------- JD analysis & application kit (M15/M16) ---------- */
+.jd-source-row { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+.jd-source-row input { flex: 1; min-width: 220px; }
+.jd-result {
+  margin-top: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: #fbfcff;
+  padding: var(--space-4);
+}
+.jd-head { display: flex; gap: var(--space-4); align-items: center; flex-wrap: wrap; }
+.jd-head-main { flex: 1; min-width: 220px; }
+.jd-section { margin-top: var(--space-3); }
+.jd-section h4, .jd-kit h4 { margin: 0 0 var(--space-2); font-size: var(--text-sm); color: var(--ink-soft); }
+.jd-meta { display: flex; gap: var(--space-3); flex-wrap: wrap; margin: 0 0 4px; font-size: var(--text-xs); color: var(--muted); }
+.jd-chips { display: flex; gap: 4px; flex-wrap: wrap; margin: 2px 0; }
+.jd-chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: var(--text-xs); font-weight: 600; background: #eef2f8; color: var(--ink-soft); }
+.jd-chip.matched { background: var(--ok-soft); color: var(--ok); }
+.jd-chip.missing { background: var(--danger-soft); color: var(--danger); }
+.jd-chip.nice { background: var(--warn-soft); color: var(--warn); }
+.jd-outline { margin: 0; padding-left: 20px; }
+.jd-outline li { margin: 4px 0; }
+.jd-kit { margin-top: var(--space-3); border: 1px dashed var(--brand); border-radius: var(--radius-md); background: var(--panel); padding: var(--space-3); }
+.jd-kit p { margin: 4px 0 var(--space-3); }
+.jd-kit ul { margin: 0 0 var(--space-3); padding-left: 18px; }
+.jd-kit-actions { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+
 .footer {
   padding: 0 clamp(var(--space-4), 3vw, var(--space-10)) var(--space-8);
   color: #7c8aa0;

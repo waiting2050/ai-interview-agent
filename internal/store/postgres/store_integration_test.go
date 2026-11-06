@@ -19,6 +19,7 @@ import (
 	"github.com/waiting2050/ai-interview-agent/internal/agent/interview"
 	"github.com/waiting2050/ai-interview-agent/internal/app"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/evaluation"
+	"github.com/waiting2050/ai-interview-agent/internal/domain/jd"
 	domainreport "github.com/waiting2050/ai-interview-agent/internal/domain/report"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/resume"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/session"
@@ -48,7 +49,7 @@ func openStore(t *testing.T) *postgres.Store {
 	if err := migrations.Apply(ctx, store.Pool()); err != nil {
 		t.Fatalf("apply migrations: %v", err)
 	}
-	if _, err := store.Pool().Exec(ctx, `TRUNCATE sessions, runs, run_steps, session_events, reports RESTART IDENTITY CASCADE`); err != nil {
+	if _, err := store.Pool().Exec(ctx, `TRUNCATE sessions, runs, run_steps, session_events, reports, jd_listings RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 	return store
@@ -870,4 +871,49 @@ func hasSkill(p resume.Profile, skill string) bool {
 		}
 	}
 	return false
+}
+
+func TestJDRepositoryCachesListing(t *testing.T) {
+	store := openStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	listing := &jd.Listing{
+		ID:         "jd-integration",
+		SourceKind: jd.SourcePaste,
+		SourceURL:  "https://jobs.example.com/42",
+		FetchedAt:  now,
+		RawText:    "岗位：Go 后端开发工程师\n要求熟悉 Go、MySQL、Redis",
+		Structured: jd.Structured{
+			Role:           "Go 后端开发工程师",
+			MinYears:       3,
+			RequiredSkills: []string{"Go", "MySQL", "Redis"},
+			Keywords:       []string{"Go", "MySQL", "Redis"},
+		},
+		CreatedAt: now,
+	}
+	if err := store.Repos().JDs.Save(ctx, listing); err != nil {
+		t.Fatalf("save jd: %v", err)
+	}
+
+	got, err := store.Repos().JDs.Get(ctx, listing.ID)
+	if err != nil {
+		t.Fatalf("get jd: %v", err)
+	}
+	if got.SourceKind != jd.SourcePaste || got.SourceURL != listing.SourceURL {
+		t.Fatalf("provenance = %q %q", got.SourceKind, got.SourceURL)
+	}
+	if !got.FetchedAt.Equal(now) {
+		t.Fatalf("fetched_at = %v, want %v", got.FetchedAt, now)
+	}
+	if got.Structured.Role != listing.Structured.Role || len(got.Structured.RequiredSkills) != 3 {
+		t.Fatalf("structured = %+v", got.Structured)
+	}
+	if got.RawText != listing.RawText {
+		t.Fatal("raw text was not preserved")
+	}
+
+	if _, err := store.Repos().JDs.Get(ctx, "missing"); !errors.Is(err, jd.ErrNotFound) {
+		t.Fatalf("missing err = %v", err)
+	}
 }

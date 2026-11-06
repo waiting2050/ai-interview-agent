@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/waiting2050/ai-interview-agent/internal/domain/evaluation"
+	"github.com/waiting2050/ai-interview-agent/internal/domain/jd"
 	domainreport "github.com/waiting2050/ai-interview-agent/internal/domain/report"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/session"
 )
@@ -91,6 +92,19 @@ type ReportRepository interface {
 	GetBySession(ctx context.Context, sessionID string) (*domainreport.Record, error)
 }
 
+// JDRepository caches parsed job descriptions together with their provenance.
+type JDRepository interface {
+	Save(ctx context.Context, listing *jd.Listing) error
+	Get(ctx context.Context, id string) (*jd.Listing, error)
+}
+
+// JDAnalyzer is the M15 rule-based JD pipeline. It parses a URL or pasted text,
+// matches it against a resume and plans an outline without calling a model.
+type JDAnalyzer interface {
+	Analyze(ctx context.Context, in jd.AnalyzeInput) (jd.Analysis, error)
+	Get(ctx context.Context, id string) (*jd.Listing, error)
+}
+
 // Repositories is the set of repositories bound to either the pool or an
 // active transaction.
 type Repositories struct {
@@ -102,6 +116,7 @@ type Repositories struct {
 	Plans       PlanRepository
 	Evaluations EvaluationRepository
 	Reports     ReportRepository
+	JDs         JDRepository
 }
 
 // Store is the runtime persistence boundary. Repos returns repositories bound

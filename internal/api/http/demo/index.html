@@ -71,6 +71,16 @@
         <div id="diagnose-state" class="upload-state" hidden></div>
         <div id="diagnose-result" class="diagnose-result" hidden></div>
       </div>
+      <div class="field">
+        <span class="field-label">JD 解析与匹配（规则版 · 不调用模型）</span>
+        <div class="jd-source-row">
+          <input id="jd-url" type="url" placeholder="公开岗位链接（留空则解析上方 JD 文本）">
+          <button id="jd-analyze-btn" class="secondary" type="button">解析 JD</button>
+        </div>
+        <p class="muted">链接只抓取公开页面并遵守 robots.txt 与单域名限速；Boss 直聘等平台请自行复制文本粘贴到上方 JD 框，系统不代爬。</p>
+        <div id="jd-state" class="upload-state" hidden></div>
+        <div id="jd-result" class="jd-result" hidden></div>
+      </div>
       <label>
         候选人称呼（可选）
         <input id="candidate-name" type="text" placeholder="例如：张三">

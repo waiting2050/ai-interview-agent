@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/waiting2050/ai-interview-agent/internal/app"
+	"github.com/waiting2050/ai-interview-agent/internal/domain/jd"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/resume"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/session"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/reqctx"
@@ -115,6 +116,23 @@ func (h *handlers) writeError(w http.ResponseWriter, r *http.Request, err error)
 		body.Message = "无法从文件中提取文本，请改用粘贴文本或换一份文件（扫描版 PDF 需 OCR，尚未启用）"
 		body.Details = map[string]any{"fallback": "manual_text"}
 		writeJSON(w, http.StatusUnprocessableEntity, body)
+
+	case errors.Is(err, jd.ErrInvalidArgument), errors.Is(err, jd.ErrEmptyResume):
+		body.Code = "invalid_argument"
+		body.Message = err.Error()
+		writeJSON(w, http.StatusBadRequest, body)
+
+	case errors.Is(err, jd.ErrNotFound):
+		body.Code = "jd_not_found"
+		body.Message = "JD 记录不存在或尚未缓存"
+		writeJSON(w, http.StatusNotFound, body)
+
+	case errors.Is(err, jd.ErrFetchFailed):
+		body.Code = "jd_fetch_failed"
+		body.Message = "无法抓取该公开页面；请改为粘贴 JD 文本"
+		body.Details = map[string]any{"error": err.Error()}
+		body.Retryable = true
+		writeJSON(w, http.StatusBadGateway, body)
 
 	default:
 		h.deps.Logger.Error("http handler error", "request_id", body.RequestID, "error", err)

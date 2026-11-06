@@ -16,7 +16,9 @@ import (
 	"github.com/waiting2050/ai-interview-agent/internal/agent/report"
 	httpapi "github.com/waiting2050/ai-interview-agent/internal/api/http"
 	"github.com/waiting2050/ai-interview-agent/internal/app"
+	"github.com/waiting2050/ai-interview-agent/internal/domain/jd"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/config"
+	"github.com/waiting2050/ai-interview-agent/internal/platform/jobfetch"
 	platformlock "github.com/waiting2050/ai-interview-agent/internal/platform/lock"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/obs"
 	"github.com/waiting2050/ai-interview-agent/internal/ports"
@@ -134,6 +136,10 @@ func run() error {
 		logger.Warn("resumed interrupted runs", "count", resumed)
 	}
 
+	// One fetcher instance keeps the per-host rate limiter and robots cache
+	// shared across requests, so frequent analyses cannot exceed the limit.
+	jobFetcher := jobfetch.NewHTTPFetcher(jobfetch.Options{})
+
 	srv := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: httpapi.NewRouter(httpapi.Deps{
@@ -141,6 +147,13 @@ func run() error {
 			Health:  store.Ping,
 			Logger:  logger,
 			Metrics: metrics,
+			JDAnalyzer: jd.New(store.Repos().JDs, func(ctx context.Context, rawURL string) (jd.Fetched, error) {
+				result, err := jobFetcher.Fetch(ctx, rawURL)
+				if err != nil {
+					return jd.Fetched{}, err
+				}
+				return jd.Fetched{URL: result.URL, Text: result.Text, FetchedAt: result.FetchedAt}, nil
+			}),
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}

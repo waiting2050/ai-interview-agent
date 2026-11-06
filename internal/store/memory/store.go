@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/waiting2050/ai-interview-agent/internal/domain/evaluation"
+	"github.com/waiting2050/ai-interview-agent/internal/domain/jd"
 	domainreport "github.com/waiting2050/ai-interview-agent/internal/domain/report"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/session"
 	"github.com/waiting2050/ai-interview-agent/internal/ports"
@@ -21,16 +22,17 @@ import (
 type Store struct {
 	mu sync.RWMutex
 
-	sessions map[string]*session.Session
-	runs     map[string]*session.Run
-	runKeys  map[string]string           // sessionID|kind|key -> runID
-	steps    map[string]*session.RunStep // runID|stepName
-	events   map[string][]session.Event
-	turns    map[string]*session.Turn
-	plans    map[string][]session.PlanItem
-	evals    map[string]*evaluation.Record   // turnID
-	reports  map[string]*domainreport.Record // sessionID
-	subs     map[string]map[chan struct{}]struct{}
+	sessions   map[string]*session.Session
+	runs       map[string]*session.Run
+	runKeys    map[string]string           // sessionID|kind|key -> runID
+	steps      map[string]*session.RunStep // runID|stepName
+	events     map[string][]session.Event
+	turns      map[string]*session.Turn
+	plans      map[string][]session.PlanItem
+	evals      map[string]*evaluation.Record   // turnID
+	reports    map[string]*domainreport.Record // sessionID
+	jdListings map[string]*jd.Listing          // listing id
+	subs       map[string]map[chan struct{}]struct{}
 
 	eventSeq int64
 
@@ -43,16 +45,17 @@ var _ ports.Store = (*Store)(nil)
 
 func New() *Store {
 	s := &Store{
-		sessions: map[string]*session.Session{},
-		runs:     map[string]*session.Run{},
-		runKeys:  map[string]string{},
-		steps:    map[string]*session.RunStep{},
-		events:   map[string][]session.Event{},
-		turns:    map[string]*session.Turn{},
-		plans:    map[string][]session.PlanItem{},
-		evals:    map[string]*evaluation.Record{},
-		reports:  map[string]*domainreport.Record{},
-		subs:     map[string]map[chan struct{}]struct{}{},
+		sessions:   map[string]*session.Session{},
+		runs:       map[string]*session.Run{},
+		runKeys:    map[string]string{},
+		steps:      map[string]*session.RunStep{},
+		events:     map[string][]session.Event{},
+		turns:      map[string]*session.Turn{},
+		plans:      map[string][]session.PlanItem{},
+		evals:      map[string]*evaluation.Record{},
+		reports:    map[string]*domainreport.Record{},
+		jdListings: map[string]*jd.Listing{},
+		subs:       map[string]map[chan struct{}]struct{}{},
 	}
 	s.repos = ports.Repositories{
 		Sessions:    &sessionRepo{s: s},
@@ -63,6 +66,7 @@ func New() *Store {
 		Plans:       &planRepo{s: s},
 		Evaluations: &evaluationRepo{s: s},
 		Reports:     &reportRepo{s: s},
+		JDs:         &jdRepo{s: s},
 	}
 	return s
 }
@@ -533,5 +537,26 @@ func (r *reportRepo) GetBySession(_ context.Context, sessionID string) (*domainr
 		return nil, ports.ErrNotFound
 	}
 	cp := *rec
+	return &cp, nil
+}
+
+type jdRepo struct{ s *Store }
+
+func (r *jdRepo) Save(_ context.Context, listing *jd.Listing) error {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	cp := *listing
+	r.s.jdListings[listing.ID] = &cp
+	return nil
+}
+
+func (r *jdRepo) Get(_ context.Context, id string) (*jd.Listing, error) {
+	r.s.mu.RLock()
+	defer r.s.mu.RUnlock()
+	listing, ok := r.s.jdListings[id]
+	if !ok {
+		return nil, jd.ErrNotFound
+	}
+	cp := *listing
 	return &cp, nil
 }

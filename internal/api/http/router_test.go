@@ -16,6 +16,7 @@ import (
 	"github.com/waiting2050/ai-interview-agent/internal/agent/interview"
 	"github.com/waiting2050/ai-interview-agent/internal/app"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/evaluation"
+	"github.com/waiting2050/ai-interview-agent/internal/domain/jd"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/session"
 	platformlock "github.com/waiting2050/ai-interview-agent/internal/platform/lock"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/obs"
@@ -58,10 +59,11 @@ func newTestRouter(t *testing.T) (*httptest.Server, *app.Service, *obs.Metrics) 
 		Metrics:     metrics,
 	})
 	srv := httptest.NewServer(NewRouter(Deps{
-		Service: svc,
-		Health:  store.Ping,
-		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Metrics: metrics,
+		Service:    svc,
+		Health:     store.Ping,
+		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Metrics:    metrics,
+		JDAnalyzer: jd.New(store.Repos().JDs, nil),
 	}))
 	t.Cleanup(srv.Close)
 	return srv, svc, metrics

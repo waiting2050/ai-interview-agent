@@ -19,6 +19,9 @@ type Deps struct {
 	// ResumeAnalyzer backs POST /v1/resume/analyze. Nil falls back to the
 	// embedded deterministic rules engine.
 	ResumeAnalyzer ports.ResumeAnalyzer
+	// JDAnalyzer backs POST /v1/jd/analyze, GET /v1/jd/{id} and the M16
+	// application kit. Nil disables those routes with 503.
+	JDAnalyzer ports.JDAnalyzer
 }
 
 // NewRouter wires the HTTP surface: health, metrics, session commands, answers
@@ -40,6 +43,9 @@ func NewRouter(deps Deps) http.Handler {
 	mux.Handle("GET /demo/", demoStatic())
 	mux.HandleFunc("POST /v1/resume/parse", h.parseResume)
 	mux.HandleFunc("POST /v1/resume/analyze", h.analyzeResume)
+	mux.HandleFunc("POST /v1/jd/analyze", h.analyzeJD)
+	mux.HandleFunc("GET /v1/jd/{id}", h.getJD)
+	mux.HandleFunc("POST /v1/jd/{id}/kit", h.generateApplyKit)
 	mux.HandleFunc("GET /v1/domains", h.listDomains)
 	mux.HandleFunc("POST /v1/sessions", h.createSession)
 	mux.HandleFunc("GET /v1/sessions/{id}", h.getSession)

@@ -1911,6 +1911,218 @@
     }
   }
 
+  // ---------- JD analysis & application kit (rule-based, no model) ----------
+
+  let jdState = { id: "", kitMarkdown: "" };
+
+  function setJDState(kind, html) {
+    const el = $("jd-state");
+    if (!kind) {
+      el.hidden = true;
+      el.className = "upload-state";
+      el.innerHTML = "";
+      return;
+    }
+    el.hidden = false;
+    el.className = "upload-state " + kind;
+    el.innerHTML = html;
+  }
+
+  function jdChips(items, cls) {
+    if (!Array.isArray(items) || !items.length) {
+      return '<span class="muted">无</span>';
+    }
+    return items.map((item) => `<span class="jd-chip ${cls}">${escapeHtml(item)}</span>`).join("");
+  }
+
+  function renderJDResult(result) {
+    const box = $("jd-result");
+    const structured = result.structured || {};
+    const match = result.match || {};
+    const gaps = result.gaps || {};
+    const outline = Array.isArray(result.outline) ? result.outline : [];
+    const score = match.available ? (Number(match.score) || 0) : 0;
+    const tone = score >= 70 ? "ok" : score >= 45 ? "warn" : "danger";
+    const hasResume = $("resume-text").value.trim().length > 0;
+
+    const ring = match.available
+      ? `<div class="diag-ring ${tone}" style="--score:${score}">` +
+        `<div class="diag-ring-inner"><b>${score}</b><span>匹配度</span></div></div>`
+      : `<div class="diag-ring danger" style="--score:0">` +
+        `<div class="diag-ring-inner"><b>—</b><span>未匹配</span></div></div>`;
+
+    const years = structured.min_years
+      ? (structured.max_years ? `${structured.min_years}–${structured.max_years} 年` : `${structured.min_years} 年以上`)
+      : "年限未识别";
+
+    const matchedSet = new Set((match.matched_keywords || []).map((kw) => String(kw).toLowerCase()));
+    const requiredMatched = (structured.required_skills || []).filter((kw) => matchedSet.has(String(kw).toLowerCase()));
+    const requiredMissing = (structured.required_skills || []).filter((kw) => !matchedSet.has(String(kw).toLowerCase()));
+
+    const outlineHtml = outline.map((item) => (
+      `<li><b>${escapeHtml(item.topic)}</b> <span class="muted">· ${escapeHtml(item.difficulty)}</span>` +
+      `<br><span class="muted">${escapeHtml(item.objective)}</span></li>`
+    )).join("") || '<li class="muted">JD 未匹配到领域包，未生成题纲。</li>';
+
+    const gapHtml = (Array.isArray(gaps.missing_experiences) && gaps.missing_experiences.length)
+      ? `<div class="jd-section"><h4>缺口与准备方向</h4><ul>${gaps.missing_experiences.map(
+          (item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul></div>`
+      : "";
+
+    box.hidden = false;
+    box.innerHTML =
+      `<div class="jd-head">${ring}<div class="jd-head-main">` +
+      `<p class="jd-meta"><span>岗位：${escapeHtml(structured.role || "未识别")}</span>` +
+      `${structured.company ? `<span>公司：${escapeHtml(structured.company)}</span>` : ""}` +
+      `<span>经验：${escapeHtml(years)}</span><span>来源：${result.source_kind === "url" ? "公开链接" : "粘贴文本"}</span></p>` +
+      `<p class="muted">${escapeHtml(match.note || "")}</p>` +
+      `<div class="jd-chips">${jdChips(requiredMatched, "matched")}${jdChips(requiredMissing, "missing")}</div>` +
+      `<p class="muted">必备技能（红 = 简历未体现）</p>` +
+      `<div class="jd-chips">${jdChips(structured.nice_to_have, "nice")}</div>` +
+      `<p class="muted">加分项</p>` +
+      `</div></div>` +
+      `<div class="jd-section"><h4>关键词命中</h4>` +
+      `<div class="jd-chips">${jdChips(match.matched_keywords, "matched")}</div>` +
+      `<div class="jd-chips">${jdChips(match.missing_keywords, "missing")}</div></div>` +
+      `<div class="jd-section"><h4>该 JD 的面试题纲（复用领域包 Plan）</h4><ol class="jd-outline">${outlineHtml}</ol></div>` +
+      gapHtml +
+      `<div class="jd-section"><h4>申请材料包（不代投）</h4>` +
+      `<button type="button" class="secondary" data-jd-action="kit"${hasResume ? "" : " disabled"}>生成申请材料包</button>` +
+      `${hasResume ? "" : '<span class="muted">先填写上方简历文本</span>'}</div>` +
+      `<div id="jd-kit" class="jd-kit" hidden></div>`;
+  }
+
+  async function runJDAnalysis() {
+    const url = $("jd-url").value.trim();
+    const text = $("jd-text").value.trim();
+    if (!url && !text) {
+      setJDState("error", "<b>没有可解析的 JD</b><span>请粘贴 JD 文本，或输入公开岗位链接。</span>");
+      $("jd-result").hidden = true;
+      return;
+    }
+    const payload = {
+      resume_text: $("resume-text").value.trim(),
+      target_role: $("target-role").value.trim(),
+      limit: 5,
+    };
+    if (url) {
+      payload.url = url;
+    } else {
+      payload.text = text;
+    }
+
+    jdState = { id: "", kitMarkdown: "" };
+    $("jd-result").hidden = true;
+    setJDState("parsing",
+      `<b>正在解析 JD</b><span>${url ? "抓取公开页面 · 遵守 robots.txt 与限速" : "解析粘贴文本"} · 不调用模型</span>`);
+    try {
+      const result = await api("/v1/jd/analyze", { method: "POST", body: JSON.stringify(payload) });
+      jdState.id = result.jd_id || "";
+      renderJDResult(result);
+      const scoreText = result.match && result.match.available
+        ? `匹配度 ${result.match.score}`
+        : "未提供简历，仅解析";
+      setJDState("ok",
+        `<b>JD 解析完成</b><span>${escapeHtml(result.structured.role || "未识别岗位")} · ${scoreText} · 题纲 ${result.outline.length} 题 · 未调用模型</span>`);
+    } catch (err) {
+      setJDState("error", `<b>解析失败</b><span>${escapeHtml(humanError(err))}</span>`);
+    }
+  }
+
+  async function runApplyKit() {
+    const id = jdState.id;
+    const resumeText = $("resume-text").value.trim();
+    if (!id || !resumeText) {
+      setJDState("error", "<b>无法生成材料包</b><span>请先解析 JD，并填写简历文本。</span>");
+      return;
+    }
+    setJDState("parsing", "<b>正在生成申请材料包</b><span>只重排简历已有事实 · 不新增虚构内容 · 不代投</span>");
+    try {
+      const kit = await api(`/v1/jd/${id}/kit`, {
+        method: "POST",
+        body: JSON.stringify({
+          resume_text: resumeText,
+          target_role: $("target-role").value.trim(),
+          candidate_name: $("candidate-name").value.trim(),
+        }),
+      });
+      jdState.kitMarkdown = kit.markdown || "";
+      renderApplyKit(kit);
+      setJDState("ok", `<b>材料包已生成</b><span>摘要 / 开场 / 题纲 / 预演问题 · 未调用模型 · 不提供自动投递</span>`);
+    } catch (err) {
+      setJDState("error", `<b>生成失败</b><span>${escapeHtml(humanError(err))}</span>`);
+    }
+  }
+
+  function renderApplyKit(kit) {
+    const box = $("jd-kit");
+    const facts = (kit.facts || []).map((fact) => (
+      `<li>${escapeHtml(fact.text)} <span class="muted">（${escapeHtml(fact.source)}）</span></li>`
+    )).join("");
+    const questions = (kit.rehearsal_questions || []).map((q) => `<li>${escapeHtml(q)}</li>`).join("");
+    const warnings = (kit.warnings || []).map((w) => `<p class="muted">注意：${escapeHtml(w)}</p>`).join("");
+    box.hidden = false;
+    box.innerHTML =
+      `<h4>定制简历摘要</h4><p>${escapeHtml(kit.summary)}</p>` +
+      `<h4>岗位开场</h4><p>${escapeHtml(kit.opener)}</p>` +
+      `<h4>预演问题</h4><ul>${questions || '<li class="muted">无</li>'}</ul>` +
+      `<h4>事实来源（全部来自简历原文）</h4><ul>${facts || '<li class="muted">无可引用事实</li>'}</ul>` +
+      warnings +
+      `<div class="jd-kit-actions">` +
+      `<button type="button" class="secondary" data-jd-action="copy">复制 Markdown</button>` +
+      `<button type="button" class="secondary" data-jd-action="download">下载 Markdown</button>` +
+      `<span class="muted">不提供自动投递：请自行确认后到目标平台提交。</span></div>`;
+  }
+
+  function copyTextFallback(text) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch (ignored) {
+      ok = false;
+    }
+    ta.remove();
+    return ok;
+  }
+
+  async function copyKitMarkdown() {
+    const text = jdState.kitMarkdown;
+    if (!text) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (ignored) {
+      if (!copyTextFallback(text)) {
+        showNotice("error", "复制失败，请使用下载 Markdown。", { timeout: 2200 });
+        return;
+      }
+    }
+    showNotice("ok", "申请材料包已复制到剪贴板。", { timeout: 1600 });
+  }
+
+  function downloadKitMarkdown() {
+    const text = jdState.kitMarkdown;
+    if (!text) {
+      return;
+    }
+    const blob = new Blob([text], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `application-kit-${jdState.id || "jd"}.md`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   function setSetupBusy(busy) {
     ["target-role", "jd-text", "resume-text", "candidate-name", "max-primary", "max-followups", "domain"].forEach((id) => {
       $(id).disabled = busy;
@@ -2209,6 +2421,21 @@
   });
 
   $("diagnose-btn").addEventListener("click", () => runResumeDiagnosis());
+  $("jd-analyze-btn").addEventListener("click", runJDAnalysis);
+  $("jd-result").addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-jd-action]");
+    if (!btn) {
+      return;
+    }
+    const action = btn.getAttribute("data-jd-action");
+    if (action === "kit") {
+      runApplyKit();
+    } else if (action === "copy") {
+      copyKitMarkdown();
+    } else if (action === "download") {
+      downloadKitMarkdown();
+    }
+  });
   $("diagnose-result").addEventListener("click", (event) => {
     const btn = event.target.closest(".diag-confirm-btn");
     if (!btn) {
