@@ -1,0 +1,539 @@
+version: "1.1"
+
+# 维度口径来自 docs/resume-rules.md（调研原文）。总分 = 100 − Σ扣分，
+# 每个维度扣分不超过该维度权重。
+dimensions:
+  - id: A
+    name: 真实性与可验证性
+    weight: 30
+  - id: B
+    name: 量化质量与结果
+    weight: 25
+  - id: C
+    name: 结构与表达
+    weight: 15
+  - id: D
+    name: 岗位匹配与技术深度
+    weight: 20
+  - id: E
+    name: 格式与细节
+    weight: 10
+
+# 类型化权重来自产品补充 docs/resume-rules-typed.md，不是调研结论。
+typed_profiles:
+  - id: internship
+    name: 实习/工作
+    dimensions:
+      - id: I1
+        name: 真实性与边界
+        weight: 35
+      - id: I2
+        name: 结果与影响
+        weight: 30
+      - id: I3
+        name: 岗位匹配
+        weight: 20
+      - id: I4
+        name: 结构表达
+        weight: 10
+      - id: I5
+        name: 格式
+        weight: 5
+    map:
+      A: I1
+      B: I2
+      C: I4
+      D: I3
+      E: I5
+  - id: personal_project
+    name: 个人项目
+    dimensions:
+      - id: P1
+        name: 工程自觉
+        weight: 35
+      - id: P2
+        name: 可验证性
+        weight: 25
+      - id: P3
+        name: 技术深度
+        weight: 20
+      - id: P4
+        name: 结构表达
+        weight: 15
+      - id: P5
+        name: 格式
+        weight: 5
+    map:
+      A: P2
+      B: P1
+      C: P4
+      D: P3
+      E: P5
+
+# mode: auto = 机器可判；auto_manual = 只自动判定机器能判的部分，
+# 其余进入「需人工确认」；manual = 纯人工，不自动扣分。
+# deduction: default 为默认扣分，可按经历类型覆盖。
+checks:
+  - id: R01
+    title: 同月存在两段全职实习/工作且未标注兼职、远程或交接
+    dimension: A
+    mode: auto
+    severity: high
+    evidence: strong
+    applies_to: [internship]
+    deduction: {default: 6, internship: 6}
+    rewrite_before: "2025.06-2025.09 A公司实习；2025.07-2025.10 B公司实习"
+    rewrite_after: "2025.07-2025.09 B公司远程兼职（每周16h），与A公司实习并行"
+
+  - id: R02
+    title: 经历空白期超过 6 个月且全文无解释
+    dimension: A
+    mode: auto
+    severity: medium
+    evidence: medium
+    applies_to: [internship]
+    deduction: {default: 4, internship: 4}
+    rewrite_before: "2024.09-2025.03 无内容"
+    rewrite_after: "2024.09-2025.03 备考并自学 Go 与分布式基础，产出 XX 项目（附仓库）"
+
+  - id: R03
+    title: 项目周期 ≤ 1 个月却宣称分布式、高并发、多租户或容灾
+    dimension: A
+    mode: auto
+    severity: high
+    evidence: medium
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 6, internship: 6, personal_project: 10, coursework: 10, competition: 8}
+    redline: true
+    rewrite_before: "2025.03 用三周完成分布式电商系统"
+    rewrite_after: "2025.03-2025.06 个人项目，完成单体版 3 个模块；分布式拆分仅做方案设计未落地"
+
+  - id: R04
+    title: 项目周期 ≤ 3 个月，中间件/存储/框架等技术栈 ≥ 8 项
+    dimension: A
+    mode: auto
+    severity: high
+    evidence: medium
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 5, internship: 5, personal_project: 8, coursework: 8}
+    rewrite_before: "三个月项目：K8s+Istio+Kafka+RabbitMQ+ES+Mongo+Redis+MySQL"
+    rewrite_after: "三个月项目核心链路为 MySQL+Redis，Kafka 仅用于异步解耦，其余为课程了解"
+
+  - id: R05
+    title: 使用主导/独立负责/从0到1，但无团队规模、模块边界或产出证据
+    dimension: A
+    mode: auto_manual
+    severity: high
+    evidence: strong
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 6, internship: 6, personal_project: 6}
+    auto_ratio: 0.5
+    rewrite_before: "主导 Feed 系统架构设计"
+    rewrite_after: "团队 4 人，我负责 Feed 读链路（3 个接口），写链路由另 1 人负责"
+
+  - id: R06
+    title: 团队/课程/开源项目未区分「团队做的」与「我做的」
+    dimension: A
+    mode: auto_manual
+    severity: high
+    evidence: strong
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 5, internship: 5, personal_project: 5}
+    auto_ratio: 0.5
+    rewrite_before: "开发了支持千万用户的推荐系统"
+    rewrite_after: "基于开源 XX 二次开发；我新增召回融合模块，原项目已有特征工程与在线服务"
+
+  - id: R07
+    title: 声称上线/生产环境/支撑用户，但无部署方式、监控或访问入口
+    dimension: A
+    mode: auto_manual
+    severity: medium
+    evidence: medium
+    applies_to: [internship, personal_project, opensource]
+    deduction: {default: 4, internship: 4, personal_project: 4}
+    auto_ratio: 0.5
+    rewrite_before: "系统已上线，支撑 5000 用户"
+    rewrite_after: "部署于 2 台 2C4G 云主机（Docker Compose），校内 20 人内测，未公网开放"
+
+  - id: R08
+    title: 性能指标无基线、无环境、无数据量或无并发条件
+    dimension: A
+    mode: auto_manual
+    severity: high
+    evidence: strong
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 6, internship: 6, personal_project: 9, coursework: 9}
+    rewrite_before: "接口 P99 从 500ms 降到 100ms"
+    rewrite_after: "本地压测（4C8G，10 万条动态，wrk 200 并发）：P99 480ms→120ms，基线为 v1.3"
+
+  - id: R09
+    title: 出现 99.99% 可用性、日均千万请求、百万用户等量级但无任何佐证
+    dimension: A
+    mode: auto
+    severity: high
+    evidence: medium
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 5, internship: 5, personal_project: 8, coursework: 8}
+    redline: true
+    rewrite_before: "可用性从 99.9% 提升至 99.99%"
+    rewrite_after: "单机部署未做多副本，未统计可用性；连续运行 30 天，告警 2 次均已处理"
+
+  - id: R10
+    title: 项目/公司名称模糊、不可核验，且无仓库、文档或作品链接
+    dimension: A
+    mode: auto
+    severity: medium
+    evidence: medium
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 3, internship: 3, personal_project: 3}
+    rewrite_before: "某互联网公司核心项目"
+    rewrite_after: "XX 校园二手平台（github.com/xxx，含 README 与压测脚本）"
+
+  - id: R11
+    title: 仓库代码量/提交记录与「从 0 到 1 重写」描述量级不符
+    dimension: A
+    mode: manual
+    severity: medium
+    evidence: inference
+    applies_to: [internship, personal_project, opensource]
+    deduction: {default: 3}
+    rewrite_before: "从 0 到 1 重构分布式系统（仓库 2.1k LOC）"
+    rewrite_after: "在 2.1k LOC 课程项目上新增限流与缓存模块（约 600 行）"
+
+  - id: R12
+    title: 应届生写架构师/技术负责人/带 5 人团队等职级错位
+    dimension: A
+    mode: auto
+    severity: high
+    evidence: medium
+    applies_to: [internship, personal_project, competition]
+    deduction: {default: 4, internship: 4}
+    redline: true
+    rewrite_before: "担任项目架构师，带领 5 人团队"
+    rewrite_after: "4 人课程项目，我负责接口设计与联调，代码评审由导师把关"
+
+  - id: R13
+    title: 条目以「负责/参与 XX 开发」结尾且无结果
+    dimension: B
+    mode: auto
+    severity: medium
+    evidence: strong
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 3, internship: 3, personal_project: 3}
+    rewrite_before: "负责用户模块开发"
+    rewrite_after: "负责用户资料/关注关系 2 个模块，接口 P95 从 210ms 降至 90ms（压测见 README）"
+
+  - id: R14
+    title: 只有「优化了性能/大幅提升/明显改善」等形容词
+    dimension: B
+    mode: auto
+    severity: high
+    evidence: strong
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 4, internship: 4, personal_project: 4}
+    rewrite_before: "优化了系统性能"
+    rewrite_after: "Feed 首屏 P99 480ms→120ms，手段为批量查询+本地缓存"
+
+  - id: R15
+    title: 优化型描述缺少 before 值
+    dimension: B
+    mode: auto
+    severity: high
+    evidence: strong
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 4, internship: 4, personal_project: 4}
+    rewrite_before: "把接口耗时优化到 100ms"
+    rewrite_after: "从 480ms 降到 120ms（同环境同数据集，v1.3→v1.4）"
+
+  - id: R16
+    title: 平均耗时/P95/P99/吞吐量混用或口径不明
+    dimension: B
+    mode: auto
+    severity: high
+    evidence: medium
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 4, internship: 4, personal_project: 4}
+    rewrite_before: "平均响应降低 60%，P99 也很低"
+    rewrite_after: "P95 320ms→110ms；平均 90ms→45ms；未测 P99"
+
+  - id: R17
+    title: 无测试条件（环境/数据量/并发/工具/基线版本）
+    dimension: B
+    mode: auto_manual
+    severity: medium
+    evidence: strong
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 3, internship: 3, personal_project: 3}
+    auto_ratio: 0.5
+    rewrite_before: "QPS 提升 3 倍"
+    rewrite_after: "同机 wrk 200 并发、10 万条数据下，读接口 QPS 1.1k→3.2k"
+
+  - id: R18
+    title: 只写「高并发/大流量」，无具体量级
+    dimension: B
+    mode: auto
+    severity: medium
+    evidence: medium
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 2, internship: 2, personal_project: 2}
+    rewrite_before: "支撑高并发场景"
+    rewrite_after: "活动峰值 3.4k QPS（压测复现，非线上真实流量）"
+
+  - id: R19
+    title: 成本类指标无单位口径（「省了 30% 机器」无台数/单价）
+    dimension: B
+    mode: manual
+    severity: medium
+    evidence: single
+    applies_to: [internship]
+    deduction: {default: 2, internship: 2}
+    rewrite_before: "节省 30% 服务器成本"
+    rewrite_after: "合并 2 个服务后，测试环境由 6 台降至 4 台（2C4G，按同规格计）"
+
+  - id: R20
+    title: 数字过度精确且无来源（73.6%、47.3%）
+    dimension: B
+    mode: auto
+    severity: medium
+    evidence: medium
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 2, internship: 2, personal_project: 2}
+    rewrite_before: "性能提升 73.6%"
+    rewrite_after: "约提升 7 成（按 480ms→120ms 折算，四舍五入）"
+
+  - id: R21
+    title: 把团队/平台收益写成个人成果
+    dimension: B
+    mode: manual
+    severity: high
+    evidence: strong
+    applies_to: [internship, personal_project, opensource]
+    deduction: {default: 4, internship: 4, personal_project: 4}
+    redline: true
+    rewrite_before: "我主导重构，系统可用性提升至 99.99%"
+    rewrite_after: "我负责缓存层降级；可用性由 SRE 统计，整体从 99.9% 提升"
+
+  - id: R22
+    title: 同一指标在简历不同位置数值不一致
+    dimension: B
+    mode: auto
+    severity: medium
+    evidence: medium
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 3, internship: 3, personal_project: 3}
+    rewrite_before: "项目段写 P99 100ms，技能段写「接口优化 60%」且基线不同"
+    rewrite_after: "统一为 P99 480→120ms，全文只出现一次"
+
+  - id: R23
+    title: 单条项目描述超过 200 字或超过 5 行
+    dimension: C
+    mode: auto
+    severity: low
+    evidence: strong
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 2, internship: 2, personal_project: 2}
+    rewrite_before: "整段 400 字流水账"
+    rewrite_after: "「问题/方案/结果」三行，各 1 句"
+
+  - id: R24
+    title: 缺少「问题—方案—取舍—结果」结构
+    dimension: C
+    mode: manual
+    severity: medium
+    evidence: strong
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 3}
+    rewrite_before: "用了 Redis 和 MQ"
+    rewrite_after: "热点 Key 击穿 → 选 singleflight 而非全量加锁（读多写少）→ 回源下降 87%"
+
+  - id: R25
+    title: 技术名词堆砌且无选型理由
+    dimension: C
+    mode: manual
+    severity: medium
+    evidence: medium
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 3}
+    rewrite_before: "Spring Cloud+Nacos+Sentinel+Seata+ES"
+    rewrite_after: "单体 + MySQL，仅引入 Redis 缓存；未拆微服务（团队 2 人、无多团队协作需求）"
+
+  - id: R26
+    title: 「参与/协助/配合/负责部分」占比过高（> 50% 条目）
+    dimension: C
+    mode: auto
+    severity: medium
+    evidence: strong
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 3, internship: 3, personal_project: 3}
+    rewrite_before: "参与推荐系统开发，协助联调"
+    rewrite_after: "负责召回融合模块（3 个策略），独立完成联调与 32 个单测"
+
+  - id: R27
+    title: 强动词滥用（全篇「主导/独立/从0到1」）
+    dimension: C
+    mode: auto
+    severity: medium
+    evidence: medium
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 2, internship: 2, personal_project: 2}
+    rewrite_before: "独立主导从 0 到 1 搭建"
+    rewrite_after: "按真实分工分别写「负责/参与/维护」"
+
+  - id: R28
+    title: 核心项目排在最后、无关经历前置
+    dimension: C
+    mode: auto
+    severity: low
+    evidence: medium
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 2, internship: 2, personal_project: 2}
+    rewrite_before: "社团经历→课程作业→核心项目"
+    rewrite_after: "核心项目→实习→课程项目"
+
+  - id: R29
+    title: 页数为一页半或超过两页
+    dimension: C
+    mode: manual
+    severity: low
+    evidence: medium
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 2}
+    note: 纯文本输入无法判断页数，需人工确认
+    rewrite_before: "1.5 页，第二页只有 3 行"
+    rewrite_after: "压到 1 页或补足到 2 页完整页"
+
+  - id: R30
+    title: 花哨模板/双栏/图表导致 ATS 解析失败
+    dimension: C
+    mode: manual
+    severity: medium
+    evidence: medium
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 3}
+    note: 纯文本输入无法判断版式，需人工确认
+    rewrite_before: "双栏+技能环形图"
+    rewrite_after: "单栏纯文本、标准标题（教育/项目/技能）"
+
+  - id: R31
+    title: 目标 JD 的核心关键词缺失
+    dimension: D
+    mode: auto
+    severity: high
+    evidence: strong
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 6, internship: 6, personal_project: 6}
+    rewrite_before: "技能栏只有「Java、Python、Go」"
+    rewrite_after: "Go：goroutine/channel/context/errgroup；MySQL 索引与事务；Redis 缓存与分布式锁"
+
+  - id: R32
+    title: 技能栏写了但项目里零使用
+    dimension: D
+    mode: auto
+    severity: high
+    evidence: strong
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 4, internship: 4, personal_project: 4}
+    rewrite_before: "技能写 Kafka，项目无一处"
+    rewrite_after: "从技能栏删除，或补上「Kafka 承接点赞事件，日均 80 万条」"
+
+  - id: R33
+    title: 求职意向不唯一（同一份简历投后端/算法/前端/产品）
+    dimension: D
+    mode: auto
+    severity: medium
+    evidence: medium
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 3, internship: 3, personal_project: 3}
+    rewrite_before: "意向：后端/算法/测试/产品"
+    rewrite_after: "意向：Go 后端开发（校招）"
+
+  - id: R34
+    title: 无关经历占篇幅超过 30%
+    dimension: D
+    mode: auto
+    severity: medium
+    evidence: medium
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 3, internship: 3, personal_project: 3}
+    rewrite_before: "3 段销售兼职占半页"
+    rewrite_after: "压成 1 行「校园大使：组织 2 场活动，覆盖 300 人」"
+
+  - id: R35
+    title: 一份简历投所有岗位，无 JD 对齐痕迹
+    dimension: D
+    mode: manual
+    severity: medium
+    evidence: strong
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 3}
+    rewrite_before: "通用版投 50 家"
+    rewrite_after: "按 JD 前 3 关键词调整项目顺序与技能栏"
+
+  - id: R36
+    title: 错别字、中英标点混用、术语大小写不一致
+    dimension: E
+    mode: auto
+    severity: medium
+    evidence: medium
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 3, internship: 3, personal_project: 3}
+    rewrite_before: "golang，MySql，Ｒｅｄｉｓ"
+    rewrite_after: "Go、MySQL、Redis"
+
+  - id: R37
+    title: 文件命名/联系方式不规范（「简历.pdf」「最新版.pdf」）
+    dimension: E
+    mode: manual
+    severity: low
+    evidence: strong
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 2}
+    note: 文本输入不含文件名与联系方式，需人工确认
+    rewrite_before: "个人简历最终版.pdf"
+    rewrite_after: "张三-Go后端-XX大学-138xxxx.pdf"
+
+  - id: R38
+    title: 技能条/百分比/星级自评
+    dimension: E
+    mode: auto
+    severity: medium
+    evidence: single
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 2, internship: 2, personal_project: 2}
+    rewrite_before: "Go ██████ 90%"
+    rewrite_after: "Go：熟悉（项目主力语言，写过后端服务与压测工具）"
+
+  - id: R39
+    title: 时间格式不统一、进行中项目缺「至今」
+    dimension: E
+    mode: auto
+    severity: low
+    evidence: medium
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 1, internship: 1, personal_project: 1}
+    rewrite_before: "2025.3-2025.6、2025年7月-至今 混排"
+    rewrite_after: "统一 2025.03-2025.06、2025.07-至今"
+
+  - id: R40
+    title: 教育信息不全（毕业时间/学历/专业缺失）
+    dimension: E
+    mode: auto
+    severity: low
+    evidence: medium
+    applies_to: [internship, personal_project, opensource, competition, coursework]
+    deduction: {default: 1, internship: 1, personal_project: 1}
+    rewrite_before: "只写学校"
+    rewrite_after: "XX 大学 软件工程 本科 2022.09-2026.06（预计）"
+
+  # 产品补充规则（非调研原文）：个人/课程项目把教程或课程作业写成生产系统。
+  - id: R41
+    title: 把课程/跟教程项目写成企业级生产系统
+    dimension: A
+    mode: auto
+    severity: high
+    evidence: inference
+    applies_to: [personal_project, coursework, competition, opensource]
+    deduction: {default: 0, personal_project: 6, coursework: 6, competition: 4, opensource: 4}
+    note: 产品推断，可人工覆盖
+    rewrite_before: "企业级高可用电商系统（跟教程完成）"
+    rewrite_after: "课程项目：按教程完成单体电商，新增优惠券模块与 12 个单测；未上线"

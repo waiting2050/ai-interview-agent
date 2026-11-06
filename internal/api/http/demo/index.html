@@ -54,6 +54,15 @@
         简历文本（可选）
         <textarea id="resume-text" rows="4" placeholder="例如：3 年 Go 经验，负责订单履约链路，做过本地消息表与 Redis 缓存">3 年 Go 后端经验，负责订单履约与库存链路，用本地消息表保证最终一致性，做过 Redis 缓存与限流。</textarea>
       </label>
+      <div class="field">
+        <span class="field-label">简历诊断（规则版 · 不调用模型）</span>
+        <div class="diagnose-actions">
+          <button id="diagnose-btn" class="secondary" type="button">诊断当前简历文本</button>
+          <span class="muted">按段落识别实习 / 个人项目；类型不明时先请你确认，不静默猜测</span>
+        </div>
+        <div id="diagnose-state" class="upload-state" hidden></div>
+        <div id="diagnose-result" class="diagnose-result" hidden></div>
+      </div>
       <label>
         候选人称呼（可选）
         <input id="candidate-name" type="text" placeholder="例如：张三">

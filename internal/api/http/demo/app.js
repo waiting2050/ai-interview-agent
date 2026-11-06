@@ -1549,6 +1549,9 @@
         throw err;
       }
       $("resume-text").value = body.text || "";
+      diagnoseOverrides = {};
+      $("diagnose-result").hidden = true;
+      setDiagnoseState(null);
       renderResumeProfile(body);
       setUploadState("ok",
         `<b>解析成功</b><span>${escapeHtml(body.filename)} · ${Number(body.chars || 0).toLocaleString()} 字` +
@@ -1565,6 +1568,175 @@
     setUploadState(null);
     $("resume-profile").hidden = true;
     $("resume-profile").innerHTML = "";
+    diagnoseOverrides = {};
+    $("diagnose-result").hidden = true;
+    setDiagnoseState(null);
+  }
+
+  // ---------- resume diagnosis (deterministic rules, no model) ----------
+
+  const SEGMENT_TYPE_LABELS = {
+    internship: "实习/工作",
+    personal_project: "个人项目",
+    opensource: "开源贡献",
+    competition: "竞赛",
+    coursework: "课程/毕设",
+    unknown: "待确认",
+  };
+  const SEVERITY_LABELS = { high: "高", medium: "中", low: "低" };
+  const BAND_TONE = { 1: "danger", 2: "warn", 3: "warn", 4: "ok", 5: "ok" };
+  let diagnoseOverrides = {};
+
+  function setDiagnoseState(kind, html) {
+    const el = $("diagnose-state");
+    if (!kind) {
+      el.hidden = true;
+      el.className = "upload-state";
+      el.innerHTML = "";
+      return;
+    }
+    el.hidden = false;
+    el.className = "upload-state " + kind;
+    el.innerHTML = html;
+  }
+
+  function dimBar(weight, deducted) {
+    const pct = weight > 0 ? Math.min(100, Math.round((deducted / weight) * 100)) : 0;
+    return `<div class="diag-bar" aria-hidden="true"><span style="width:${pct}%"></span></div>`;
+  }
+
+  function renderDiagnosis(diag) {
+    const box = $("diagnose-result");
+    const tone = BAND_TONE[diag.band.level] || "warn";
+    const dims = Array.isArray(diag.dimensions) ? diag.dimensions : [];
+    const segments = Array.isArray(diag.segments) ? diag.segments : [];
+    const issues = Array.isArray(diag.issues) ? diag.issues : [];
+    const confirms = Array.isArray(diag.needs_confirmation) ? diag.needs_confirmation : [];
+    const manual = Array.isArray(diag.manual_checks) ? diag.manual_checks : [];
+
+    const scoreRing =
+      `<div class="diag-ring ${tone}" style="--score:${Number(diag.overall_score) || 0}">` +
+      `<div class="diag-ring-inner"><b>${Number(diag.overall_score) || 0}</b><span>${escapeHtml(diag.band.name)}</span></div></div>`;
+
+    const subScores =
+      `<div class="diag-subscore"><b>${diag.screen_score.score}</b><span>初筛分 · HR 视角</span></div>` +
+      `<div class="diag-subscore"><b>${diag.tech_score.score}</b><span>技术分 · 面试官视角</span></div>` +
+      `<div class="diag-subscore"><b>${diag.document_score}</b><span>文档分 · A–E 规则</span></div>`;
+
+    const top = (diag.top_issues || []).map((text) => `<li>${escapeHtml(text)}</li>`).join("");
+
+    const dimHtml = dims.map((d) => (
+      `<div class="diag-dim">` +
+      `<div class="diag-dim-head"><span>${escapeHtml(d.id)} · ${escapeHtml(d.name)}</span>` +
+      `<span class="muted">扣 ${d.deducted} / ${d.weight}</span></div>` +
+      dimBar(d.weight, d.deducted) +
+      `</div>`
+    )).join("");
+
+    const segmentHtml = segments.map((seg) => {
+      if (typeof seg.score !== "number" || seg.score < 0) {
+        return `<div class="diag-segment unknown"><div class="diag-segment-head">` +
+          `<b>${escapeHtml(truncateText(seg.title, 36))}</b><span class="tag">${escapeHtml(SEGMENT_TYPE_LABELS[seg.type] || seg.type)}</span>` +
+          `</div><p class="muted">类型未确认，暂不计分。</p></div>`;
+      }
+      const segDims = (seg.dimensions || []).map((d) => (
+        `<div class="diag-dim"><div class="diag-dim-head"><span>${escapeHtml(d.name)}</span>` +
+        `<span class="muted">扣 ${d.deducted} / ${d.weight}</span></div>${dimBar(d.weight, d.deducted)}</div>`
+      )).join("");
+      const prompts = (seg.followups || []).map((p) => `<li>${escapeHtml(p)}</li>`).join("");
+      return `<div class="diag-segment">` +
+        `<div class="diag-segment-head"><b>${escapeHtml(truncateText(seg.title, 36))}</b>` +
+        `<span class="tag">${escapeHtml(SEGMENT_TYPE_LABELS[seg.type] || seg.type)}</span>` +
+        `<span class="diag-segment-score">${seg.score}</span></div>` +
+        `<p class="muted">${seg.months ? seg.months + " 个月 · " : ""}篇幅权重 ${seg.weight_percent}% · ${seg.type_source === "user" ? "类型由你指定" : "类型自动识别"}</p>` +
+        segDims +
+        (prompts ? `<details class="diag-fold"><summary>该段面试追问（${seg.followups.length} 条）</summary><ul>${prompts}</ul></details>` : "") +
+        `</div>`;
+    }).join("");
+
+    const issueHtml = issues.map((issue) => {
+      const sev = SEVERITY_LABELS[issue.severity] || issue.severity;
+      const dim = issue.dimension_name || issue.dimension;
+      const rewrite = issue.rewrite && (issue.rewrite.before || issue.rewrite.after)
+        ? `<details class="diag-fold"><summary>查看改写示例（差 → 好）</summary>` +
+          `<div class="diag-rewrite"><p><span class="bad">差</span>${escapeHtml(issue.rewrite.before)}</p>` +
+          `<p><span class="good">好</span>${escapeHtml(issue.rewrite.after)}</p></div></details>`
+        : "";
+      return `<div class="diag-issue sev-${escapeHtml(issue.severity)}">` +
+        `<div class="diag-issue-head"><span class="sev">${escapeHtml(sev)}</span>` +
+        `<b>${escapeHtml(issue.rule_id)} · ${escapeHtml(issue.title)}</b>` +
+        `<span class="diag-deduct">−${issue.deducted}</span></div>` +
+        `<p class="diag-quote">原文：${escapeHtml(issue.quote)}</p>` +
+        `<p class="muted">${escapeHtml(dim)} · 证据强度：${escapeHtml(issue.evidence)}` +
+        `${issue.mode === "auto_manual" ? " · 自动判定部分，可人工申诉" : ""}` +
+        `${issue.note ? " · " + escapeHtml(issue.note) : ""}</p>` +
+        rewrite + `</div>`;
+    }).join("") || '<p class="muted">未发现自动可判定的扣分项。</p>';
+
+    const confirmHtml = confirms.length
+      ? `<div class="diag-confirm"><b>有 ${confirms.length} 段经历类型无法判断，请确认后重算</b>` +
+        confirms.map((item) => {
+          const options = Object.keys(SEGMENT_TYPE_LABELS)
+            .filter((key) => key !== "unknown")
+            .map((key) => `<option value="${key}"${diagnoseOverrides[item.index] === key ? " selected" : ""}>` +
+              `${escapeHtml(SEGMENT_TYPE_LABELS[key])}</option>`).join("");
+          return `<div class="diag-confirm-row"><span>#${item.index} ${escapeHtml(truncateText(item.title, 40))}</span>` +
+            `<select data-segment="${item.index}" class="diag-type-select">${options}</select>` +
+            `<button type="button" class="secondary diag-confirm-btn" data-segment="${item.index}">按此类型重算</button></div>`;
+        }).join("") + `</div>`
+      : "";
+
+    const manualHtml = manual.length
+      ? `<details class="diag-fold"><summary>需人工确认的 ${manual.length} 项（不计入自动分）</summary>` +
+        manual.map((item) => `<li><b>${escapeHtml(item.rule_id)}</b> ${escapeHtml(item.title)}` +
+          `<span class="muted"> — ${escapeHtml(item.note)}</span></li>`).join("") + `</details>`
+      : "";
+
+    box.hidden = false;
+    box.innerHTML =
+      `<div class="diag-head">${scoreRing}<div class="diag-head-main">` +
+      `<div class="diag-badges">${subScores}</div>` +
+      `<p class="muted">${escapeHtml(diag.rules_summary)} · 不调用模型 · ${diag.rule_hits} 条自动命中</p>` +
+      `<p class="diag-advice">${escapeHtml(diag.conflict_advice)}</p>` +
+      `<ul class="diag-top">${top}</ul>` +
+      `</div></div>` +
+      `<div class="diag-grid">` +
+      `<section><h4>A–E 维度扣分</h4>${dimHtml}</section>` +
+      `<section><h4>分段得分（按经历类型）</h4>${segmentHtml || '<p class="muted">未识别到可计分的经历段落。</p>'}</section>` +
+      `</div>` +
+      confirmHtml +
+      `<section class="diag-issues"><h4>问题列表（按严重度排序）</h4>${issueHtml}</section>` +
+      manualHtml;
+  }
+
+  async function runResumeDiagnosis(extraOverrides) {
+    const text = $("resume-text").value.trim();
+    if (!text) {
+      setDiagnoseState("error", "<b>没有可诊断的文本</b><span>请先上传简历或粘贴正文。</span>");
+      $("diagnose-result").hidden = true;
+      return;
+    }
+    diagnoseOverrides = Object.assign({}, diagnoseOverrides, extraOverrides || {});
+    const segmentTypes = Object.keys(diagnoseOverrides)
+      .map((key) => ({ index: Number(key), type: diagnoseOverrides[key] }));
+    setDiagnoseState("parsing", "<b>正在按规则诊断</b><span>分段、类型识别、40+ 检查项逐条匹配 · 不调用模型</span>");
+    try {
+      const diag = await api("/v1/resume/analyze", {
+        method: "POST",
+        body: JSON.stringify({
+          text,
+          jd_text: $("jd-text").value.trim(),
+          target_role: $("target-role").value.trim(),
+          filename: "pasted-resume.txt",
+          segment_types: segmentTypes,
+        }),
+      });
+      renderDiagnosis(diag);
+      setDiagnoseState("ok",
+        `<b>诊断完成</b><span>总分 ${diag.overall_score}（${escapeHtml(diag.band.name)}）· 初筛 ${diag.screen_score.score} / 技术 ${diag.tech_score.score} · 未调用模型</span>`);
+    } catch (err) {
+      setDiagnoseState("error", `<b>诊断失败</b><span>${escapeHtml(humanError(err))}</span>`);
+    }
   }
 
   function setSetupBusy(busy) {
@@ -1854,6 +2026,22 @@
     if (file) {
       handleResumeFile(file);
     }
+  });
+
+  $("diagnose-btn").addEventListener("click", () => runResumeDiagnosis());
+  $("diagnose-result").addEventListener("click", (event) => {
+    const btn = event.target.closest(".diag-confirm-btn");
+    if (!btn) {
+      return;
+    }
+    const index = btn.getAttribute("data-segment");
+    const select = $("diagnose-result").querySelector(`.diag-type-select[data-segment="${index}"]`);
+    if (!select) {
+      return;
+    }
+    const overrides = {};
+    overrides[index] = select.value;
+    runResumeDiagnosis(overrides);
   });
   submitBtn.addEventListener("click", submitAnswer);
   finishBtn.addEventListener("click", finishInterview);

@@ -7,6 +7,7 @@ import (
 
 	"github.com/waiting2050/ai-interview-agent/internal/app"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/obs"
+	"github.com/waiting2050/ai-interview-agent/internal/ports"
 )
 
 type Deps struct {
@@ -15,6 +16,9 @@ type Deps struct {
 	Logger  *slog.Logger
 	// Metrics backs GET /metrics. Nil falls back to a fresh empty registry.
 	Metrics *obs.Metrics
+	// ResumeAnalyzer backs POST /v1/resume/analyze. Nil falls back to the
+	// embedded deterministic rules engine.
+	ResumeAnalyzer ports.ResumeAnalyzer
 }
 
 // NewRouter wires the HTTP surface: health, metrics, session commands, answers
@@ -35,6 +39,7 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("GET /demo", h.demoPage)
 	mux.Handle("GET /demo/", demoStatic())
 	mux.HandleFunc("POST /v1/resume/parse", h.parseResume)
+	mux.HandleFunc("POST /v1/resume/analyze", h.analyzeResume)
 	mux.HandleFunc("POST /v1/sessions", h.createSession)
 	mux.HandleFunc("GET /v1/sessions/{id}", h.getSession)
 	mux.HandleFunc("POST /v1/sessions/{id}/start", h.startSession)
