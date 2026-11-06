@@ -61,12 +61,12 @@ type Document struct {
 }
 
 var formatByExt = map[string]DocumentFormat{
-	".txt": FormatTXT,
-	".md":  FormatMD,
+	".txt":  FormatTXT,
+	".md":   FormatMD,
 	".docx": FormatDOCX,
-	".pdf": FormatPDF,
-	".png": FormatPNG,
-	".jpg": FormatJPG,
+	".pdf":  FormatPDF,
+	".png":  FormatPNG,
+	".jpg":  FormatJPG,
 	".jpeg": FormatJPG,
 }
 
