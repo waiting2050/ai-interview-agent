@@ -47,8 +47,67 @@ JSON 结构：
   "followup": {"needed": false, "target": "", "reason": ""}
 }`
 
-// EvaluationSystem returns the system message for answer evaluation.
-func EvaluationSystem() string { return evaluationSystem }
+// DimensionSpec is one rubric row rendered into the evaluation prompt. The
+// caller passes pack dimensions so the model scores the same axes the report
+// and UI display.
+type DimensionSpec struct {
+	Key    string
+	Name   string
+	Anchor string
+}
+
+// EvaluationSystem returns the system message for answer evaluation. With no
+// specs it returns the fixed default rubric; otherwise the dimension block and
+// JSON skeleton are generated from the supplied rubric.
+func EvaluationSystem(dims ...DimensionSpec) string {
+	if len(dims) == 0 {
+		return evaluationSystem
+	}
+
+	var b strings.Builder
+	b.WriteString("[TASK:evaluation] 你是资深技术面试官，负责评估候选人对一道技术问题的回答。只输出一个 JSON 对象，不要输出 Markdown 代码块、解释或多余文字。\n\n")
+	b.WriteString("评分维度（每个维度给 1-5 的整数分）：\n")
+	for _, d := range dims {
+		anchor := strings.TrimSpace(d.Anchor)
+		if anchor == "" {
+			anchor = "1 分 = 明显错误或几乎无信息；3 分 = 基本正确但泛泛而谈；5 分 = 准确、深入且有具体取舍。"
+		}
+		fmt.Fprintf(&b, "- %s %s：%s\n", d.Key, d.Name, anchor)
+	}
+	b.WriteString(`
+硬性规则：
+1. evidence 中每条 quote 必须逐字出现在候选人回答里（允许标点/空格差异），否则会被丢弃。
+2. bonus/penalty 的 quote 同样必须来自回答原文；bonus 为 1-3 分，penalty 为 -3 到 -1 分。
+3. 只有回答出现明显亮点才给 bonus；答非所问、事实错误、空泛模板才给 penalty。
+4. 如果存在 missing_points 或 penalty，且值得追问，可令 followup.needed=true，并给出 followup.target（要追问的具体点）。没有明确追问价值时必须为 false。
+5. confidence 取 0-1；回答信息不足时降低 confidence，而不是编造细节。
+6. 如果 user 消息给出了「本题期望覆盖」，evidence.reason 必须明确写出被覆盖的期望点原文（格式如「覆盖：goroutine 调度与 G-M-P 模型」）；未覆盖的期望点必须逐条写入 missing_points。不能只写「回答原文片段」之类的笼统理由。
+7. scores 必须且只能包含上面列出的维度 key，每个维度都必须给分。
+
+JSON 结构：
+{
+  "schema_version": 1,
+  "turn_id": "",
+  "scores": {`)
+	keys := make([]string, 0, len(dims))
+	for _, d := range dims {
+		keys = append(keys, fmt.Sprintf("%q: 3", d.Key))
+	}
+	b.WriteString(strings.Join(keys, ", "))
+	b.WriteString(`},
+  "evidence": [{"dimension": "`)
+	if len(dims) > 0 {
+		b.WriteString(dims[0].Key)
+	}
+	b.WriteString(`", "quote": "回答原文片段", "reason": "为什么"}],
+  "bonus": [{"type": "highlight", "quote": "回答原文片段", "points": 1, "reason": "亮点"}],
+  "penalty": [{"type": "violation", "quote": "回答原文片段", "points": -1, "reason": "问题"}],
+  "confidence": 0.6,
+  "missing_points": ["缺失的关键点"],
+  "followup": {"needed": false, "target": "", "reason": ""}
+}`)
+	return b.String()
+}
 
 type EvaluationInput struct {
 	TargetRole     string
@@ -227,7 +286,29 @@ JSON 结构：
 }`
 
 // ReportSystem returns the system message for report commentary generation.
-func ReportSystem() string { return reportSystem }
+// With no specs it keeps the fixed default keys; otherwise dimension_comments
+// are constrained to the session pack rubric.
+func ReportSystem(dims ...DimensionSpec) string {
+	if len(dims) == 0 {
+		return reportSystem
+	}
+	keys := make([]string, 0, len(dims))
+	for _, d := range dims {
+		keys = append(keys, d.Key)
+	}
+	out := strings.Replace(reportSystem,
+		"correctness / depth / engineering_judgment / structure / evidence_credibility",
+		strings.Join(keys, " / "), 1)
+
+	skeleton := make([]string, 0, len(keys))
+	for _, key := range keys {
+		skeleton = append(skeleton, fmt.Sprintf("%q: \"\"", key))
+	}
+	out = strings.Replace(out,
+		`{"correctness": "", "depth": "", "engineering_judgment": "", "structure": "", "evidence_credibility": ""}`,
+		"{"+strings.Join(skeleton, ", ")+"}", 1)
+	return out
+}
 
 // ReportTurn is the compact per-question evidence injected into the report
 // prompt. Answers are excerpts, never the full transcript.

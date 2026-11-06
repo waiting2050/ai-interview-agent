@@ -1109,6 +1109,17 @@ data: {"event_id":43,"session_id":"01H...","run_id":"01H...","type":"question.as
   - 不因节省仓库体积删除任何已有内容；领域包很小，重点是仓库聚焦与内容可信。
 - 验收：加载器启动校验单测覆盖非法包；同一测试答案在默认包下分数与改造前一致；未知 `domain` 返回 400；报告维度名来自包配置；三个完整包各自接入后 `go test ./...` 全绿，Go 包原有测试保持不变。
 
+**M14 实现记录（已完成）**
+
+- 加载器：`internal/domain/domainpack/pack.go` 通过 `domainpacks/embed.go` 读取 `domainpacks/*/manifest.yaml`；启动时校验 id 与目录一致、id 唯一、方向存在、难度合法、每考点 3 条 expected_points、`source` 为 `curated` 时禁止带 URL（`retrieved` 必须带 URL）、lexicon 非空、rubric 权重和为 1。任何一条不满足都返回错误，不静默跳过。
+- 迁移：原 `syllabus` 24 个考点原样迁入 `domainpacks/go-backend/manifest.yaml`（保留 `go-concurrency`、`go-arch-layering` 等原 ID）；`internal/domain/syllabus` 退化为兼容层，旧 API 与测试不变。
+- 新增包：`java-backend` 11 个考点（JVM 3 / Spring 6 / MySQL 2），`ai-agent` 12 个考点（LLM 4 / RAG 4 / 服务化 4）；AI 包用 `system_design` 替换 `structure`，证明维度不是硬编码五维。
+- 会话域：`POST /v1/sessions` 接受 `domain`（默认 `go-backend`），未知值返回 400；`sessions.domain` 落库（`migrations/0005_m14.sql`）；`GET /v1/domains` 暴露 id/name/版本/方向/rubric/考点数，前端下拉与展示不写死包列表以外的数据。
+- 维度贯通：`evaluation.Rubric` 支持任意维度顺序/名称/权重；评估 prompt、JSON 校验、heuristic 评分、`get_session_overview`、报告降级渲染与前端得分条/雷达图全部读包配置。前端仅在样例模式使用默认五维兜底。
+- 示例与文档：`docs/domainpacks/examples/solution-presales.example.yaml`、`ops-growth.example.yaml` 各 2 个考点，`docs/domainpacks/solution-and-ops.md` 记录售前/FDE/运营的完整考点与维度；示例位于 `docs/` 下，不在 embed 范围内，测试断言不会被加载。
+- 测试：`internal/domain/domainpack/pack_test.go` 覆盖三包完整性、权重和、curated 无 URL、非法包逐项拒绝、示例目录不加载、Plan 去重与确定性黄金用例；API 测试覆盖未知 domain 400、rubric 透出与 `/v1/domains`。
+- 验证：`gofmt -l .` 为空；`go vet ./...`、`go test ./...`、`go test -tags=eval ./internal/agent/eval`、`go test -tags=integration ./...` 全绿（integration 使用本地 PG 5433 / Redis 6380）。
+
 ### M15 JD 采集与匹配（计划，M12 之后）
 
 - 采集范围：仅公开可访问页面——公司招聘官网、Greenhouse / Lever / Workable 等公开 ATS 接口、公司自有岗位页。遵守 `robots.txt`，每域名限速（个位数/分钟），失败指数退避；不绕验证码、不模拟登录、不伪造 UA、不托管用户账号。

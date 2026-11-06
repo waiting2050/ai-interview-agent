@@ -2,24 +2,38 @@
   "use strict";
 
   const $ = (id) => document.getElementById(id);
-  const DIMENSIONS = [
-    ["correctness", "正确性"],
-    ["depth", "深度"],
-    ["engineering_judgment", "工程判断"],
-    ["structure", "表达结构"],
-    ["evidence_credibility", "证据可信度"],
-  ];
-  // Mirrors internal/domain/evaluation. Weights are shown, not just applied.
-  const WEIGHTS = {
-    correctness: 0.30,
-    depth: 0.25,
-    engineering_judgment: 0.20,
-    structure: 0.15,
-    evidence_credibility: 0.10,
+  // Fallback rubric for sample mode and before a session is created. Real
+  // sessions replace it with the domain pack rubric returned by the server.
+  const DEFAULT_RUBRIC = {
+    dimensions: [
+      { key: "correctness", name: "正确性", weight: 0.30 },
+      { key: "depth", name: "深度", weight: 0.25 },
+      { key: "engineering_judgment", name: "工程判断", weight: 0.20 },
+      { key: "structure", name: "表达结构", weight: 0.15 },
+      { key: "evidence_credibility", name: "证据可信度", weight: 0.10 },
+    ],
   };
   const BONUS_CAP = 8;
   const PENALTY_CAP = -10;
-  const DIM_LABEL = Object.fromEntries(DIMENSIONS);
+
+  function rubricDims() {
+    const dims = state.rubric && state.rubric.dimensions;
+    return Array.isArray(dims) && dims.length > 0 ? dims : DEFAULT_RUBRIC.dimensions;
+  }
+
+  function rubricPairs() {
+    return rubricDims().map((d) => [d.key, d.name]);
+  }
+
+  function dimLabel(key) {
+    const dim = rubricDims().find((d) => d.key === key);
+    return dim ? dim.name : key;
+  }
+
+  function dimWeight(key) {
+    const dim = rubricDims().find((d) => d.key === key);
+    return dim ? Number(dim.weight) : 0;
+  }
   const EVENT_TYPES = [
     "session.created", "session.started", "session.phase", "session.aborted", "session.completed",
     "session.failed", "question.asked", "answer.received", "evaluation.completed",
@@ -162,6 +176,7 @@
     reportLoaded: false,
     canFinish: false,
     config: null,
+    rubric: null,
     role: "",
     startedAt: null,
     primaryAsked: 0,
@@ -937,7 +952,7 @@
   function dimensionGrid(scores) {
     const grid = document.createElement("div");
     grid.className = "dim-grid";
-    DIMENSIONS.forEach(([key, label]) => {
+    rubricPairs().forEach(([key, label]) => {
       const raw = scores && scores[key];
       if (raw == null) {
         return;
@@ -984,14 +999,16 @@
   }
 
   function humanScoreLine(d) {
-    const values = DIMENSIONS.map(([key]) => d.scores[key]);
+    const dims = rubricDims();
+    const values = dims.map((dim) => d.scores[dim.key]);
     const filled = values.filter((v) => v != null);
-    const allEqual = filled.length === DIMENSIONS.length && filled.every((v) => v === filled[0]);
+    const allEqual = filled.length === dims.length && filled.every((v) => v === filled[0]);
+    const weights = dims.map((dim) => Number(dim.weight).toFixed(2)).join(" / ");
     let line;
     if (allEqual) {
-      line = `五维均 ${filled[0]} 分 → ${filled[0]}/5×100 = ${d.base.toFixed(1)}`;
+      line = `${dims.length} 个维度均为 ${filled[0]} 分 → ${filled[0]}/5×100 = ${d.base.toFixed(1)}`;
     } else {
-      line = `五维 ${values.map((v) => (v == null ? "-" : v)).join("/")}，按 0.30 / 0.25 / 0.20 / 0.15 / 0.10 权重折算 → base ${d.base.toFixed(1)}`;
+      line = `${dims.length} 个维度 ${values.map((v) => (v == null ? "-" : v)).join("/")}，按 ${weights} 权重折算 → base ${d.base.toFixed(1)}`;
     }
     if (d.bonus === 0 && d.penalty === 0) {
       line += "，无加分扣分。";
@@ -1002,12 +1019,12 @@
   }
 
   function scoreTableHtml(d) {
-    const rows = DIMENSIONS.map(([key, label]) => {
+    const rows = rubricPairs().map(([key, label]) => {
       const raw = d.scores[key];
       if (raw == null) {
         return "";
       }
-      const weight = WEIGHTS[key] || 0;
+      const weight = dimWeight(key);
       const contribution = Number(raw) / 5 * weight * 100;
       return `<tr><td>${escapeHtml(label)}</td><td class="num">${raw} / 5</td>` +
         `<td class="num">${weight.toFixed(2)}</td><td class="num">${contribution.toFixed(1)}</td></tr>`;
@@ -1055,15 +1072,16 @@
     }
     const dims = new Set(unique.map((e) => e.dimension || ""));
     const item = (e) =>
-      `<li>${clampHtml(e.quote, 3)}<span class="dim-tag">支持：${escapeHtml(DIM_LABEL[e.dimension] || e.dimension || "未标注")}</span>` +
+      `<li>${clampHtml(e.quote, 3)}<span class="dim-tag">支持：${escapeHtml(dimLabel(e.dimension) || "未标注")}</span>` +
       `${e.reason ? `<p class="evidence-reason">${escapeHtml(e.reason)}</p>` : ""}</li>`;
     if (dims.size < 2) {
       return `<ul class="evidence-list">${unique.map(item).join("")}</ul>`;
     }
-    const groups = DIMENSIONS
+    const known = new Set(rubricDims().map((d) => d.key));
+    const groups = rubricPairs()
       .map(([key, label]) => ({ label, items: unique.filter((e) => e.dimension === key) }))
       .filter((g) => g.items.length > 0);
-    const unknown = unique.filter((e) => !DIM_LABEL[e.dimension]);
+    const unknown = unique.filter((e) => !known.has(e.dimension));
     if (unknown.length > 0) {
       groups.push({ label: "未标注", items: unknown });
     }
@@ -1262,29 +1280,32 @@
   }
 
   function radarSvg(dims) {
+    const pairs = rubricPairs();
+    const n = pairs.length;
     const size = 250;
     const cx = 125;
     const cy = 118;
     const r = 80;
-    const angle = (i) => -Math.PI / 2 + i * 2 * Math.PI / 5;
+    const angle = (i) => -Math.PI / 2 + i * 2 * Math.PI / n;
     const point = (i, ratio) => {
       const x = cx + Math.cos(angle(i)) * r * ratio;
       const y = cy + Math.sin(angle(i)) * r * ratio;
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     };
-    const values = DIMENSIONS.map(([key]) => {
+    const values = pairs.map(([key]) => {
       const found = (dims || []).find((d) => d.dimension === key);
       return Math.max(0, Math.min(100, Number(found ? found.score : 0))) / 100;
     });
+    const vertices = (ratio) => Array.from({ length: n }, (_, i) => point(i, ratio)).join(" ");
     const rings = [0.25, 0.5, 0.75, 1].map((g) =>
-      `<polygon points="${[0, 1, 2, 3, 4].map((i) => point(i, g)).join(" ")}" fill="none" stroke="#e3e9f3" stroke-width="1"/>`).join("");
-    const axes = [0, 1, 2, 3, 4].map((i) => {
+      `<polygon points="${vertices(g)}" fill="none" stroke="#e3e9f3" stroke-width="1"/>`).join("");
+    const axes = Array.from({ length: n }, (_, i) => {
       const p = point(i, 1).split(",");
       return `<line x1="${cx}" y1="${cy}" x2="${p[0]}" y2="${p[1]}" stroke="#e3e9f3"/>`;
     }).join("");
-    const shape = `<polygon points="${[0, 1, 2, 3, 4].map((i) => point(i, values[i])).join(" ")}" ` +
+    const shape = `<polygon points="${Array.from({ length: n }, (_, i) => point(i, values[i])).join(" ")}" ` +
       `fill="rgba(52,82,225,0.16)" stroke="#3452e1" stroke-width="2"/>`;
-    const labels = DIMENSIONS.map(([, label], i) => {
+    const labels = pairs.map(([, label], i) => {
       const lx = cx + Math.cos(angle(i)) * (r + 22);
       const ly = cy + Math.sin(angle(i)) * (r + 22);
       return `<text x="${lx.toFixed(0)}" y="${ly.toFixed(0)}" text-anchor="middle" dominant-baseline="middle" ` +
@@ -1363,7 +1384,7 @@
   function sectionPreview(section, questions) {
     const idx = Number(section.index);
     if (idx === 1) {
-      return "五维加权得分与短板说明，点击查看明细";
+      return "加权得分与短板说明，点击查看明细";
     }
     if (idx === 2 && questions.length > 0) {
       return `共 ${questions.length} 题，点击查看逐题点评`;
@@ -1567,6 +1588,7 @@
     state.sampleMode = true;
     state.role = "Go 后端开发工程师";
     state.config = { max_primary_questions: 3, max_followups_per_question: 1, max_total_followups: 2 };
+    state.rubric = null;
     state.primaryAsked = 3;
     state.followupsUsed = 0;
     resetStepper(3);
@@ -1890,7 +1912,7 @@
   }
 
   function setSetupBusy(busy) {
-    ["target-role", "jd-text", "resume-text", "candidate-name", "max-primary", "max-followups"].forEach((id) => {
+    ["target-role", "jd-text", "resume-text", "candidate-name", "max-primary", "max-followups", "domain"].forEach((id) => {
       $(id).disabled = busy;
     });
     $("start-btn").disabled = busy;
@@ -1944,6 +1966,7 @@
           target_role: role,
           resume_text: $("resume-text").value.trim(),
           jd_text: jd,
+          domain: $("domain").value,
           config: {
             max_primary_questions: primary,
             max_followups_per_question: followups,
@@ -1956,6 +1979,7 @@
         }),
       });
       state.sessionId = created.session_id;
+      state.rubric = created.rubric || null;
       state.config = created.config || {
         max_primary_questions: primary,
         max_followups_per_question: followups,
@@ -1999,6 +2023,7 @@
     state.reportLoaded = false;
     state.canFinish = false;
     state.config = null;
+    state.rubric = null;
     state.role = "";
     state.startedAt = null;
     state.primaryAsked = 0;

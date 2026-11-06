@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"github.com/waiting2050/ai-interview-agent/internal/agent/interview"
+	"github.com/waiting2050/ai-interview-agent/internal/domain/domainpack"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/resume"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/session"
-	"github.com/waiting2050/ai-interview-agent/internal/domain/syllabus"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/idgen"
 )
 
@@ -24,6 +24,7 @@ type StartInput struct {
 	ResumeText string
 	Profile    resume.Profile
 	JDText     string
+	Domain     string
 	Config     session.Config
 }
 
@@ -43,34 +44,38 @@ type StartSteps struct {
 	Ask  func(ctx context.Context, in StartInput, plan PlanResult) (AskResult, error)
 }
 
-// DefaultStartSteps builds an outline from the built-in syllabus and asks the
-// first question with the model-backed generator.
+// DefaultStartSteps builds an outline from the session domain pack and asks
+// the first question with the model-backed generator.
 func DefaultStartSteps(generator *interview.QuestionGenerator) StartSteps {
 	if generator == nil {
 		generator = interview.NewQuestionGenerator(interview.NewHeuristicClient(), "fake-heuristic")
 	}
 	return StartSteps{
-		Plan: planFromSyllabus,
+		Plan: planFromDomainPack,
 		Ask:  askFirstQuestion(generator),
 	}
 }
 
-// planFromSyllabus selects and merges built-in outlines based on the target
-// role, JD and resume profile. The result is deterministic for the same input.
-func planFromSyllabus(_ context.Context, in StartInput) (PlanResult, error) {
+// planFromDomainPack selects and merges pack topics based on the target role,
+// JD and resume profile. The result is deterministic for the same input.
+func planFromDomainPack(_ context.Context, in StartInput) (PlanResult, error) {
+	pack := domainpack.Default().MustGet(in.Domain)
+	if pack == nil {
+		return PlanResult{}, fmt.Errorf("no domain pack for %q", in.Domain)
+	}
 	text := strings.Join([]string{
 		in.TargetRole,
 		in.JDText,
 		in.Profile.Text(),
 		in.ResumeText,
 	}, "\n")
-	outline := syllabus.Plan(text, in.Config.Difficulty, in.Config.MaxPrimaryQuestions)
-	if len(outline.Items) == 0 {
-		return PlanResult{}, fmt.Errorf("syllabus produced no items")
+	planned := pack.Plan(text, in.Config.Difficulty, in.Config.MaxPrimaryQuestions)
+	if len(planned) == 0 {
+		return PlanResult{}, fmt.Errorf("domain pack %q produced no items", pack.ID)
 	}
 
-	items := make([]interview.PlanItemView, 0, len(outline.Items))
-	for i, item := range outline.Items {
+	items := make([]interview.PlanItemView, 0, len(planned))
+	for i, item := range planned {
 		items = append(items, interview.PlanItemView{
 			Seq:            i + 1,
 			Topic:          item.Topic,
@@ -79,7 +84,21 @@ func planFromSyllabus(_ context.Context, in StartInput) (PlanResult, error) {
 			Difficulty:     item.Difficulty,
 		})
 	}
-	return PlanResult{Direction: outline.Direction, Items: items}, nil
+	return PlanResult{Direction: direction(planned), Items: items}, nil
+}
+
+// direction summarises the matched directions, e.g. "go+mysql+redis".
+func direction(items []domainpack.PlanItem) string {
+	seen := map[string]struct{}{}
+	var out []string
+	for _, item := range items {
+		if _, ok := seen[item.Direction]; ok {
+			continue
+		}
+		seen[item.Direction] = struct{}{}
+		out = append(out, item.Direction)
+	}
+	return strings.Join(out, "+")
 }
 
 func askFirstQuestion(generator *interview.QuestionGenerator) func(context.Context, StartInput, PlanResult) (AskResult, error) {

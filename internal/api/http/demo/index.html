@@ -31,6 +31,14 @@
         <input id="target-role" type="text" required placeholder="例如：Go 后端开发工程师" value="Go 后端开发工程师">
       </label>
       <label>
+        面试领域
+        <select id="domain">
+          <option value="go-backend" selected>Go 后端（并发 / MySQL / Redis）</option>
+          <option value="java-backend">Java 后端（JVM / Spring / MySQL）</option>
+          <option value="ai-agent">AI Agent（LLM / RAG / 服务化）</option>
+        </select>
+      </label>
+      <label>
         职位描述 JD <span class="req">*</span>
         <textarea id="jd-text" rows="5" required placeholder="粘贴岗位职责与要求">负责高并发订单系统设计，要求熟悉 Go、分布式事务、消息队列、MySQL/Redis，有可观测性与性能优化经验。</textarea>
       </label>

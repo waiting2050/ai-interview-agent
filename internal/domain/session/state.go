@@ -139,6 +139,7 @@ type Session struct {
 	ResumeText    string
 	ResumeProfile resume.Profile
 	JDText        string
+	Domain        string
 	Config        Config
 
 	Status        Status

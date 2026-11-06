@@ -20,6 +20,7 @@ type Evaluator struct {
 	modelName   string
 	maxRepairs  int
 	temperature float32
+	rubric      evaluation.Rubric
 }
 
 func NewEvaluator(client llm.Client, modelName string) *Evaluator {
@@ -28,7 +29,16 @@ func NewEvaluator(client llm.Client, modelName string) *Evaluator {
 		modelName:   modelName,
 		maxRepairs:  2,
 		temperature: 0.1,
+		rubric:      evaluation.DefaultRubric(),
 	}
+}
+
+// WithRubric sets the fallback rubric used when a call does not supply one.
+func (e *Evaluator) WithRubric(r evaluation.Rubric) *Evaluator {
+	if !r.IsZero() {
+		e.rubric = r
+	}
+	return e
 }
 
 type EvaluateInput struct {
@@ -42,6 +52,9 @@ type EvaluateInput struct {
 	ResumeText     string
 	JDText         string
 	ExpectedPoints []string
+	// Rubric overrides the evaluator default so a session is scored on its
+	// domain pack dimensions.
+	Rubric evaluation.Rubric
 }
 
 type Outcome struct {
@@ -72,12 +85,29 @@ func (e *Evaluator) Evaluate(ctx context.Context, in EvaluateInput) (Outcome, er
 		ExpectedPoints: in.ExpectedPoints,
 	})
 
+	rubric := in.Rubric
+	if rubric.IsZero() {
+		rubric = e.rubric
+	}
+	if rubric.IsZero() {
+		rubric = evaluation.DefaultRubric()
+	}
+	dims := make([]prompt.DimensionSpec, 0, len(rubric.Order))
+	for _, d := range rubric.Order {
+		dims = append(dims, prompt.DimensionSpec{
+			Key:    string(d),
+			Name:   rubric.Name(d),
+			Anchor: rubric.Anchors[d],
+		})
+	}
+	system := prompt.EvaluationSystem(dims...)
+
 	out := Outcome{ModelName: e.modelName, PromptVersion: prompt.EvaluationVersion}
 	var issues []string
 
 	for attempt := 1; attempt <= 1+e.maxRepairs; attempt++ {
 		req := llm.Request{
-			System:      prompt.EvaluationSystem(),
+			System:      system,
 			User:        user,
 			Temperature: e.temperature,
 			MaxTokens:   800,
@@ -101,8 +131,8 @@ func (e *Evaluator) Evaluate(ctx context.Context, in EvaluateInput) (Outcome, er
 			continue
 		}
 		result.TurnID = in.TurnID
-		result.Sanitize(in.Answer)
-		issues = result.Validate()
+		result.SanitizeWith(in.Answer, rubric)
+		issues = result.ValidateWith(rubric)
 		if len(issues) == 0 {
 			out.Result = *result
 			return out, nil

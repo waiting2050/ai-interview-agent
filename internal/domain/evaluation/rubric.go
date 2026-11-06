@@ -4,6 +4,8 @@
 package evaluation
 
 import (
+	"errors"
+	"fmt"
 	"math"
 	"strings"
 	"time"
@@ -20,7 +22,8 @@ const (
 	DimensionEvidenceCredibility Dimension = "evidence_credibility"
 )
 
-// DimensionOrder is the stable order used by prompts, scoring and validation.
+// DimensionOrder is the stable order used by prompts, scoring and validation
+// when no domain pack rubric is supplied.
 var DimensionOrder = []Dimension{
 	DimensionCorrectness,
 	DimensionDepth,
@@ -29,13 +32,121 @@ var DimensionOrder = []Dimension{
 	DimensionEvidenceCredibility,
 }
 
-// Weights mirrors the rubric table in the development plan.
+// Weights mirrors the default rubric table in the development plan.
 var Weights = map[Dimension]float64{
 	DimensionCorrectness:         0.30,
 	DimensionDepth:               0.25,
 	DimensionEngineeringJudgment: 0.20,
 	DimensionStructure:           0.15,
 	DimensionEvidenceCredibility: 0.10,
+}
+
+// DimensionDef is one rubric row supplied by a domain pack. The evaluation
+// package stays independent of the pack loader; callers convert pack
+// dimensions into defs.
+type DimensionDef struct {
+	Key    string
+	Name   string
+	Weight float64
+	Anchor string
+}
+
+// Rubric is a validated dimension table. Order drives prompts, validation,
+// scoring and report rendering so a pack can rename or replace dimensions.
+type Rubric struct {
+	Order   []Dimension
+	Weights map[Dimension]float64
+	Names   map[Dimension]string
+	Anchors map[Dimension]string
+}
+
+// DefaultRubric returns the five-dimension rubric used before M14.
+func DefaultRubric() Rubric {
+	names := map[Dimension]string{
+		DimensionCorrectness:         "正确性",
+		DimensionDepth:               "深度",
+		DimensionEngineeringJudgment: "工程判断",
+		DimensionStructure:           "表达结构",
+		DimensionEvidenceCredibility: "证据可信度",
+	}
+	weights := make(map[Dimension]float64, len(Weights))
+	for k, v := range Weights {
+		weights[k] = v
+	}
+	return Rubric{
+		Order:   append([]Dimension(nil), DimensionOrder...),
+		Weights: weights,
+		Names:   names,
+	}
+}
+
+// NewRubric validates and converts pack dimensions. Weights must be positive
+// and sum to 1 so the base score stays on the 0-100 scale.
+func NewRubric(defs []DimensionDef) (Rubric, error) {
+	if len(defs) == 0 {
+		return Rubric{}, errors.New("rubric needs at least one dimension")
+	}
+	r := Rubric{
+		Weights: make(map[Dimension]float64, len(defs)),
+		Names:   make(map[Dimension]string, len(defs)),
+		Anchors: make(map[Dimension]string, len(defs)),
+	}
+	sum := 0.0
+	for i, d := range defs {
+		key := strings.TrimSpace(d.Key)
+		if key == "" {
+			return Rubric{}, fmt.Errorf("rubric dimension[%d]: key is required", i)
+		}
+		dim := Dimension(key)
+		if _, dup := r.Weights[dim]; dup {
+			return Rubric{}, fmt.Errorf("rubric: duplicate dimension %q", key)
+		}
+		if d.Weight <= 0 || d.Weight > 1 {
+			return Rubric{}, fmt.Errorf("rubric dimension %q: weight must be in (0,1], got %v", key, d.Weight)
+		}
+		name := strings.TrimSpace(d.Name)
+		if name == "" {
+			name = key
+		}
+		r.Order = append(r.Order, dim)
+		r.Weights[dim] = d.Weight
+		r.Names[dim] = name
+		r.Anchors[dim] = strings.TrimSpace(d.Anchor)
+		sum += d.Weight
+	}
+	if diff := sum - 1; diff > 0.001 || diff < -0.001 {
+		return Rubric{}, fmt.Errorf("rubric weights must sum to 1, got %.3f", sum)
+	}
+	return r, nil
+}
+
+// IsZero reports whether a rubric was not supplied; callers then fall back to
+// DefaultRubric.
+func (r Rubric) IsZero() bool {
+	return len(r.Order) == 0
+}
+
+// Name returns the human label for a dimension.
+func (r Rubric) Name(d Dimension) string {
+	if r.Names != nil {
+		if name, ok := r.Names[d]; ok {
+			return name
+		}
+	}
+	if name, ok := DefaultRubric().Names[d]; ok {
+		return name
+	}
+	return string(d)
+}
+
+// Weight returns the dimension weight, falling back to the default table.
+func (r Rubric) Weight(d Dimension) float64 {
+	if r.Weights != nil {
+		if w, ok := r.Weights[d]; ok {
+			return w
+		}
+	}
+	return Weights[d]
 }
 
 const (
@@ -85,12 +196,20 @@ type Score struct {
 	Total   float64
 }
 
-// ComputeScore applies the formula from the plan:
+// ComputeScore applies the formula from the plan with the default rubric:
 // base = Σ(score_i / 5 × weight_i) × 100, total = clamp(base + bonus + penalty, 0, 100).
 func ComputeScore(scores map[Dimension]int, bonus, penalty []Adjustment) Score {
+	return ComputeScoreWith(scores, bonus, penalty, DefaultRubric())
+}
+
+// ComputeScoreWith applies the weighted formula using the supplied rubric.
+func ComputeScoreWith(scores map[Dimension]int, bonus, penalty []Adjustment, rubric Rubric) Score {
+	if rubric.IsZero() {
+		rubric = DefaultRubric()
+	}
 	var base float64
-	for _, d := range DimensionOrder {
-		base += float64(scores[d]) / 5 * Weights[d] * 100
+	for _, d := range rubric.Order {
+		base += float64(scores[d]) / 5 * rubric.Weight(d) * 100
 	}
 
 	var bonusPoints, penaltyPoints float64
@@ -118,9 +237,17 @@ func round1(v float64) float64 { return math.Round(v*10) / 10 }
 // called before Validate so a single hallucinated quote does not fail the
 // whole result.
 func (r *Result) Sanitize(answer string) {
+	r.SanitizeWith(answer, DefaultRubric())
+}
+
+// SanitizeWith drops evidence for dimensions outside the supplied rubric.
+func (r *Result) SanitizeWith(answer string, rubric Rubric) {
+	if rubric.IsZero() {
+		rubric = DefaultRubric()
+	}
 	evidence := r.Evidence[:0]
 	for _, e := range r.Evidence {
-		if isValidDimension(e.Dimension) && QuoteInAnswer(e.Quote, answer) {
+		if rubricHas(rubric, e.Dimension) && QuoteInAnswer(e.Quote, answer) {
 			evidence = append(evidence, e)
 		}
 	}
@@ -150,12 +277,20 @@ func (r *Result) Sanitize(answer string) {
 // Validate returns the issues that must be repaired or, after the retry budget,
 // degrade the evaluation. Sanitize must run first.
 func (r *Result) Validate() []string {
+	return r.ValidateWith(DefaultRubric())
+}
+
+// ValidateWith checks scores against the supplied rubric order.
+func (r *Result) ValidateWith(rubric Rubric) []string {
+	if rubric.IsZero() {
+		rubric = DefaultRubric()
+	}
 	var issues []string
 
 	if r.SchemaVersion != SchemaVersion {
 		issues = append(issues, "schema_version must be 1")
 	}
-	for _, d := range DimensionOrder {
+	for _, d := range rubric.Order {
 		score, ok := r.Scores[d]
 		if !ok {
 			issues = append(issues, "missing score for "+string(d))
@@ -177,8 +312,8 @@ func (r *Result) Validate() []string {
 	return issues
 }
 
-func isValidDimension(d Dimension) bool {
-	_, ok := Weights[d]
+func rubricHas(rubric Rubric, d Dimension) bool {
+	_, ok := rubric.Weights[d]
 	return ok
 }
 

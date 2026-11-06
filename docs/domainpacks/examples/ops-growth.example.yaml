@@ -1,0 +1,75 @@
+# 示例包：增长运营（不会被加载）
+#
+# 与售前示例一样，仅用于展示格式与维度差异。docs/ 下不参与 embed 与校验。
+
+id: ops-growth
+name: 增长运营
+version: "0.1"
+
+rubric:
+  dimensions:
+    - key: metric_definition
+      name: 指标口径
+      weight: 0.25
+      anchor: 指标是否可复算，分子分母与时间窗口是否说清
+    - key: experiment_design
+      name: 实验设计
+      weight: 0.25
+      anchor: 是否有对照组、样本量与显著性意识
+    - key: growth_hypothesis
+      name: 增长假设
+      weight: 0.2
+      anchor: 假设是否可证伪，是否连接到具体动作
+    - key: review_depth
+      name: 复盘深度
+      weight: 0.2
+      anchor: 是否区分噪声与真实变化，给出下一步验证
+    - key: evidence
+      name: 数据可信度
+      weight: 0.1
+      anchor: 数据来源、统计周期与已知偏差是否交代
+
+directions:
+  - id: metrics
+    label: 指标与实验
+    keywords: [增长, 运营, 指标, abtest, 留存]
+  - id: review
+    label: 复盘与迭代
+    keywords: [复盘, 归因, 漏斗, 转化]
+
+topics:
+  - id: growth-metric
+    direction: metrics
+    topic: 指标口径与漏斗拆解
+    objective: 说明如何定义并拆解一个北极星指标
+    difficulty: mid
+    expected_points:
+      - 北极星指标与护栏指标的选择依据
+      - 漏斗各环节的分子分母定义
+      - 口径变化对历史数据的影响
+    source: curated
+
+  - id: growth-abtest
+    direction: metrics
+    topic: A/B 实验设计与误判
+    objective: 说明如何避免把噪声当成增长
+    difficulty: senior
+    expected_points:
+      - 假设、样本量与最小可检测效应
+      - 分流与干扰因素控制
+      - 显著性、置信区间与多重比较
+    source: curated
+
+lexicon:
+  skills:
+    - 数据分析
+    - 实验设计
+    - 用户增长
+  tools:
+    - SQL
+    - BI
+    - A/B 平台
+  keywords:
+    - 增长
+    - 留存
+    - 转化率

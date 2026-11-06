@@ -72,6 +72,7 @@ type TurnSnapshot struct {
 	Elapsed   time.Duration `json:"elapsed"`
 	Now       time.Time     `json:"now"`
 
+	Domain     string         `json:"domain"`
 	TargetRole string         `json:"target_role"`
 	Difficulty string         `json:"difficulty"`
 	Profile    resume.Profile `json:"profile"`

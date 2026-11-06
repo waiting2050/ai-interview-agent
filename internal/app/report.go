@@ -7,6 +7,7 @@ import (
 
 	"github.com/waiting2050/ai-interview-agent/internal/agent/report"
 	"github.com/waiting2050/ai-interview-agent/internal/agent/tools"
+	"github.com/waiting2050/ai-interview-agent/internal/domain/domainpack"
 	domainreport "github.com/waiting2050/ai-interview-agent/internal/domain/report"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/session"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/idgen"
@@ -249,7 +250,12 @@ func (r *Runner) executeReport(ctx context.Context, run *session.Run) error {
 	}
 
 	evidence, err := recordStep(ctx, r.store, r.log, r.now, run.ID, stepCollect, func(ctx context.Context) (tools.Bundle, error) {
-		q := tools.NewQuery(run.SessionID, r.store.Repos(), tools.Options{})
+		pack := domainpack.Default().MustGet(sess.Domain)
+		opts := tools.Options{}
+		if pack != nil {
+			opts.Rubric = pack.EvaluationRubric()
+		}
+		q := tools.NewQuery(run.SessionID, r.store.Repos(), opts)
 		return q.Collect(ctx)
 	})
 	if err != nil {

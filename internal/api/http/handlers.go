@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/waiting2050/ai-interview-agent/internal/app"
+	"github.com/waiting2050/ai-interview-agent/internal/domain/domainpack"
 	domainreport "github.com/waiting2050/ai-interview-agent/internal/domain/report"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/resume"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/session"
@@ -50,33 +51,37 @@ type createSessionRequest struct {
 	ResumeText    string          `json:"resume_text"`
 	ResumeProfile *resume.Profile `json:"resume_profile"`
 	JDText        string          `json:"jd_text"`
+	Domain        string          `json:"domain"`
 	Config        *session.Config `json:"config"`
 }
 
 type sessionDTO struct {
-	SessionID     string         `json:"session_id"`
-	CandidateName string         `json:"candidate_name"`
-	TargetRole    string         `json:"target_role"`
-	ResumeProfile resume.Profile `json:"resume_profile"`
-	Config        session.Config `json:"config"`
-	Status        string         `json:"status"`
-	Phase         string         `json:"phase"`
-	StateVersion  uint64         `json:"state_version"`
-	PendingTurnID string         `json:"pending_turn_id,omitempty"`
-	PlanCursor    int            `json:"plan_cursor"`
-	FollowupsUsed int            `json:"followups_used"`
-	StartedAt     *time.Time     `json:"started_at,omitempty"`
-	EndedAt       *time.Time     `json:"ended_at,omitempty"`
-	CreatedAt     time.Time      `json:"created_at"`
-	UpdatedAt     time.Time      `json:"updated_at"`
+	SessionID     string            `json:"session_id"`
+	CandidateName string            `json:"candidate_name"`
+	TargetRole    string            `json:"target_role"`
+	ResumeProfile resume.Profile    `json:"resume_profile"`
+	Domain        string            `json:"domain"`
+	Rubric        domainpack.Rubric `json:"rubric"`
+	Config        session.Config    `json:"config"`
+	Status        string            `json:"status"`
+	Phase         string            `json:"phase"`
+	StateVersion  uint64            `json:"state_version"`
+	PendingTurnID string            `json:"pending_turn_id,omitempty"`
+	PlanCursor    int               `json:"plan_cursor"`
+	FollowupsUsed int               `json:"followups_used"`
+	StartedAt     *time.Time        `json:"started_at,omitempty"`
+	EndedAt       *time.Time        `json:"ended_at,omitempty"`
+	CreatedAt     time.Time         `json:"created_at"`
+	UpdatedAt     time.Time         `json:"updated_at"`
 }
 
 func toSessionDTO(s *session.Session) sessionDTO {
-	return sessionDTO{
+	dto := sessionDTO{
 		SessionID:     s.ID,
 		CandidateName: s.CandidateName,
 		TargetRole:    s.TargetRole,
 		ResumeProfile: s.ResumeProfile,
+		Domain:        s.Domain,
 		Config:        s.Config,
 		Status:        string(s.Status),
 		Phase:         string(s.Phase),
@@ -89,6 +94,37 @@ func toSessionDTO(s *session.Session) sessionDTO {
 		CreatedAt:     s.CreatedAt,
 		UpdatedAt:     s.UpdatedAt,
 	}
+	if pack := domainpack.Default().MustGet(s.Domain); pack != nil {
+		dto.Rubric = pack.Rubric
+	}
+	return dto
+}
+
+type domainDTO struct {
+	ID         string                 `json:"id"`
+	Name       string                 `json:"name"`
+	Version    string                 `json:"version"`
+	Directions []domainpack.Direction `json:"directions"`
+	Rubric     domainpack.Rubric      `json:"rubric"`
+	TopicCount int                    `json:"topic_count"`
+}
+
+// listDomains backs the demo domain selector so the client never hardcodes
+// pack ids or rubric labels.
+func (h *handlers) listDomains(w http.ResponseWriter, r *http.Request) {
+	packs := domainpack.Default().List()
+	domains := make([]domainDTO, 0, len(packs))
+	for _, pack := range packs {
+		domains = append(domains, domainDTO{
+			ID:         pack.ID,
+			Name:       pack.Name,
+			Version:    pack.Version,
+			Directions: pack.Directions,
+			Rubric:     pack.Rubric,
+			TopicCount: len(pack.Topics),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"domains": domains})
 }
 
 func (h *handlers) createSession(w http.ResponseWriter, r *http.Request) {
@@ -113,6 +149,7 @@ func (h *handlers) createSession(w http.ResponseWriter, r *http.Request) {
 		ResumeText:    req.ResumeText,
 		ResumeProfile: profile,
 		JDText:        req.JDText,
+		Domain:        req.Domain,
 		Config:        cfg,
 	})
 	if err != nil {

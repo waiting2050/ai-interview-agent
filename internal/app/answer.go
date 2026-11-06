@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/waiting2050/ai-interview-agent/internal/agent/interview"
+	"github.com/waiting2050/ai-interview-agent/internal/domain/domainpack"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/followup"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/resume"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/session"
@@ -72,6 +73,7 @@ func DefaultAnswerSteps(evaluator Evaluator, generator *interview.QuestionGenera
 				ResumeText:     snap.ResumeText,
 				JDText:         snap.JDText,
 				ExpectedPoints: snap.ExpectedPoints,
+				Rubric:         domainpack.Default().MustGet(snap.Domain).EvaluationRubric(),
 			})
 		},
 		AskFollowup: func(ctx context.Context, snap AnswerSnapshot, out interview.Outcome, decision followup.Decision) (interview.Question, error) {
@@ -317,6 +319,7 @@ func (r *Runner) buildSnapshot(ctx context.Context, run *session.Run) (AnswerSna
 		StartedAt:             startedAt,
 		Elapsed:               elapsed,
 		Now:                   now,
+		Domain:                sess.Domain,
 		TargetRole:            sess.TargetRole,
 		Difficulty:            sess.Config.Difficulty,
 		Profile:               profile,

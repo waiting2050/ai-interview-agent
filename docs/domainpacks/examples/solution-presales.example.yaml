@@ -1,0 +1,81 @@
+# 示例包：售前解决方案（不会被加载）
+#
+# 这个文件放在 docs/domainpacks/examples/ 下，embed 规则只扫描
+# domainpacks/*/manifest.yaml，因此它不会出现在领域下拉列表，也不参与校验。
+# 它只展示「同一套加载器，如何用不同维度和考点表达非技术岗位」。
+#
+# 复制到 domainpacks/solution-presales/manifest.yaml 并改名 id 后才会生效。
+
+id: solution-presales
+name: 售前解决方案
+version: "0.1"
+
+# 维度名与权重完全由包定义；前端从 POST /v1/sessions 的 rubric 字段读取。
+rubric:
+  dimensions:
+    - key: requirement_understanding
+      name: 需求理解
+      weight: 0.25
+      anchor: 能否把客户原话转成可验证的问题、约束与成功标准
+    - key: solution_expression
+      name: 方案表达
+      weight: 0.25
+      anchor: 结构是否结论先行，能否让非技术听众听懂
+    - key: tradeoff_boundary
+      name: 权衡与边界
+      weight: 0.2
+      anchor: 是否说明适用条件、不适用场景、成本与替代方案
+    - key: objection_handling
+      name: 异议处理
+      weight: 0.2
+      anchor: 面对质疑是否先承认合理部分，再给出证据与下一步
+    - key: credibility
+      name: 可信度
+      weight: 0.1
+      anchor: 是否有可核验的案例、数据或明确的不确定性说明
+
+directions:
+  - id: discovery
+    label: 需求澄清
+    keywords: [售前, 需求, discovery, 客户, pre-sales]
+  - id: proposal
+    label: 方案与答辩
+    keywords: [方案, 投标, poc, proposal, 答辩]
+
+topics:
+  - id: presales-discovery
+    direction: discovery
+    topic: 需求澄清与成功标准
+    objective: 把「想要一个 AI 客服」拆成可验收的问题定义
+    difficulty: mid
+    expected_points:
+      - 现状、痛点与受影响角色
+      - 可量化的成功标准与验收口径
+      - 约束条件：预算、合规、上线时间
+    source: curated
+    # 说明：curated 条目禁止带 url；只有 source=retrieved 才必须带 url。
+
+  - id: presales-objection
+    direction: proposal
+    topic: 方案异议与边界说明
+    objective: 回应「你们和竞品有什么区别」并主动暴露边界
+    difficulty: senior
+    expected_points:
+      - 先复述客户关心的判断标准
+      - 给出可验证的差异点而非形容词
+      - 明确不适用场景与替代路径
+    source: curated
+
+lexicon:
+  skills:
+    - 需求分析
+    - 方案设计
+    - 客户沟通
+  tools:
+    - CRM
+    - 投标文件
+    - POC
+  keywords:
+    - 售前
+    - 解决方案
+    - 交付

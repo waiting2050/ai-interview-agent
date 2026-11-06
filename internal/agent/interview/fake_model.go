@@ -27,7 +27,7 @@ func NewHeuristicChatModel() *llm.FakeChatModel {
 		}
 		answer := between(req.User, "<answer>", "</answer>")
 		expected := expectedPoints(req.User)
-		return heuristicJSON(answer, expected), nil
+		return heuristicJSON(answer, expected, rubricKeys(req.System)), nil
 	})
 }
 
@@ -145,7 +145,34 @@ func heuristicQuestion(system, user string) string {
 	return string(raw)
 }
 
-func heuristicJSON(answer string, expected []string) string {
+// rubricKeys extracts the dimension keys from the evaluation system prompt.
+// Only lines beginning at column 0 are dimension rows; the indented scoring
+// anchors must not be mistaken for keys.
+func rubricKeys(system string) []evaluation.Dimension {
+	var keys []evaluation.Dimension
+	for _, line := range strings.Split(system, "\n") {
+		if !strings.HasPrefix(line, "- ") {
+			continue
+		}
+		key, _, _ := strings.Cut(strings.TrimSpace(line[2:]), " ")
+		if key == "" || strings.ContainsAny(key, "：:") {
+			continue
+		}
+		valid := true
+		for _, r := range key {
+			if (r < 'a' || r > 'z') && r != '_' {
+				valid = false
+				break
+			}
+		}
+		if valid {
+			keys = append(keys, evaluation.Dimension(key))
+		}
+	}
+	return keys
+}
+
+func heuristicJSON(answer string, expected []string, dims []evaluation.Dimension) string {
 	answer = strings.TrimSpace(answer)
 	length := len([]rune(answer))
 
@@ -210,15 +237,17 @@ func heuristicJSON(answer string, expected []string) string {
 		}
 	}
 
+	if len(dims) == 0 {
+		dims = evaluation.DimensionOrder
+	}
+	scores := make(map[evaluation.Dimension]int, len(dims))
+	for _, d := range dims {
+		scores[d] = score
+	}
+
 	result := evaluation.Result{
 		SchemaVersion: evaluation.SchemaVersion,
-		Scores: map[evaluation.Dimension]int{
-			evaluation.DimensionCorrectness:         score,
-			evaluation.DimensionDepth:               score,
-			evaluation.DimensionEngineeringJudgment: score,
-			evaluation.DimensionStructure:           score,
-			evaluation.DimensionEvidenceCredibility: score,
-		},
+		Scores:        scores,
 		Evidence:      evidence,
 		Bonus:         []evaluation.Adjustment{},
 		Penalty:       []evaluation.Adjustment{},

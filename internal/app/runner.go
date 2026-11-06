@@ -99,6 +99,7 @@ func (r *Runner) executeStart(ctx context.Context, run *session.Run) error {
 		ResumeText: sess.ResumeText,
 		Profile:    sess.ResumeProfile,
 		JDText:     sess.JDText,
+		Domain:     sess.Domain,
 		Config:     sess.Config,
 	}
 

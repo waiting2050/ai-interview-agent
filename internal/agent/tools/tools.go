@@ -38,6 +38,9 @@ type Options struct {
 	MaxResultRunes  int
 	MaxCalls        int
 	MaxSectionCalls int
+	// Rubric supplies dimension order, names and weights for the overview.
+	// Empty falls back to the default five-dimension rubric.
+	Rubric evaluation.Rubric
 }
 
 func (o *Options) normalize() {
@@ -132,9 +135,12 @@ type TurnSummary struct {
 	AnswerExcerpt string `json:"answer_excerpt"`
 }
 
-// DimensionSummary is the interview-wide average for one dimension.
+// DimensionSummary is the interview-wide average for one dimension. Name and
+// Weight come from the domain pack rubric, not a hardcoded table.
 type DimensionSummary struct {
 	Dimension string  `json:"dimension"`
+	Name      string  `json:"name"`
+	Weight    float64 `json:"weight"`
 	Score     float64 `json:"score"`
 }
 
@@ -346,7 +352,11 @@ func (q *Query) SessionOverview(ctx context.Context) (Overview, error) {
 		overview.OverallScore = round1(scoreSum / float64(scoreCount))
 	}
 
-	for _, dimension := range evaluation.DimensionOrder {
+	rubric := q.opts.Rubric
+	if rubric.IsZero() {
+		rubric = evaluation.DefaultRubric()
+	}
+	for _, dimension := range rubric.Order {
 		var sum float64
 		var count int
 		for _, rec := range evals {
@@ -364,6 +374,8 @@ func (q *Query) SessionOverview(ctx context.Context) (Overview, error) {
 		}
 		overview.Dimensions = append(overview.Dimensions, DimensionSummary{
 			Dimension: string(dimension),
+			Name:      rubric.Name(dimension),
+			Weight:    rubric.Weight(dimension),
 			Score:     value,
 		})
 	}

@@ -63,11 +63,16 @@ func (b *Builder) Generate(ctx context.Context, ev tools.Bundle) (Outcome, error
 	}
 
 	user := prompt.ReportUser(buildPromptInput(ev))
+	dims := make([]prompt.DimensionSpec, 0, len(ev.Overview.Dimensions))
+	for _, d := range ev.Overview.Dimensions {
+		dims = append(dims, prompt.DimensionSpec{Key: d.Dimension, Name: d.Name})
+	}
+	system := prompt.ReportSystem(dims...)
 	var issues []string
 
 	for attempt := 1; attempt <= b.maxAttempts; attempt++ {
 		req := llm.Request{
-			System:      prompt.ReportSystem(),
+			System:      system,
 			User:        user,
 			Temperature: 0.3,
 			MaxTokens:   900,
@@ -252,7 +257,11 @@ func buildPromptInput(ev tools.Bundle) prompt.ReportInput {
 		OverallScore:  overview.OverallScore,
 	}
 	for _, dim := range overview.Dimensions {
-		in.Dimensions = append(in.Dimensions, fmt.Sprintf("%s（%s）：%.1f", dim.Dimension, dimensionLabel(dim.Dimension), dim.Score))
+		label := dim.Name
+		if label == "" {
+			label = dimensionLabel(dim.Dimension)
+		}
+		in.Dimensions = append(in.Dimensions, fmt.Sprintf("%s（%s）：%.1f", dim.Dimension, label, dim.Score))
 	}
 	for _, turn := range ev.Turns {
 		in.Turns = append(in.Turns, prompt.ReportTurn{

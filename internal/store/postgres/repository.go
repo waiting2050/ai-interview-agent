@@ -15,7 +15,7 @@ import (
 
 type sessionRepository struct{ q querier }
 
-const sessionColumns = `id, candidate_name, target_role, resume_text, resume_profile, jd_text, config,
+const sessionColumns = `id, candidate_name, target_role, resume_text, resume_profile, jd_text, domain, config,
 	status, phase, state_version, pending_turn_id, plan_cursor, followups_used,
 	started_at, ended_at, created_at, updated_at`
 
@@ -31,8 +31,8 @@ func (r *sessionRepository) Create(ctx context.Context, s *session.Session) erro
 
 	_, err = r.q.Exec(ctx, `
 		INSERT INTO sessions (`+sessionColumns+`)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
-		s.ID, s.CandidateName, s.TargetRole, s.ResumeText, string(profile), s.JDText, string(cfg),
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+		s.ID, s.CandidateName, s.TargetRole, s.ResumeText, string(profile), s.JDText, s.Domain, string(cfg),
 		string(s.Status), string(s.Phase), s.StateVersion, s.PendingTurnID, s.PlanCursor, s.FollowupsUsed,
 		s.StartedAt, s.EndedAt, s.CreatedAt, s.UpdatedAt)
 	if err != nil {
@@ -81,7 +81,7 @@ func scanSession(row pgx.Row) (*session.Session, error) {
 		phase   string
 	)
 	if err := row.Scan(
-		&s.ID, &s.CandidateName, &s.TargetRole, &s.ResumeText, &profile, &s.JDText, &cfg,
+		&s.ID, &s.CandidateName, &s.TargetRole, &s.ResumeText, &profile, &s.JDText, &s.Domain, &cfg,
 		&status, &phase, &s.StateVersion, &s.PendingTurnID, &s.PlanCursor, &s.FollowupsUsed,
 		&s.StartedAt, &s.EndedAt, &s.CreatedAt, &s.UpdatedAt,
 	); err != nil {

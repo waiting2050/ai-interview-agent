@@ -39,8 +39,8 @@ func Fallback(ev tools.Bundle, now time.Time) domain.Report {
 		out.Dimensions = append(out.Dimensions, domain.DimensionScore{
 			Dimension: dim.Dimension,
 			Score:     dim.Score,
-			Weight:    evaluation.Weights[evaluation.Dimension(dim.Dimension)],
-			Comment:   dimensionComment(dim.Dimension, dim.Score),
+			Weight:    dim.Weight,
+			Comment:   dimensionComment(dim.Score),
 		})
 	}
 
@@ -105,7 +105,7 @@ func verdict(overview tools.Overview) string {
 	fmt.Fprintf(&b, "本次面试共完成 %d 道题，综合得分 %.1f 分（%s）。", overview.AnsweredTurns, overview.OverallScore, domain.Band(overview.OverallScore))
 	if best, worst, ok := dimensionExtremes(overview.Dimensions); ok {
 		fmt.Fprintf(&b, "表现相对最好的是%s（%.1f 分），最薄弱的是%s（%.1f 分）。",
-			dimensionLabel(best.Dimension), best.Score, dimensionLabel(worst.Dimension), worst.Score)
+			dimensionName(best), best.Score, dimensionName(worst), worst.Score)
 	}
 	if len(overview.WeakTopics) > 0 {
 		fmt.Fprintf(&b, "从题目维度看，%s相关内容需要优先补强。", strings.Join(overview.WeakTopics, "、"))
@@ -158,7 +158,15 @@ func adjustments(in []evaluation.Adjustment) []domain.ScoreAdjustment {
 	return out
 }
 
-func dimensionComment(dimension string, score float64) string {
+// dimensionName prefers the pack label and falls back to the legacy mapping.
+func dimensionName(dim tools.DimensionSummary) string {
+	if strings.TrimSpace(dim.Name) != "" {
+		return dim.Name
+	}
+	return dimensionLabel(dim.Dimension)
+}
+
+func dimensionComment(score float64) string {
 	switch {
 	case score >= 80:
 		return "该维度表现稳定，能给出可验证的细节。"

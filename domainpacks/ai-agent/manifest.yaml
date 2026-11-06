@@ -1,0 +1,160 @@
+id: ai-agent
+name: AI Agent 应用
+version: "1.0"
+rubric:
+  dimensions:
+    - key: correctness
+      name: 正确性
+      weight: 0.30
+      anchor: 对模型、检索与推理机制的理解是否准确
+    - key: depth
+      name: 深度
+      weight: 0.20
+      anchor: 是否讲到链路细节、失败模式与边界条件
+    - key: system_design
+      name: 系统设计
+      weight: 0.20
+      anchor: 是否能给出可落地的模块划分与数据流
+    - key: engineering_judgment
+      name: 工程判断
+      weight: 0.20
+      anchor: 是否权衡效果、延迟、成本与可维护性
+    - key: evidence_credibility
+      name: 证据可信度
+      weight: 0.10
+      anchor: 是否有可核验的指标、实验或线上数据支撑
+directions:
+  - id: llm
+    label: 大模型与 Prompt
+    keywords: [llm, 大模型, transformer, 提示词, 上下文]
+  - id: rag
+    label: 检索增强与向量
+    keywords: [rag, 检索, 向量, embedding, 召回]
+  - id: serving
+    label: 推理服务与评测
+    keywords: [推理, 服务化, 部署, 成本, 吞吐]
+topics:
+  - id: llm-foundation
+    direction: llm
+    topic: LLM 基础与生成机制
+    objective: 考察对模型结构、解码过程与能力边界的理解
+    difficulty: junior
+    expected_points:
+      - 自回归解码流程与采样参数的取舍
+      - 上下文窗口长度对长文本任务的影响
+      - 模型能力边界与典型失败模式识别
+    source: curated
+  - id: llm-prompt
+    direction: llm
+    topic: Prompt 与上下文工程
+    objective: 考察提示结构、上下文预算与输出约束的设计能力
+    difficulty: mid
+    expected_points:
+      - 指令、示例与角色提示的结构化编排
+      - 上下文预算分配与历史信息的压缩策略
+      - 结构化输出约束与结果解析的容错
+    source: curated
+  - id: llm-agent-tool
+    direction: llm
+    topic: Agent 工具调用与规划
+    objective: 考察工具定义、多步规划与副作用防护的设计
+    difficulty: senior
+    expected_points:
+      - 工具定义与参数模式的结构化约束
+      - 多步规划失败后的重试与终止判定
+      - 工具越权调用与副作用的具体防护
+    source: curated
+  - id: llm-memory
+    direction: llm
+    topic: 多轮记忆与状态管理
+    objective: 考察短期上下文与长期记忆的分层及治理方案
+    difficulty: senior
+    expected_points:
+      - 短期窗口与长期记忆的分层存储设计
+      - 记忆抽取、去重与新旧冲突的消解
+      - 会话状态回收与用户隐私脱敏机制
+    source: curated
+  - id: rag-chunking
+    direction: rag
+    topic: 文档切分与预处理
+    objective: 考察切分策略、结构保留与语料清洗的实际取舍
+    difficulty: mid
+    expected_points:
+      - 按语义边界切分与重叠窗口的设置
+      - 表格与多级标题的结构化保留方式
+      - 切分粒度对召回与生成效果的影响
+    source: curated
+  - id: rag-retrieval
+    direction: rag
+    topic: 检索、重排与融合排序
+    objective: 考察多路召回、重排模型与查询改写的组合策略
+    difficulty: senior
+    expected_points:
+      - 向量召回与关键词召回的融合排序
+      - 重排模型在延迟与精度之间的权衡
+      - 查询改写与多路召回策略的合理组合
+    source: curated
+  - id: rag-vector-store
+    direction: rag
+    topic: 向量库选型与索引
+    objective: 考察索引类型、过滤能力与扩容方式的选择依据
+    difficulty: mid
+    expected_points:
+      - 近似索引构建参数对召回率的影响
+      - 元数据过滤与分片扩容的落地策略
+      - 写入、更新与删除操作的一致性处理
+    source: curated
+  - id: rag-eval
+    direction: rag
+    topic: 召回质量评估与调优
+    objective: 考察评测集构建、指标拆解与负样本设计的方法
+    difficulty: senior
+    expected_points:
+      - 评测集构建与召回命中率指标设计
+      - 端到端效果与分阶段指标的拆解方法
+      - 负样本与困难样本的构造方式设计
+    source: curated
+  - id: serving-inference
+    direction: serving
+    topic: 推理服务化与批处理
+    objective: 考察在线推理的延迟优化、缓存复用与批处理策略
+    difficulty: senior
+    expected_points:
+      - 动静分离与 KV 缓存的复用策略
+      - 连续批处理与显存占用之间的平衡
+      - 首 token 延迟与吐字速率优化
+    source: curated
+  - id: serving-cost
+    direction: serving
+    topic: 成本与容量规划
+    objective: 考察 token 成本模型、缓存收益与扩容降级的规划
+    difficulty: senior
+    expected_points:
+      - 单请求 token 消耗与预算模型
+      - 缓存命中率对单位成本的改善幅度
+      - 扩容阈值与降级路由的具体触发设计
+    source: curated
+  - id: serving-hallucination
+    direction: serving
+    topic: 评测与幻觉治理
+    objective: 考察离线评测、线上抽检与幻觉拦截的闭环建设
+    difficulty: senior
+    expected_points:
+      - 离线评测集与线上抽检的完整闭环
+      - 事实校验与引用溯源的拦截策略设计
+      - 幻觉率与拒答率之间的平衡取舍方式
+    source: curated
+  - id: serving-streaming
+    direction: serving
+    topic: 流式输出与链路可观测
+    objective: 考察流式协议、超时重试与全链路成本归因的设计
+    difficulty: mid
+    expected_points:
+      - 流式协议选择与断线续传的实现方式
+      - 调用超时、限流与失败重试的策略
+      - 全链路埋点与调用成本归因的分析
+    source: curated
+lexicon:
+  skills: [llm, rag, embedding, "prompt engineering", "function calling"]
+  tools: [langchain, llamaindex, milvus, faiss, vllm]
+  keywords: [大模型, 智能体, 检索增强, 推理服务, 评测]

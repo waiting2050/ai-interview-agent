@@ -1,0 +1,150 @@
+id: java-backend
+name: Java 后端
+version: "1.0"
+rubric:
+  dimensions:
+    - key: correctness
+      name: 正确性
+      weight: 0.30
+      anchor: 机制与结论是否符合 Java 及框架的实际行为
+    - key: depth
+      name: 深度
+      weight: 0.20
+      anchor: 是否讲到实现细节、边界条件与异常路径
+    - key: engineering_judgment
+      name: 工程判断
+      weight: 0.20
+      anchor: 是否给出取舍依据、改造成本与回滚方案
+    - key: structure
+      name: 表达结构
+      weight: 0.15
+      anchor: 是否结论先行、层次清晰并按因果展开
+    - key: evidence_credibility
+      name: 证据可信度
+      weight: 0.15
+      anchor: 是否有可核验的指标、日志或项目经历支撑
+directions:
+  - id: jvm
+    label: JVM 与并发
+    keywords: [java, jvm, gc, 线程池, 并发]
+  - id: spring
+    label: Spring 与工程实践
+    keywords: [spring, "spring boot", mybatis, 事务, 微服务]
+  - id: mysql
+    label: MySQL 索引与锁
+    keywords: [mysql, innodb, 索引, 锁, "b+树"]
+topics:
+  - id: jvm-gc
+    direction: jvm
+    topic: JVM 内存模型与垃圾回收
+    objective: 考察候选人对内存分区、回收算法与停顿问题的排查能力
+    difficulty: mid
+    expected_points:
+      - 堆、栈与元空间的分区及对象分配路径
+      - 分代回收与常见垃圾收集器的差异
+      - 用 GC 日志与停顿指标定位内存问题
+    source: curated
+  - id: jvm-threadpool
+    direction: jvm
+    topic: 线程池参数与任务编排
+    objective: 考察线程池核心参数、拒绝策略与背压手段的实际取舍
+    difficulty: mid
+    expected_points:
+      - 核心线程数与队列容量的取值依据
+      - 拒绝策略选择与任务背压的落地方式
+      - 线程泄漏与任务堆积的监控手段设计
+    source: curated
+  - id: jvm-concurrency-lock
+    direction: jvm
+    topic: synchronized 与 AQS 锁机制
+    objective: 考察对象头锁状态迁移、AQS 实现与锁竞争的优化思路
+    difficulty: senior
+    expected_points:
+      - 对象头 Mark Word 与锁升级过程
+      - AQS 同步队列与公平锁的实现代价
+      - 锁竞争下的伪共享与性能压测方法
+    source: curated
+  - id: spring-transaction
+    direction: spring
+    topic: Spring 声明式事务与失效场景
+    objective: 考察事务传播行为、代理失效与回滚边界的理解
+    difficulty: mid
+    expected_points:
+      - 事务传播行为与嵌套事务的实际语义
+      - 同类自调用导致事务失效的根本原因
+      - 回滚规则与异常被捕获后的实际边界
+    source: curated
+  - id: spring-bean-lifecycle
+    direction: spring
+    topic: Bean 生命周期与循环依赖
+    objective: 考察 Bean 创建顺序、扩展点与循环依赖解法的掌握
+    difficulty: mid
+    expected_points:
+      - 实例化、属性注入与初始化回调顺序
+      - 三级缓存解决循环依赖的完整机制
+      - 后置处理器对扩展点与代理的影响
+    source: curated
+  - id: spring-cache-consistency
+    direction: spring
+    topic: 缓存与数据库一致性
+    objective: 考察缓存更新策略、失效窗口与最终一致兜底的设计
+    difficulty: mid
+    expected_points:
+      - 先更新数据库还是先删缓存的权衡
+      - 延迟双删与订阅失效方案的适用场景
+      - 不一致窗口的监控与补偿任务设计
+    source: curated
+  - id: spring-mq-idempotency
+    direction: spring
+    topic: 消息队列幂等与重复消费
+    objective: 考察消息重复、乱序与失败重试下的幂等设计
+    difficulty: mid
+    expected_points:
+      - 业务幂等键与去重表的具体落地方式
+      - 消息重试与位点回滚下的状态机收敛
+      - 顺序消息与分区键之间的绑定关系
+    source: curated
+  - id: spring-microservices
+    direction: spring
+    topic: 微服务治理与服务边界
+    objective: 考察服务拆分依据、依赖治理与跨服务故障定位能力
+    difficulty: senior
+    expected_points:
+      - 服务拆分粒度与团队边界的匹配原则
+      - 超时、重试与熔断策略的预算分配
+      - 跨服务链路追踪与问题定位的具体手段
+    source: curated
+  - id: spring-troubleshooting
+    direction: spring
+    topic: 线上问题排查与诊断工具链
+    objective: 考察从告警发现到线程、内存、链路定位的完整路径
+    difficulty: senior
+    expected_points:
+      - CPU 飙高时线程栈与火焰图的定位
+      - 内存泄漏场景下的堆快照对比方法
+      - 动态追踪与 arthas 的只读排查
+    source: curated
+  - id: mysql-index
+    direction: mysql
+    topic: InnoDB 索引结构与执行计划
+    objective: 考察索引结构、回表代价与执行计划的判读能力
+    difficulty: mid
+    expected_points:
+      - 聚簇索引与二级索引的回表代价分析
+      - 最左前缀原则与索引列顺序的选择依据
+      - 执行计划中扫描行数与访问类型判读
+    source: curated
+  - id: mysql-lock
+    direction: mysql
+    topic: InnoDB 锁与死锁处理
+    objective: 考察加锁范围、死锁成因与线上锁等待的处置方式
+    difficulty: senior
+    expected_points:
+      - 记录锁、间隙锁与临键锁的加锁范围
+      - 死锁日志的等待图与具体 SQL 定位
+      - 锁等待超时与业务重试策略的配合
+    source: curated
+lexicon:
+  skills: [java, spring, "spring boot", mysql, redis, kafka]
+  tools: [jstack, jmap, arthas, prometheus, grafana]
+  keywords: [后端, 微服务, 高并发, 分布式]

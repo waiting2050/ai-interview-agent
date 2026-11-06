@@ -14,6 +14,7 @@ import (
 
 	"github.com/waiting2050/ai-interview-agent/internal/agent/interview"
 	"github.com/waiting2050/ai-interview-agent/internal/agent/report"
+	"github.com/waiting2050/ai-interview-agent/internal/domain/domainpack"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/resume"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/session"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/idgen"
@@ -154,7 +155,9 @@ type CreateSessionInput struct {
 	ResumeText    string
 	ResumeProfile resume.Profile
 	JDText        string
-	Config        session.Config
+	// Domain selects the interview domain pack. Empty means go-backend.
+	Domain string
+	Config session.Config
 }
 
 func (s *Service) CreateSession(ctx context.Context, in CreateSessionInput) (*session.Session, error) {
@@ -166,6 +169,14 @@ func (s *Service) CreateSession(ctx context.Context, in CreateSessionInput) (*se
 	}
 	if in.JDText == "" {
 		return nil, fmt.Errorf("%w: jd_text is required", ErrInvalidArgument)
+	}
+
+	domain := strings.TrimSpace(in.Domain)
+	if domain == "" {
+		domain = domainpack.LegacyGoBackendID
+	}
+	if _, ok := domainpack.Default().Get(domain); !ok {
+		return nil, fmt.Errorf("%w: unknown domain %q", ErrInvalidArgument, domain)
 	}
 
 	in.Config.Normalize()
@@ -187,6 +198,7 @@ func (s *Service) CreateSession(ctx context.Context, in CreateSessionInput) (*se
 		ResumeText:    in.ResumeText,
 		ResumeProfile: profile,
 		JDText:        in.JDText,
+		Domain:        domain,
 		Config:        in.Config,
 		Status:        session.StatusCreated,
 		StateVersion:  0,

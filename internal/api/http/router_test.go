@@ -79,6 +79,96 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool, msg string) 
 	t.Fatalf("%s", msg)
 }
 
+func TestCreateSessionValidatesAndReturnsDomainRubric(t *testing.T) {
+	srv, _, _ := newTestRouter(t)
+
+	resp, err := http.Post(srv.URL+"/v1/sessions", "application/json", strings.NewReader(`{
+		"target_role":"AI 应用工程师","resume_text":"resume","jd_text":"RAG","domain":"ai-agent"
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create status = %d", resp.StatusCode)
+	}
+	var created struct {
+		Domain string `json:"domain"`
+		Rubric struct {
+			Dimensions []struct {
+				Key    string  `json:"key"`
+				Name   string  `json:"name"`
+				Weight float64 `json:"weight"`
+			} `json:"dimensions"`
+		} `json:"rubric"`
+	}
+	if err := decodeBody(resp.Body, &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.Domain != "ai-agent" {
+		t.Fatalf("domain = %q", created.Domain)
+	}
+	found := false
+	for _, dim := range created.Rubric.Dimensions {
+		if dim.Key == "system_design" && dim.Name == "系统设计" && dim.Weight == 0.20 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("rubric did not come from the ai-agent pack: %+v", created.Rubric)
+	}
+
+	bad, err := http.Post(srv.URL+"/v1/sessions", "application/json", strings.NewReader(`{
+		"target_role":"x","resume_text":"resume","jd_text":"jd","domain":"not-a-pack"
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bad.Body.Close()
+	if bad.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unknown domain status = %d, want 400", bad.StatusCode)
+	}
+	var body errorBody
+	if err := decodeBody(bad.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Code != "invalid_argument" || !strings.Contains(body.Message, "unknown domain") {
+		t.Fatalf("error = %+v", body)
+	}
+}
+
+func TestListDomainsReturnsThreePacks(t *testing.T) {
+	srv, _, _ := newTestRouter(t)
+	resp, err := http.Get(srv.URL + "/v1/domains")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		Domains []struct {
+			ID         string `json:"id"`
+			Name       string `json:"name"`
+			TopicCount int    `json:"topic_count"`
+			Rubric     struct {
+				Dimensions []struct {
+					Key string `json:"key"`
+				} `json:"dimensions"`
+			} `json:"rubric"`
+		} `json:"domains"`
+	}
+	if err := decodeBody(resp.Body, &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Domains) != 3 {
+		t.Fatalf("domains = %d", len(out.Domains))
+	}
+	for _, d := range out.Domains {
+		if d.ID == "" || d.Name == "" || d.TopicCount < 10 || len(d.Rubric.Dimensions) == 0 {
+			t.Fatalf("incomplete domain %+v", d)
+		}
+	}
+}
+
 func TestCreateStartAndSSEReplayFromLastEventID(t *testing.T) {
 	srv, svc, _ := newTestRouter(t)
 
