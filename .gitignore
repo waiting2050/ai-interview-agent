@@ -1,0 +1,29 @@
+# local secrets and environment
+/.env
+
+# build output
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+coverage.*
+
+# editor and OS noise
+.idea/
+.vscode/
+.DS_Store
+
+# runtime scratch files
+/tmp/
+/.tmp/
+*.log
+*.tmp
+
+# local demo artifacts / README curl payloads
+/.screenshots/
+/session.json
+/answer.json
+
+# temporary eval output; checked-in baselines under docs/eval-results stay tracked
+/docs/eval-results/tmp/
