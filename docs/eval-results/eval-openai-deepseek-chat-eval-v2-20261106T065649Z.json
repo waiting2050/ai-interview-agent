@@ -1,0 +1,1364 @@
+{
+  "generated_at": "2026-11-06T06:56:49.2979318Z",
+  "dataset_path": "internal/agent/eval/testdata/regression.json",
+  "dataset_sha256": "0b55a9b9f7b05895ce3d45fe8a50098e37b9933042cab5e775fb995280d55518",
+  "provider": "openai",
+  "model": "deepseek-chat",
+  "base_url": "https://api.deepseek.com",
+  "fallback": false,
+  "prompt_version": "eval-v2",
+  "rubric_schema_version": 1,
+  "thresholds": {
+    "schema_valid_rate": 1,
+    "band_hit_rate": 0.8,
+    "adjacent_band_rate": 0.95,
+    "dimension_mae": 0.6,
+    "evidence_quote_rate": 1
+  },
+  "distribution": {
+    "empty": 2,
+    "exaggerated": 3,
+    "high": 8,
+    "low": 4,
+    "mid": 11,
+    "off_topic": 2
+  },
+  "metrics": {
+    "total": 30,
+    "evaluated": 30,
+    "degraded": 0,
+    "errors": 0,
+    "schema_valid_rate": 1,
+    "band_hits": 24,
+    "band_hit_rate": 0.8,
+    "adjacent_hits": 30,
+    "adjacent_band_rate": 1,
+    "dimension_mae": 0.4333,
+    "evidence_quote_rate": 1,
+    "avg_prompt_tokens": 761.7667,
+    "avg_completion_tokens": 596.3667,
+    "avg_latency_ms": 4176.2
+  },
+  "misses_by_type": {
+    "high": 6
+  },
+  "gate": {
+    "passed": true
+  },
+  "cases": [
+    {
+      "case_id": "high-01-gmp",
+      "type": "high",
+      "topic": "Go 并发模型",
+      "expected_band": 5,
+      "actual_band": 3,
+      "band_delta": -1,
+      "total_score": 67,
+      "expected_scores": {
+        "correctness": 5,
+        "depth": 5,
+        "engineering_judgment": 5,
+        "evidence_credibility": 5,
+        "structure": 4
+      },
+      "actual_scores": {
+        "correctness": 4,
+        "depth": 3,
+        "engineering_judgment": 3,
+        "evidence_credibility": 3,
+        "structure": 3
+      },
+      "deviations": [
+        {
+          "dimension": "correctness",
+          "expected": 5,
+          "actual": 4,
+          "delta": -1
+        },
+        {
+          "dimension": "depth",
+          "expected": 5,
+          "actual": 3,
+          "delta": -2
+        },
+        {
+          "dimension": "engineering_judgment",
+          "expected": 5,
+          "actual": 3,
+          "delta": -2
+        },
+        {
+          "dimension": "structure",
+          "expected": 4,
+          "actual": 3,
+          "delta": -1
+        },
+        {
+          "dimension": "evidence_credibility",
+          "expected": 5,
+          "actual": 3,
+          "delta": -2
+        }
+      ],
+      "degraded": false,
+      "attempts": 1,
+      "evidence_quotes": 7,
+      "evidence_quote_ok": true,
+      "prompt_tokens": 868,
+      "completion_tokens": 716,
+      "latency_ms": 5060,
+      "notes": "讲清了 GM 的锁竞争问题、P 的本地队列与 work stealing、资源挂载，并给出量化收益；4 分结构是因为先结论后细节的过渡略糙。"
+    },
+    {
+      "case_id": "high-02-mysql-slow",
+      "type": "high",
+      "topic": "索引与执行计划",
+      "expected_band": 5,
+      "actual_band": 5,
+      "band_delta": 0,
+      "total_score": 87,
+      "expected_scores": {
+        "correctness": 5,
+        "depth": 4,
+        "engineering_judgment": 5,
+        "evidence_credibility": 4,
+        "structure": 4
+      },
+      "actual_scores": {
+        "correctness": 5,
+        "depth": 4,
+        "engineering_judgment": 4,
+        "evidence_credibility": 4,
+        "structure": 4
+      },
+      "deviations": [
+        {
+          "dimension": "engineering_judgment",
+          "expected": 5,
+          "actual": 4,
+          "delta": -1
+        }
+      ],
+      "degraded": false,
+      "attempts": 1,
+      "evidence_quotes": 8,
+      "evidence_quote_ok": true,
+      "prompt_tokens": 857,
+      "completion_tokens": 627,
+      "latency_ms": 4099,
+      "notes": "定位路径完整，索引失效原因覆盖到位，有真实改造前后的量化对比；depth 未到 4.5 是因为没有展开优化器选错索引的情况。"
+    },
+    {
+      "case_id": "high-03-cache-consistency",
+      "type": "high",
+      "topic": "缓存模式与一致性",
+      "expected_band": 5,
+      "actual_band": 5,
+      "band_delta": 0,
+      "total_score": 81,
+      "expected_scores": {
+        "correctness": 5,
+        "depth": 4,
+        "engineering_judgment": 4,
+        "evidence_credibility": 4,
+        "structure": 4
+      },
+      "actual_scores": {
+        "correctness": 4,
+        "depth": 4,
+        "engineering_judgment": 4,
+        "evidence_credibility": 4,
+        "structure": 4
+      },
+      "deviations": [
+        {
+          "dimension": "correctness",
+          "expected": 5,
+          "actual": 4,
+          "delta": -1
+        }
+      ],
+      "degraded": false,
+      "attempts": 1,
+      "evidence_quotes": 8,
+      "evidence_quote_ok": true,
+      "prompt_tokens": 816,
+      "completion_tokens": 693,
+      "latency_ms": 4358,
+      "notes": "明确承认没有强一致，给了延迟双删、binlog 补偿和版本号三类手段，并说明强一致场景的退路；细节到位但 depth 没讲到并发窗口的严格证明。"
+    },
+    {
+      "case_id": "high-04-local-message",
+      "type": "high",
+      "topic": "分布式事务与最终一致",
+      "expected_band": 5,
+      "actual_band": 3,
+      "band_delta": -1,
+      "total_score": 74,
+      "expected_scores": {
+        "correctness": 4,
+        "depth": 5,
+        "engineering_judgment": 5,
+        "evidence_credibility": 4,
+        "structure": 4
+      },
+      "actual_scores": {
+        "correctness": 4,
+        "depth": 3,
+        "engineering_judgment": 4,
+        "evidence_credibility": 3,
+        "structure": 4
+      },
+      "deviations": [
+        {
+          "dimension": "depth",
+          "expected": 5,
+          "actual": 3,
+          "delta": -2
+        },
+        {
+          "dimension": "engineering_judgment",
+          "expected": 5,
+          "actual": 4,
+          "delta": -1
+        },
+        {
+          "dimension": "evidence_credibility",
+          "expected": 4,
+          "actual": 3,
+          "delta": -1
+        }
+      ],
+      "degraded": false,
+      "attempts": 1,
+      "evidence_quotes": 8,
+      "evidence_quote_ok": true,
+      "prompt_tokens": 826,
+      "completion_tokens": 718,
+      "latency_ms": 4981,
+      "notes": "事务边界、消息状态机、幂等、对账四层都覆盖了，量化结果也合理；correctness 留 4 分是因为没有讨论消息表与业务库同库部署的前提。"
+    },
+    {
+      "case_id": "high-05-kafka-idempotent",
+      "type": "high",
+      "topic": "消息队列与幂等",
+      "expected_band": 5,
+      "actual_band": 3,
+      "band_delta": -1,
+      "total_score": 73,
+      "expected_scores": {
+        "correctness": 5,
+        "depth": 4,
+        "engineering_judgment": 4,
+        "evidence_credibility": 5,
+        "structure": 4
+      },
+      "actual_scores": {
+        "correctness": 4,
+        "depth": 3,
+        "engineering_judgment": 4,
+        "evidence_credibility": 4,
+        "structure": 3
+      },
+      "deviations": [
+        {
+          "dimension": "correctness",
+          "expected": 5,
+          "actual": 4,
+          "delta": -1
+        },
+        {
+          "dimension": "depth",
+          "expected": 4,
+          "actual": 3,
+          "delta": -1
+        },
+        {
+          "dimension": "structure",
+          "expected": 4,
+          "actual": 3,
+          "delta": -1
+        },
+        {
+          "dimension": "evidence_credibility",
+          "expected": 5,
+          "actual": 4,
+          "delta": -1
+        }
+      ],
+      "degraded": false,
+      "attempts": 1,
+      "evidence_quotes": 7,
+      "evidence_quote_ok": true,
+      "prompt_tokens": 815,
+      "completion_tokens": 668,
+      "latency_ms": 4681,
+      "notes": "明确重复是常态，给了幂等表和状态机两种落地方案，还提了 rebalance 这个容易被遗漏的点；量化数据可信。"
+    },
+    {
+      "case_id": "high-06-rate-limit",
+      "type": "high",
+      "topic": "限流与原子脚本",
+      "expected_band": 5,
+      "actual_band": 3,
+      "band_delta": -1,
+      "total_score": 71,
+      "expected_scores": {
+        "correctness": 4,
+        "depth": 4,
+        "engineering_judgment": 5,
+        "evidence_credibility": 5,
+        "structure": 4
+      },
+      "actual_scores": {
+        "correctness": 4,
+        "depth": 3,
+        "engineering_judgment": 4,
+        "evidence_credibility": 3,
+        "structure": 3
+      },
+      "deviations": [
+        {
+          "dimension": "depth",
+          "expected": 4,
+          "actual": 3,
+          "delta": -1
+        },
+        {
+          "dimension": "engineering_judgment",
+          "expected": 5,
+          "actual": 4,
+          "delta": -1
+        },
+        {
+          "dimension": "structure",
+          "expected": 4,
+          "actual": 3,
+          "delta": -1
+        },
+        {
+          "dimension": "evidence_credibility",
+          "expected": 5,
+          "actual": 3,
+          "delta": -2
+        }
+      ],
+      "degraded": false,
+      "attempts": 1,
+      "evidence_quotes": 9,
+      "evidence_quote_ok": true,
+      "prompt_tokens": 831,
+      "completion_tokens": 709,
+      "latency_ms": 4323,
+      "notes": "选型理由清楚，分布式实现和 Redis 故障降级都讲到了，有误杀率这种可验证指标；depth 扣分是因为没提时间窗口精度和时钟漂移。"
+    },
+    {
+      "case_id": "high-07-innodb-lock",
+      "type": "high",
+      "topic": "锁与死锁",
+      "expected_band": 5,
+      "actual_band": 3,
+      "band_delta": -1,
+      "total_score": 76,
+      "expected_scores": {
+        "correctness": 5,
+        "depth": 5,
+        "engineering_judgment": 4,
+        "evidence_credibility": 4,
+        "structure": 4
+      },
+      "actual_scores": {
+        "correctness": 4,
+        "depth": 3,
+        "engineering_judgment": 4,
+        "evidence_credibility": 4,
+        "structure": 4
+      },
+      "deviations": [
+        {
+          "dimension": "correctness",
+          "expected": 5,
+          "actual": 4,
+          "delta": -1
+        },
+        {
+          "dimension": "depth",
+          "expected": 5,
+          "actual": 3,
+          "delta": -2
+        }
+      ],
+      "degraded": false,
+      "attempts": 1,
+      "evidence_quotes": 6,
+      "evidence_quote_ok": true,
+      "prompt_tokens": 841,
+      "completion_tokens": 671,
+      "latency_ms": 4642,
+      "notes": "next-key lock 的触发条件、RC 对比、死锁日志排查和治理手段都到位，也有线上结果；engineering_judgment 4 分是因为降隔离级别没有讨论业务风险。"
+    },
+    {
+      "case_id": "high-08-cpu-profile",
+      "type": "high",
+      "topic": "可观测性与故障排查",
+      "expected_band": 5,
+      "actual_band": 3,
+      "band_delta": -1,
+      "total_score": 74,
+      "expected_scores": {
+        "correctness": 4,
+        "depth": 5,
+        "engineering_judgment": 4,
+        "evidence_credibility": 4,
+        "structure": 5
+      },
+      "actual_scores": {
+        "correctness": 4,
+        "depth": 3,
+        "engineering_judgment": 4,
+        "evidence_credibility": 4,
+        "structure": 3
+      },
+      "deviations": [
+        {
+          "dimension": "depth",
+          "expected": 5,
+          "actual": 3,
+          "delta": -2
+        },
+        {
+          "dimension": "structure",
+          "expected": 5,
+          "actual": 3,
+          "delta": -2
+        }
+      ],
+      "degraded": false,
+      "attempts": 1,
+      "evidence_quotes": 8,
+      "evidence_quote_ok": true,
+      "prompt_tokens": 829,
+      "completion_tokens": 732,
+      "latency_ms": 5075,
+      "notes": "止损和定位顺序清楚，pprof、top -H、火焰图链路完整，案例有量化；correctness 留 4 分是因为没提内核态排查的具体工具。"
+    },
+    {
+      "case_id": "mid-01-gc",
+      "type": "mid",
+      "topic": "内存管理与 GC",
+      "expected_band": 3,
+      "actual_band": 3,
+      "band_delta": 0,
+      "total_score": 66,
+      "expected_scores": {
+        "correctness": 3,
+        "depth": 3,
+        "engineering_judgment": 3,
+        "evidence_credibility": 3,
+        "structure": 3
+      },
+      "actual_scores": {
+        "correctness": 4,
+        "depth": 3,
+        "engineering_judgment": 3,
+        "evidence_credibility": 3,
+        "structure": 3
+      },
+      "deviations": [
+        {
+          "dimension": "correctness",
+          "expected": 3,
+          "actual": 4,
+          "delta": 1
+        }
+      ],
+      "degraded": false,
+      "attempts": 1,
+      "evidence_quotes": 7,
+      "evidence_quote_ok": true,
+      "prompt_tokens": 748,
+      "completion_tokens": 584,
+      "latency_ms": 4435,
+      "notes": "概念正确但只到教科书层面，没有讲混合写屏障、辅助标记或一次真实调优，属于典型中档答案。"
+    },
+    {
+      "case_id": "mid-02-context",
+      "type": "mid",
+      "topic": "Go 并发模型",
+      "expected_band": 3,
+      "actual_band": 3,
+      "band_delta": 0,
+      "total_score": 66,
+      "expected_scores": {
+        "correctness": 4,
+        "depth": 3,
+        "engineering_judgment": 3,
+        "evidence_credibility": 3,
+        "structure": 3
+      },
+      "actual_scores": {
+        "correctness": 4,
+        "depth": 3,
+        "engineering_judgment": 3,
+        "evidence_credibility": 3,
+        "structure": 3
+      },
+      "degraded": false,
+      "attempts": 1,
+      "evidence_quotes": 5,
+      "evidence_quote_ok": true,
+      "prompt_tokens": 746,
+      "completion_tokens": 450,
+      "latency_ms": 3748,
+      "notes": "传播机制和退出条件都对，但没有提 WithCancel 的内存释放、cancel 必须调用、以及跨 goroutine 的常见泄漏。"
+    },
+    {
+      "case_id": "mid-03-bplus-tree",
+      "type": "mid",
+      "topic": "索引与执行计划",
+      "expected_band": 3,
+      "actual_band": 3,
+      "band_delta": 0,
+      "total_score": 60,
+      "expected_scores": {
+        "correctness": 4,
+        "depth": 3,
+        "engineering_judgment": 3,
+        "evidence_credibility": 3,
+        "structure": 3
+      },
+      "actual_scores": {
+        "correctness": 4,
+        "depth": 3,
+        "engineering_judgment": 2,
+        "evidence_credibility": 2,
+        "structure": 3
+      },
+      "deviations": [
+        {
+          "dimension": "engineering_judgment",
+          "expected": 3,
+          "actual": 2,
+          "delta": -1
+        },
+        {
+          "dimension": "evidence_credibility",
+          "expected": 3,
+          "actual": 2,
+          "delta": -1
+        }
+      ],
+      "degraded": false,
+      "attempts": 1,
+      "evidence_quotes": 8,
+      "evidence_quote_ok": true,
+      "prompt_tokens": 750,
+      "completion_tokens": 587,
+      "latency_ms": 3884,
+      "notes": "关键结论正确，对比了 B 树和哈希索引，但没有展开页大小、聚簇索引和回表，深度一般。"
+    },
+    {
+      "case_id": "mid-04-isolation",
+      "type": "mid",
+      "topic": "事务与 MVCC",
+      "expected_band": 3,
+      "actual_band": 3,
+      "band_delta": 0,
+      "total_score": 55,
+      "expected_scores": {
+        "correctness": 3,
+        "depth": 3,
+        "engineering_judgment": 3,
+        "evidence_credibility": 3,
+        "structure": 3
+      },
+      "actual_scores": {
+        "correctness": 4,
+        "depth": 2,
+        "engineering_judgment": 2,
+        "evidence_credibility": 2,
+        "structure": 3
+      },
+      "deviations": [
+        {
+          "dimension": "correctness",
+          "expected": 3,
+          "actual": 4,
+          "delta": 1
+        },
+        {
+          "dimension": "depth",
+          "expected": 3,
+          "actual": 2,
+          "delta": -1
+        },
+        {
+          "dimension": "engineering_judgment",
+          "expected": 3,
+          "actual": 2,
+          "delta": -1
+        },
+        {
+          "dimension": "evidence_credibility",
+          "expected": 3,
+          "actual": 2,
+          "delta": -1
+        }
+      ],
+      "degraded": false,
+      "attempts": 1,
+      "evidence_quotes": 6,
+      "evidence_quote_ok": true,
+      "prompt_tokens": 735,
+      "completion_tokens": 639,
+      "latency_ms": 4879,
+      "notes": "四档隔离级别与现象对应正确，但 MVCC 和间隙锁只是一笔带过，没有 Read View 或具体验证，属于背诵型中档。"
+    },
+    {
+      "case_id": "mid-05-persist",
+      "type": "mid",
+      "topic": "持久化与恢复",
+      "expected_band": 3,
+      "actual_band": 3,
+      "band_delta": 0,
+      "total_score": 66,
+      "expected_scores": {
+        "correctness": 4,
+        "depth": 3,
+        "engineering_judgment": 4,
+        "evidence_credibility": 3,
+        "structure": 3
+      },
+      "actual_scores": {
+        "correctness": 4,
+        "depth": 3,
+        "engineering_judgment": 3,
+        "evidence_credibility": 3,
+        "structure": 3
+      },
+      "deviations": [
+        {
+          "dimension": "engineering_judgment",
+          "expected": 4,
+          "actual": 3,
+          "delta": -1
+        }
+      ],
+      "degraded": false,
+      "attempts": 1,
+      "evidence_quotes": 6,
+      "evidence_quote_ok": true,
+      "prompt_tokens": 767,
+      "completion_tokens": 597,
+      "latency_ms": 3769,
+      "notes": "差异和混合持久化都对，给了可落地的默认配置；但没有算恢复时间和容量，缺少取舍依据。"
+    },
+    {
+      "case_id": "mid-06-replica",
+      "type": "mid",
+      "topic": "高可用与集群",
+      "expected_band": 3,
+      "actual_band": 3,
+      "band_delta": 0,
+      "total_score": 62,
+      "expected_scores": {
+        "correctness": 3,
+        "depth": 3,
+        "engineering_judgment": 3,
+        "evidence_credibility": 3,
+        "structure": 3
+      },
+      "actual_scores": {
+        "correctness": 4,
+        "depth": 3,
+        "engineering_judgment": 2,
+        "evidence_credibility": 3,
+        "structure": 3
+      },
+      "deviations": [
+        {
+          "dimension": "correctness",
+          "expected": 3,
+          "actual": 4,
+          "delta": 1
+        },
+        {
+          "dimension": "engineering_judgment",
+          "expected": 3,
+          "actual": 2,
+          "delta": -1
+        }
+      ],
+      "degraded": false,
+      "attempts": 1,
+      "evidence_quotes": 7,
+      "evidence_quote_ok": true,
+      "prompt_tokens": 743,
+      "completion_tokens": 675,
+      "latency_ms": 4583,
+      "notes": "全量加增量的流程正确，提到了 repl backlog，但没有讲复制延迟、failover 和脑裂。"
+    },
+    {
+      "case_id": "mid-07-idempotency",
+      "type": "mid",
+      "topic": "错误处理与稳定性",
+      "expected_band": 3,
+      "actual_band": 3,
+      "band_delta": 0,
+      "total_score": 71,
+      "expected_scores": {
+        "correctness": 4,
+        "depth": 3,
+        "engineering_judgment": 3,
+        "evidence_credibility": 3,
+        "structure": 4
+      },
+      "actual_scores": {
+        "correctness": 4,
+        "depth": 3,
+        "engineering_judgment": 4,
+        "evidence_credibility": 3,
+        "structure": 3
+      },
+      "deviations": [
+        {
+          "dimension": "engineering_judgment",
+          "expected": 3,
+          "actual": 4,
+          "delta": 1
+        },
+        {
+          "dimension": "structure",
+          "expected": 4,
+          "actual": 3,
+          "delta": -1
+        }
+      ],
+      "degraded": false,
+      "attempts": 1,
+      "evidence_quotes": 7,
+      "evidence_quote_ok": true,
+      "prompt_tokens": 741,
+      "completion_tokens": 596,
+      "latency_ms": 4222,
+      "notes": "唯一索引加状态机是常见且正确的组合，也意识到先查后写的窗口；缺少失败重试和幂等键过期的讨论。"
+    },
+    {
+      "case_id": "mid-08-retry",
+      "type": "mid",
+      "topic": "错误处理与稳定性",
+      "expected_band": 3,
+      "actual_band": 3,
+      "band_delta": 0,
+      "total_score": 71,
+      "expected_scores": {
+        "correctness": 3,
+        "depth": 3,
+        "engineering_judgment": 3,
+        "evidence_credibility": 3,
+        "structure": 3
+      },
+      "actual_scores": {
+        "correctness": 4,
+        "depth": 3,
+        "engineering_judgment": 4,
+        "evidence_credibility": 3,
+        "structure": 3
+      },
+      "deviations": [
+        {
+          "dimension": "correctness",
+          "expected": 3,
+          "actual": 4,
+          "delta": 1
+        },
+        {
+          "dimension": "engineering_judgment",
+          "expected": 3,
+          "actual": 4,
+          "delta": 1
+        }
+      ],
+      "degraded": false,
+      "attempts": 1,
+      "evidence_quotes": 7,
+      "evidence_quote_ok": true,
+      "prompt_tokens": 741,
+      "completion_tokens": 559,
+      "latency_ms": 3759,
+      "notes": "要点齐全但都是结论，没有具体退避参数、熔断配合或重试放大的例子，属于中规中矩的中档回答。"
+    },
+    {
+      "case_id": "mid-09-goroutine-leak",
+      "type": "mid",
+      "topic": "可观测性与故障排查",
+      "expected_band": 3,
+      "actual_band": 3,
+      "band_delta": 0,
+      "total_score": 69,
+      "expected_scores": {
+        "correctness": 4,
+        "depth": 3,
+        "engineering_judgment": 3,
+        "evidence_credibility": 3,
+        "structure": 4
+      },
+      "actual_scores": {
+        "correctness": 4,
+        "depth": 3,
+        "engineering_judgment": 3,
+        "evidence_credibility": 3,
+        "structure": 4
+      },
+      "degraded": false,
+      "attempts": 1,
+      "evidence_quotes": 6,
+      "evidence_quote_ok": true,
+      "prompt_tokens": 751,
+      "completion_tokens": 553,
+      "latency_ms": 4107,
+      "notes": "排查路径和常见原因都对，结构清楚；但没有一次完整案例，也没有并发数基线和告警阈值。"
+    },
+    {
+      "case_id": "mid-10-slice",
+      "type": "mid",
+      "topic": "Go 基础",
+      "expected_band": 3,
+      "actual_band": 3,
+      "band_delta": 0,
+      "total_score": 50,
+      "expected_scores": {
+        "correctness": 3,
+        "depth": 3,
+        "engineering_judgment": 3,
+        "evidence_credibility": 3,
+        "structure": 3
+      },
+      "actual_scores": {
+        "correctness": 3,
+        "depth": 2,
+        "engineering_judgment": 3,
+        "evidence_credibility": 2,
+        "structure": 2
+      },
+      "deviations": [
+        {
+          "dimension": "depth",
+          "expected": 3,
+          "actual": 2,
+          "delta": -1
+        },
+        {
+          "dimension": "structure",
+          "expected": 3,
+          "actual": 2,
+          "delta": -1
+        },
+        {
+          "dimension": "evidence_credibility",
+          "expected": 3,
+          "actual": 2,
+          "delta": -1
+        }
+      ],
+      "degraded": false,
+      "attempts": 1,
+      "evidence_quotes": 5,
+      "evidence_quote_ok": true,
+      "prompt_tokens": 724,
+      "completion_tokens": 625,
+      "latency_ms": 4292,
+      "notes": "扩容倍数正确但版本口径略旧，没提 1.18 之后的阈值变化和底层数组共享导致的坑。"
+    },
+    {
+      "case_id": "mid-11-no-index",
+      "type": "mid",
+      "topic": "索引与执行计划",
+      "expected_band": 3,
+      "actual_band": 3,
+      "band_delta": 0,
+      "total_score": 66,
+      "expected_scores": {
+        "correctness": 4,
+        "depth": 3,
+        "engineering_judgment": 3,
+        "evidence_credibility": 3,
+        "structure": 3
+      },
+      "actual_scores": {
+        "correctness": 4,
+        "depth": 3,
+        "engineering_judgment": 3,
+        "evidence_credibility": 3,
+        "structure": 3
+      },
+      "degraded": false,
+      "attempts": 1,
+      "evidence_quotes": 7,
+      "evidence_quote_ok": true,
+      "prompt_tokens": 753,
+      "completion_tokens": 646,
+      "latency_ms": 4334,
+      "notes": "列举的失效场景准确，也提到优化器代价判断；但没有区分数据分布导致的选择性问题和实际案例。"
+    },
+    {
+      "case_id": "low-01-channel",
+      "type": "low",
+      "topic": "Go 并发模型",
+      "expected_band": 1,
+      "actual_band": 1,
+      "band_delta": 0,
+      "total_score": 31,
+      "expected_scores": {
+        "correctness": 1,
+        "depth": 1,
+        "engineering_judgment": 1,
+        "evidence_credibility": 1,
+        "structure": 2
+      },
+      "actual_scores": {
+        "correctness": 2,
+        "depth": 1,
+        "engineering_judgment": 1,
+        "evidence_credibility": 2,
+        "structure": 2
+      },
+      "deviations": [
+        {
+          "dimension": "correctness",
+          "expected": 1,
+          "actual": 2,
+          "delta": 1
+        },
+        {
+          "dimension": "evidence_credibility",
+          "expected": 1,
+          "actual": 2,
+          "delta": 1
+        }
+      ],
+      "degraded": false,
+      "attempts": 1,
+      "evidence_quotes": 5,
+      "evidence_quote_ok": true,
+      "prompt_tokens": 704,
+      "completion_tokens": 465,
+      "latency_ms": 3470,
+      "notes": "候选人明确表示没看过底层，只停留在使用层，几乎没有信息量，按 1 档处理。"
+    },
+    {
+      "case_id": "low-02-redis-single-thread",
+      "type": "low",
+      "topic": "Redis 基础",
+      "expected_band": 1,
+      "actual_band": 1,
+      "band_delta": 0,
+      "total_score": 20,
+      "expected_scores": {
+        "correctness": 1,
+        "depth": 1,
+        "engineering_judgment": 1,
+        "evidence_credibility": 1,
+        "structure": 2
+      },
+      "actual_scores": {
+        "correctness": 1,
+        "depth": 1,
+        "engineering_judgment": 1,
+        "evidence_credibility": 1,
+        "structure": 1
+      },
+      "deviations": [
+        {
+          "dimension": "structure",
+          "expected": 2,
+          "actual": 1,
+          "delta": -1
+        }
+      ],
+      "degraded": false,
+      "attempts": 1,
+      "evidence_quotes": 6,
+      "evidence_quote_ok": true,
+      "prompt_tokens": 706,
+      "completion_tokens": 629,
+      "latency_ms": 4463,
+      "notes": "把单线程等同于没有并发问题，还建议当数据库用，属于明确的事实错误。"
+    },
+    {
+      "case_id": "low-03-index-key",
+      "type": "low",
+      "topic": "索引与执行计划",
+      "expected_band": 1,
+      "actual_band": 1,
+      "band_delta": 0,
+      "total_score": 27,
+      "expected_scores": {
+        "correctness": 2,
+        "depth": 1,
+        "engineering_judgment": 1,
+        "evidence_credibility": 1,
+        "structure": 2
+      },
+      "actual_scores": {
+        "correctness": 2,
+        "depth": 1,
+        "engineering_judgment": 1,
+        "evidence_credibility": 1,
+        "structure": 2
+      },
+      "degraded": false,
+      "attempts": 1,
+      "evidence_quotes": 5,
+      "evidence_quote_ok": true,
+      "prompt_tokens": 703,
+      "completion_tokens": 493,
+      "latency_ms": 3569,
+      "notes": "只知道索引能加速，没有结构、回表或代价概念，信息量接近为零。"
+    },
+    {
+      "case_id": "low-04-mutex",
+      "type": "low",
+      "topic": "并发安全",
+      "expected_band": 1,
+      "actual_band": 1,
+      "band_delta": 0,
+      "total_score": 29,
+      "expected_scores": {
+        "correctness": 2,
+        "depth": 1,
+        "engineering_judgment": 1,
+        "evidence_credibility": 1,
+        "structure": 2
+      },
+      "actual_scores": {
+        "correctness": 2,
+        "depth": 1,
+        "engineering_judgment": 1,
+        "evidence_credibility": 1,
+        "structure": 2
+      },
+      "degraded": false,
+      "attempts": 1,
+      "evidence_quotes": 6,
+      "evidence_quote_ok": true,
+      "prompt_tokens": 698,
+      "completion_tokens": 534,
+      "latency_ms": 3799,
+      "notes": "方向不算错，但只会全函数加锁且明确不考虑性能，缺少原子操作、channel、锁粒度等任何展开。"
+    },
+    {
+      "case_id": "empty-01-forgot",
+      "type": "empty",
+      "topic": "缓存模式与一致性",
+      "expected_band": 1,
+      "actual_band": 1,
+      "band_delta": 0,
+      "total_score": 17,
+      "expected_scores": {
+        "correctness": 1,
+        "depth": 1,
+        "engineering_judgment": 1,
+        "evidence_credibility": 1,
+        "structure": 2
+      },
+      "actual_scores": {
+        "correctness": 1,
+        "depth": 1,
+        "engineering_judgment": 1,
+        "evidence_credibility": 1,
+        "structure": 1
+      },
+      "deviations": [
+        {
+          "dimension": "structure",
+          "expected": 2,
+          "actual": 1,
+          "delta": -1
+        }
+      ],
+      "degraded": false,
+      "attempts": 1,
+      "evidence_quotes": 5,
+      "evidence_quote_ok": true,
+      "prompt_tokens": 709,
+      "completion_tokens": 488,
+      "latency_ms": 3259,
+      "notes": "没有区分两种失效场景，也没有任何处理方案，属于明显空洞。"
+    },
+    {
+      "case_id": "empty-02-fluff",
+      "type": "empty",
+      "topic": "缓存模式与一致性",
+      "expected_band": 1,
+      "actual_band": 1,
+      "band_delta": 0,
+      "total_score": 29,
+      "expected_scores": {
+        "correctness": 2,
+        "depth": 1,
+        "engineering_judgment": 1,
+        "evidence_credibility": 1,
+        "structure": 2
+      },
+      "actual_scores": {
+        "correctness": 2,
+        "depth": 1,
+        "engineering_judgment": 1,
+        "evidence_credibility": 1,
+        "structure": 2
+      },
+      "degraded": false,
+      "attempts": 1,
+      "evidence_quotes": 5,
+      "evidence_quote_ok": true,
+      "prompt_tokens": 711,
+      "completion_tokens": 473,
+      "latency_ms": 3601,
+      "notes": "全是正确但无信息量的套话，没有任何具体手段，按空洞处理；长度不短，专门用来检验评估是否能识别空话。"
+    },
+    {
+      "case_id": "exag-01-cache-scale",
+      "type": "exaggerated",
+      "topic": "高可用与集群",
+      "expected_band": 1,
+      "actual_band": 1,
+      "band_delta": 0,
+      "total_score": 19,
+      "expected_scores": {
+        "correctness": 2,
+        "depth": 2,
+        "engineering_judgment": 2,
+        "evidence_credibility": 1,
+        "structure": 3
+      },
+      "actual_scores": {
+        "correctness": 1,
+        "depth": 1,
+        "engineering_judgment": 1,
+        "evidence_credibility": 1,
+        "structure": 2
+      },
+      "deviations": [
+        {
+          "dimension": "correctness",
+          "expected": 2,
+          "actual": 1,
+          "delta": -1
+        },
+        {
+          "dimension": "depth",
+          "expected": 2,
+          "actual": 1,
+          "delta": -1
+        },
+        {
+          "dimension": "engineering_judgment",
+          "expected": 2,
+          "actual": 1,
+          "delta": -1
+        },
+        {
+          "dimension": "structure",
+          "expected": 3,
+          "actual": 2,
+          "delta": -1
+        }
+      ],
+      "degraded": false,
+      "attempts": 1,
+      "evidence_quotes": 6,
+      "evidence_quote_ok": true,
+      "prompt_tokens": 795,
+      "completion_tokens": 674,
+      "latency_ms": 4955,
+      "notes": "数字明显违背常识且无任何验证方式，还把热点治理简化成加机器，属于典型夸大；结构尚可但不能掩盖可信度问题。"
+    },
+    {
+      "case_id": "exag-02-mysql-scale",
+      "type": "exaggerated",
+      "topic": "慢查询优化",
+      "expected_band": 1,
+      "actual_band": 1,
+      "band_delta": 0,
+      "total_score": 20,
+      "expected_scores": {
+        "correctness": 2,
+        "depth": 2,
+        "engineering_judgment": 2,
+        "evidence_credibility": 1,
+        "structure": 2
+      },
+      "actual_scores": {
+        "correctness": 1,
+        "depth": 1,
+        "engineering_judgment": 1,
+        "evidence_credibility": 1,
+        "structure": 1
+      },
+      "deviations": [
+        {
+          "dimension": "correctness",
+          "expected": 2,
+          "actual": 1,
+          "delta": -1
+        },
+        {
+          "dimension": "depth",
+          "expected": 2,
+          "actual": 1,
+          "delta": -1
+        },
+        {
+          "dimension": "engineering_judgment",
+          "expected": 2,
+          "actual": 1,
+          "delta": -1
+        },
+        {
+          "dimension": "structure",
+          "expected": 2,
+          "actual": 1,
+          "delta": -1
+        }
+      ],
+      "degraded": false,
+      "attempts": 1,
+      "evidence_quotes": 5,
+      "evidence_quote_ok": true,
+      "prompt_tokens": 763,
+      "completion_tokens": 663,
+      "latency_ms": 4465,
+      "notes": "20 亿行单表 1ms 且不做分片，数据无法自洽，还明确表示没有压测，夸大特征明显。"
+    },
+    {
+      "case_id": "exag-03-short-brag",
+      "type": "exaggerated",
+      "topic": "工程经验",
+      "expected_band": 1,
+      "actual_band": 1,
+      "band_delta": 0,
+      "total_score": 23,
+      "expected_scores": {
+        "correctness": 2,
+        "depth": 1,
+        "engineering_judgment": 1,
+        "evidence_credibility": 1,
+        "structure": 2
+      },
+      "actual_scores": {
+        "correctness": 2,
+        "depth": 1,
+        "engineering_judgment": 1,
+        "evidence_credibility": 1,
+        "structure": 1
+      },
+      "deviations": [
+        {
+          "dimension": "structure",
+          "expected": 2,
+          "actual": 1,
+          "delta": -1
+        }
+      ],
+      "degraded": false,
+      "attempts": 1,
+      "evidence_quotes": 5,
+      "evidence_quote_ok": true,
+      "prompt_tokens": 696,
+      "completion_tokens": 477,
+      "latency_ms": 3293,
+      "notes": "只有结论性吹嘘，没有背景、方案和可追问细节，属于短句式夸大。"
+    },
+    {
+      "case_id": "off-01-k8s",
+      "type": "off_topic",
+      "topic": "缓存模式与一致性",
+      "expected_band": 1,
+      "actual_band": 1,
+      "band_delta": 0,
+      "total_score": 17,
+      "expected_scores": {
+        "correctness": 1,
+        "depth": 2,
+        "engineering_judgment": 2,
+        "evidence_credibility": 1,
+        "structure": 3
+      },
+      "actual_scores": {
+        "correctness": 1,
+        "depth": 1,
+        "engineering_judgment": 1,
+        "evidence_credibility": 1,
+        "structure": 1
+      },
+      "deviations": [
+        {
+          "dimension": "depth",
+          "expected": 2,
+          "actual": 1,
+          "delta": -1
+        },
+        {
+          "dimension": "engineering_judgment",
+          "expected": 2,
+          "actual": 1,
+          "delta": -1
+        },
+        {
+          "dimension": "structure",
+          "expected": 3,
+          "actual": 1,
+          "delta": -2
+        }
+      ],
+      "degraded": false,
+      "attempts": 1,
+      "evidence_quotes": 5,
+      "evidence_quote_ok": true,
+      "prompt_tokens": 751,
+      "completion_tokens": 441,
+      "latency_ms": 3636,
+      "notes": "完全没有回答缓存穿透，转到沟通、K8s 和个人评价，属于跑题；表达本身有条理。"
+    },
+    {
+      "case_id": "off-02-business",
+      "type": "off_topic",
+      "topic": "事务与 MVCC",
+      "expected_band": 1,
+      "actual_band": 1,
+      "band_delta": 0,
+      "total_score": 23,
+      "expected_scores": {
+        "correctness": 1,
+        "depth": 1,
+        "engineering_judgment": 1,
+        "evidence_credibility": 1,
+        "structure": 3
+      },
+      "actual_scores": {
+        "correctness": 1,
+        "depth": 1,
+        "engineering_judgment": 1,
+        "evidence_credibility": 1,
+        "structure": 2
+      },
+      "deviations": [
+        {
+          "dimension": "structure",
+          "expected": 3,
+          "actual": 2,
+          "delta": -1
+        }
+      ],
+      "degraded": false,
+      "attempts": 1,
+      "evidence_quotes": 5,
+      "evidence_quote_ok": true,
+      "prompt_tokens": 735,
+      "completion_tokens": 509,
+      "latency_ms": 3545,
+      "notes": "用业务理解替代技术回答，并给出加机器这种与 MVCC 无关的结论，属于跑题。"
+    }
+  ]
+}

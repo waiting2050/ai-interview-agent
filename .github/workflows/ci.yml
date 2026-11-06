@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.25.1"
+
+jobs:
+  unit:
+    name: fmt / vet / unit / heuristic eval
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "the following files are not gofmt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -count=1 ./...
+
+      # 回归基线只跑 heuristic，不配置任何模型 key；测试本身也只断言
+      # schema 与证据引用的硬不变量，不依赖真实模型。
+      - name: heuristic regression baseline
+        env:
+          MODEL_PROVIDER: heuristic
+          OPENAI_API_KEY: ""
+          OPENAI_BASE_URL: ""
+        run: go test -tags=eval -count=1 ./internal/agent/eval
+
+  integration:
+    name: integration (postgres 16 + redis 7)
+    runs-on: ubuntu-latest
+    needs: unit
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: interview
+          POSTGRES_PASSWORD: interview
+          POSTGRES_DB: interview
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U interview -d interview"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://interview:interview@127.0.0.1:5432/interview?sslmode=disable
+      REDIS_ADDR: 127.0.0.1:6379
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: integration tests
+        run: go test -tags=integration -count=1 ./...

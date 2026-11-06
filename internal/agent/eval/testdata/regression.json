@@ -1,0 +1,545 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "case_id": "high-01-gmp",
+      "type": "high",
+      "topic": "Go 并发模型",
+      "difficulty": "senior",
+      "question": "Go 的 GMP 调度模型解决了什么问题？为什么在 GM 之外还要加 P 这一层？",
+      "answer": "主要是解决大量 goroutine 的调度开销。早期是 GM 模型，所有 M 抢一把全局队列锁，多核扩容时锁竞争很严重。加了 P 之后，每个 M 绑定一个 P，goroutine 优先放 P 的本地 runq，满了再放全局队列，work stealing 从别的 P 尾部偷一半，锁竞争就下来了。P 的数量默认是 GOMAXPROCS，也决定同时真正跑用户代码的 M 数。P 上还挂 mcache、sudog 这些资源，避免每次都走全局分配。我们线上有个网关服务，把阻塞调用改成批量处理后，goroutine 从 2 万降到 8 千，调度延迟从 3ms 降到 0.8ms。",
+      "expected_points": ["G-M-P 各自的职责", "本地队列与 work stealing"],
+      "expected_band": 5,
+      "expected_scores": {
+        "correctness": 5,
+        "depth": 5,
+        "engineering_judgment": 5,
+        "structure": 4,
+        "evidence_credibility": 5
+      },
+      "notes": "讲清了 GM 的锁竞争问题、P 的本地队列与 work stealing、资源挂载，并给出量化收益；4 分结构是因为先结论后细节的过渡略糙。"
+    },
+    {
+      "case_id": "high-02-mysql-slow",
+      "type": "high",
+      "topic": "索引与执行计划",
+      "difficulty": "mid",
+      "question": "订单查询接口突然变慢，你会怎么定位？说说索引层面的常见原因。",
+      "answer": "先看慢查询日志，再 EXPLAIN，重点看 type 是不是 ALL、rows 估多少、Extra 有没有 Using filesort 或 Using temporary。索引层面常见的是联合索引没走最左前缀，或者在索引列上做函数、隐式类型转换，比如 varchar 字段传了数字。还有回表次数太多，能改成覆盖索引就改。范围查询后面的列会失效，order by 和 where 的索引顺序不一致也会 filesort。我们之前有个接口是 where user_id + status 再 order by create_time，改成 (user_id,status,create_time) 的联合索引后，扫描行数从 80 万降到 3000，P99 从 1.2s 降到 90ms。",
+      "expected_points": ["慢日志与 EXPLAIN", "最左前缀与回表"],
+      "expected_band": 5,
+      "expected_scores": {
+        "correctness": 5,
+        "depth": 4,
+        "engineering_judgment": 5,
+        "structure": 4,
+        "evidence_credibility": 4
+      },
+      "notes": "定位路径完整，索引失效原因覆盖到位，有真实改造前后的量化对比；depth 未到 4.5 是因为没有展开优化器选错索引的情况。"
+    },
+    {
+      "case_id": "high-03-cache-consistency",
+      "type": "high",
+      "topic": "缓存模式与一致性",
+      "difficulty": "mid",
+      "question": "数据库和 Redis 双写，怎么保证缓存一致性？",
+      "answer": "没有强一致，只能让不一致窗口尽量小。常见做法是 cache aside，更新数据库后删缓存，删除失败靠 binlog 订阅做补偿，再加一次延迟双删兜底读旧值回填。并发读写还是可能读到旧值，需要给 key 加版本号，或者用 canal 按顺序消费。如果业务真的要求强一致，就别用缓存，或者读写都加锁。我们订单详情页是 cache aside 加 binlog 删除，缓存命中率 96%，数据库 QPS 从 8k 降到 600，删除失败的补偿率大概是万分之一。",
+      "expected_points": ["缓存与数据库一致性", "删除失败补偿"],
+      "expected_band": 5,
+      "expected_scores": {
+        "correctness": 5,
+        "depth": 4,
+        "engineering_judgment": 4,
+        "structure": 4,
+        "evidence_credibility": 4
+      },
+      "notes": "明确承认没有强一致，给了延迟双删、binlog 补偿和版本号三类手段，并说明强一致场景的退路；细节到位但 depth 没讲到并发窗口的严格证明。"
+    },
+    {
+      "case_id": "high-04-local-message",
+      "type": "high",
+      "topic": "分布式事务与最终一致",
+      "difficulty": "senior",
+      "question": "跨服务下单和扣库存，怎么保证最终一致？",
+      "answer": "用本地消息表，业务数据和消息在同一个本地事务里落库，然后异步投递，消费方必须做幂等。消息状态分 pending、sent、consumed，定时任务扫 pending 重投，超过次数进死信人工处理。关键是消费幂等，用业务唯一键或者状态机 CAS，不能只靠消息 id，因为重复投递是常态。再往后还要有对账，每天比对订单和库存流水，差账自动补偿。我们大促峰值 1.2 万 TPS，最终一致延迟 P99 在 800ms 左右，没出现过超卖。",
+      "expected_points": ["本地消息表与事务边界", "消费幂等与对账"],
+      "expected_band": 5,
+      "expected_scores": {
+        "correctness": 4,
+        "depth": 5,
+        "engineering_judgment": 5,
+        "structure": 4,
+        "evidence_credibility": 4
+      },
+      "notes": "事务边界、消息状态机、幂等、对账四层都覆盖了，量化结果也合理；correctness 留 4 分是因为没有讨论消息表与业务库同库部署的前提。"
+    },
+    {
+      "case_id": "high-05-kafka-idempotent",
+      "type": "high",
+      "topic": "消息队列与幂等",
+      "difficulty": "mid",
+      "question": "Kafka 消费端怎么保证不重复处理？",
+      "answer": "Kafka 只能保证分区内有序，重复是常态，所以消费端必须幂等。我一般用业务唯一键做幂等表，insert 唯一索引，冲突就丢弃；或者状态机更新带 version CAS，重复消息不会重复扣款。消费逻辑要可重放，offset 手动提交，处理成功再 commit，失败进重试 topic，超过 3 次进死信。还要注意 rebalance 导致的重复，consumer 要在超时前处理完。我们支付回调就是这套，重复率大概 0.3%，没出过重复扣款。",
+      "expected_points": ["消费幂等实现", "重试与死信"],
+      "expected_band": 5,
+      "expected_scores": {
+        "correctness": 5,
+        "depth": 4,
+        "engineering_judgment": 4,
+        "structure": 4,
+        "evidence_credibility": 5
+      },
+      "notes": "明确重复是常态，给了幂等表和状态机两种落地方案，还提了 rebalance 这个容易被遗漏的点；量化数据可信。"
+    },
+    {
+      "case_id": "high-06-rate-limit",
+      "type": "high",
+      "topic": "限流与原子脚本",
+      "difficulty": "mid",
+      "question": "线上接口要做限流，令牌桶和漏桶怎么选？",
+      "answer": "令牌桶允许突发，适合对外 API 按 QPS 放行；漏桶输出恒定，适合保护下游。单机可以用 x/time/rate，分布式就得 Redis 加 Lua 保证原子性，key 按接口和租户维度拆，Lua 里读 token 和时间戳算补充，超时回退到本地限流，避免 Redis 抖动把全站打挂。还要区分拒绝和排队，拒绝返回 429 带 Retry-After。我们网关用的是令牌桶，单实例 5000 QPS，Redis 故障时本地兜底，误杀率控制在 2% 以内。",
+      "expected_points": ["令牌桶与漏桶差异", "Lua 原子性与降级"],
+      "expected_band": 5,
+      "expected_scores": {
+        "correctness": 4,
+        "depth": 4,
+        "engineering_judgment": 5,
+        "structure": 4,
+        "evidence_credibility": 5
+      },
+      "notes": "选型理由清楚，分布式实现和 Redis 故障降级都讲到了，有误杀率这种可验证指标；depth 扣分是因为没提时间窗口精度和时钟漂移。"
+    },
+    {
+      "case_id": "high-07-innodb-lock",
+      "type": "high",
+      "topic": "锁与死锁",
+      "difficulty": "senior",
+      "question": "RR 隔离级别下，什么情况会加间隙锁？线上死锁怎么排查？",
+      "answer": "RR 下当前读会加 next-key lock，也就是记录锁加间隙锁，范围查询和唯一索引等值不存在时会锁区间，用来防止幻读。RC 基本只有记录锁。死锁排查先打开 innodb_print_all_deadlocks，看 LATEST DETECTED DEADLOCK，重点关注两个事务的加锁顺序和走的索引。常见是不同顺序更新两行，或者二级索引加锁后再锁主键。解决思路是统一加锁顺序、缩小事务、必要时降隔离级别、补合适索引。我们有次批量更新和单条更新交叉，改成按 id 排序后死锁从每天几十次降到 0。",
+      "expected_points": ["RR 与间隙锁", "死锁检测与排查"],
+      "expected_band": 5,
+      "expected_scores": {
+        "correctness": 5,
+        "depth": 5,
+        "engineering_judgment": 4,
+        "structure": 4,
+        "evidence_credibility": 4
+      },
+      "notes": "next-key lock 的触发条件、RC 对比、死锁日志排查和治理手段都到位，也有线上结果；engineering_judgment 4 分是因为降隔离级别没有讨论业务风险。"
+    },
+    {
+      "case_id": "high-08-cpu-profile",
+      "type": "high",
+      "topic": "可观测性与故障排查",
+      "difficulty": "mid",
+      "question": "线上一台机器 CPU 打满，你怎么定位到具体代码？",
+      "answer": "先看监控确认是用户态还是内核态，再用 top -H 找线程，转成十六进制去 pprof 的 goroutine 里对，或者直接开 net/http/pprof 抓 30 秒 CPU profile，看火焰图里占比最高的调用。常见原因是热 key 循环、JSON 序列化、正则回溯，GC 太频繁也会拉高 CPU。还要先确认是不是流量突增，能限流就先限流止损，再慢慢定位。我们有个服务是日志里每次 fmt.Sprintf，占了 40% CPU，改成结构化日志后 CPU 从 95% 降到 45%。",
+      "expected_points": ["pprof 与火焰图", "线上故障定位路径"],
+      "expected_band": 5,
+      "expected_scores": {
+        "correctness": 4,
+        "depth": 5,
+        "engineering_judgment": 4,
+        "structure": 5,
+        "evidence_credibility": 4
+      },
+      "notes": "止损和定位顺序清楚，pprof、top -H、火焰图链路完整，案例有量化；correctness 留 4 分是因为没提内核态排查的具体工具。"
+    },
+    {
+      "case_id": "mid-01-gc",
+      "type": "mid",
+      "topic": "内存管理与 GC",
+      "difficulty": "mid",
+      "question": "Go 的垃圾回收大概怎么工作的？",
+      "answer": "Go 用的是并发三色标记加清除，STW 很短。对象从白色开始，从根可达的标灰再标黑，写屏障保证并发标记不漏对象。GC 触发看 GOGC 和目标堆大小，可以调 GOGC 或者用 debug.SetMemoryLimit。",
+      "expected_points": ["三色标记与写屏障", "GC 调优"],
+      "expected_band": 3,
+      "expected_scores": {
+        "correctness": 3,
+        "depth": 3,
+        "engineering_judgment": 3,
+        "structure": 3,
+        "evidence_credibility": 3
+      },
+      "notes": "概念正确但只到教科书层面，没有讲混合写屏障、辅助标记或一次真实调优，属于典型中档答案。"
+    },
+    {
+      "case_id": "mid-02-context",
+      "type": "mid",
+      "topic": "Go 并发模型",
+      "difficulty": "mid",
+      "question": "context 的取消是怎么传播的？",
+      "answer": "context 是树形结构，父 context 取消会关闭 done channel，子 context 监听父的 Done 之后自己也 cancel，Err 会返回 context.Canceled 或者 DeadlineExceeded。下游函数要 select 监听 ctx.Done 才能真正退出，否则取消传下去也没用。",
+      "expected_points": ["context 取消与超时传递"],
+      "expected_band": 3,
+      "expected_scores": {
+        "correctness": 4,
+        "depth": 3,
+        "engineering_judgment": 3,
+        "structure": 3,
+        "evidence_credibility": 3
+      },
+      "notes": "传播机制和退出条件都对，但没有提 WithCancel 的内存释放、cancel 必须调用、以及跨 goroutine 的常见泄漏。"
+    },
+    {
+      "case_id": "mid-03-bplus-tree",
+      "type": "mid",
+      "topic": "索引与执行计划",
+      "difficulty": "mid",
+      "question": "MySQL 为什么用 B+ 树做索引？",
+      "answer": "B+ 树非叶子节点只存 key，扇出大，树高低，磁盘 IO 少；数据都在叶子节点并且用链表连起来，范围查询方便。B 树每个节点也存数据，同样大小装的 key 少，树会更高。哈希索引只适合等值查询。",
+      "expected_points": ["B+ 树索引结构"],
+      "expected_band": 3,
+      "expected_scores": {
+        "correctness": 4,
+        "depth": 3,
+        "engineering_judgment": 3,
+        "structure": 3,
+        "evidence_credibility": 3
+      },
+      "notes": "关键结论正确，对比了 B 树和哈希索引，但没有展开页大小、聚簇索引和回表，深度一般。"
+    },
+    {
+      "case_id": "mid-04-isolation",
+      "type": "mid",
+      "topic": "事务与 MVCC",
+      "difficulty": "mid",
+      "question": "MySQL 的四种隔离级别分别解决什么问题？",
+      "answer": "读未提交会有脏读，读已提交解决脏读但有不可重复读，可重复读解决不可重复读，MySQL 默认 RR，用 MVCC 加间隙锁基本避免幻读，串行化最安全但并发差。",
+      "expected_points": ["隔离级别与可见性"],
+      "expected_band": 3,
+      "expected_scores": {
+        "correctness": 3,
+        "depth": 3,
+        "engineering_judgment": 3,
+        "structure": 3,
+        "evidence_credibility": 3
+      },
+      "notes": "四档隔离级别与现象对应正确，但 MVCC 和间隙锁只是一笔带过，没有 Read View 或具体验证，属于背诵型中档。"
+    },
+    {
+      "case_id": "mid-05-persist",
+      "type": "mid",
+      "topic": "持久化与恢复",
+      "difficulty": "mid",
+      "question": "Redis 的 RDB 和 AOF 怎么选？",
+      "answer": "RDB 是快照，恢复快但可能丢最后一次快照之后的数据；AOF 记命令，丢得少但文件大、恢复慢。一般两者都开，AOF 用 everysec，Redis 4 之后有混合持久化，重启时先加载 RDB 再重放增量 AOF。",
+      "expected_points": ["RDB 与 AOF 差异", "fsync 策略与数据安全"],
+      "expected_band": 3,
+      "expected_scores": {
+        "correctness": 4,
+        "depth": 3,
+        "engineering_judgment": 4,
+        "structure": 3,
+        "evidence_credibility": 3
+      },
+      "notes": "差异和混合持久化都对，给了可落地的默认配置；但没有算恢复时间和容量，缺少取舍依据。"
+    },
+    {
+      "case_id": "mid-06-replica",
+      "type": "mid",
+      "topic": "高可用与集群",
+      "difficulty": "mid",
+      "question": "Redis 主从同步的过程？",
+      "answer": "从节点连上来先发 psync，主节点做全量同步，bgsave 生成 RDB 传过去，这期间的写命令放 replication buffer，之后走增量传播。断线重连用 offset 做部分同步，复制积压缓冲区够大就能只补差量。",
+      "expected_points": ["主从与哨兵"],
+      "expected_band": 3,
+      "expected_scores": {
+        "correctness": 3,
+        "depth": 3,
+        "engineering_judgment": 3,
+        "structure": 3,
+        "evidence_credibility": 3
+      },
+      "notes": "全量加增量的流程正确，提到了 repl backlog，但没有讲复制延迟、failover 和脑裂。"
+    },
+    {
+      "case_id": "mid-07-idempotency",
+      "type": "mid",
+      "topic": "错误处理与稳定性",
+      "difficulty": "mid",
+      "question": "接口怎么保证幂等？",
+      "answer": "用业务唯一键或者客户端传的幂等键，服务端落唯一索引，重复请求直接返回第一次结果。还可以用状态机，只有待支付能变已支付，重复回调就忽略。要注意先查后写有并发窗口，得靠唯一约束兜底。",
+      "expected_points": ["超时、重试与幂等"],
+      "expected_band": 3,
+      "expected_scores": {
+        "correctness": 4,
+        "depth": 3,
+        "engineering_judgment": 3,
+        "structure": 4,
+        "evidence_credibility": 3
+      },
+      "notes": "唯一索引加状态机是常见且正确的组合，也意识到先查后写的窗口；缺少失败重试和幂等键过期的讨论。"
+    },
+    {
+      "case_id": "mid-08-retry",
+      "type": "mid",
+      "topic": "错误处理与稳定性",
+      "difficulty": "mid",
+      "question": "下游接口超时，重试要注意什么？",
+      "answer": "只重试幂等的请求，或者带幂等键；设置最大次数和指数退避加抖动，避免雪崩；要有整体超时预算，不能每层都重试。非幂等写操作最好查状态再决定，或者走补偿。",
+      "expected_points": ["超时、重试与幂等"],
+      "expected_band": 3,
+      "expected_scores": {
+        "correctness": 3,
+        "depth": 3,
+        "engineering_judgment": 3,
+        "structure": 3,
+        "evidence_credibility": 3
+      },
+      "notes": "要点齐全但都是结论，没有具体退避参数、熔断配合或重试放大的例子，属于中规中矩的中档回答。"
+    },
+    {
+      "case_id": "mid-09-goroutine-leak",
+      "type": "mid",
+      "topic": "可观测性与故障排查",
+      "difficulty": "mid",
+      "question": "goroutine 泄漏怎么排查？",
+      "answer": "先看 goroutine 数量是不是持续上涨，抓 pprof 的 goroutine 看堆栈集中在哪。常见是 channel 没人读一直阻塞、context 没传下去、time.Ticker 没 Stop、HTTP 连接没关。定位到代码后补退出路径，再加监控告警。",
+      "expected_points": ["pprof 与 trace", "线上故障定位路径"],
+      "expected_band": 3,
+      "expected_scores": {
+        "correctness": 4,
+        "depth": 3,
+        "engineering_judgment": 3,
+        "structure": 4,
+        "evidence_credibility": 3
+      },
+      "notes": "排查路径和常见原因都对，结构清楚；但没有一次完整案例，也没有并发数基线和告警阈值。"
+    },
+    {
+      "case_id": "mid-10-slice",
+      "type": "mid",
+      "topic": "Go 基础",
+      "difficulty": "mid",
+      "question": "slice 的扩容规则是什么？",
+      "answer": "append 超过 cap 会扩容，小 slice 大概翻倍，大了按 1.25 倍增长，然后拷贝老数据。所以最好预估容量用 make 指定 cap，避免多次拷贝。",
+      "expected_points": ["slice 扩容与内存分配"],
+      "expected_band": 3,
+      "expected_scores": {
+        "correctness": 3,
+        "depth": 3,
+        "engineering_judgment": 3,
+        "structure": 3,
+        "evidence_credibility": 3
+      },
+      "notes": "扩容倍数正确但版本口径略旧，没提 1.18 之后的阈值变化和底层数组共享导致的坑。"
+    },
+    {
+      "case_id": "mid-11-no-index",
+      "type": "mid",
+      "topic": "索引与执行计划",
+      "difficulty": "mid",
+      "question": "一条 SQL 走不了索引，可能是什么原因？",
+      "answer": "常见是索引列上做函数或运算、隐式类型转换、like 前置百分号、or 里有没索引的条件、联合索引没走最左前缀，还有优化器觉得走索引回表更贵。可以用 force index 验证，再决定改 SQL 还是改索引。",
+      "expected_points": ["最左前缀与回表", "统计信息与索引选择"],
+      "expected_band": 3,
+      "expected_scores": {
+        "correctness": 4,
+        "depth": 3,
+        "engineering_judgment": 3,
+        "structure": 3,
+        "evidence_credibility": 3
+      },
+      "notes": "列举的失效场景准确，也提到优化器代价判断；但没有区分数据分布导致的选择性问题和实际案例。"
+    },
+    {
+      "case_id": "low-01-channel",
+      "type": "low",
+      "topic": "Go 并发模型",
+      "difficulty": "mid",
+      "question": "Go 的 channel 底层是怎么实现的？",
+      "answer": "这个没看过底层，平时就是 make 个 channel 收发数据，知道有缓冲和无缓冲。",
+      "expected_points": ["channel 阻塞与缓冲区设计"],
+      "expected_band": 1,
+      "expected_scores": {
+        "correctness": 1,
+        "depth": 1,
+        "engineering_judgment": 1,
+        "structure": 2,
+        "evidence_credibility": 1
+      },
+      "notes": "候选人明确表示没看过底层，只停留在使用层，几乎没有信息量，按 1 档处理。"
+    },
+    {
+      "case_id": "low-02-redis-single-thread",
+      "type": "low",
+      "topic": "Redis 基础",
+      "difficulty": "mid",
+      "question": "Redis 单线程为什么快？有没有并发问题？",
+      "answer": "Redis 是单线程的所以不会有并发问题，直接当数据库用就行，反正快。",
+      "expected_points": ["单线程与 IO 多路复用"],
+      "expected_band": 1,
+      "expected_scores": {
+        "correctness": 1,
+        "depth": 1,
+        "engineering_judgment": 1,
+        "structure": 2,
+        "evidence_credibility": 1
+      },
+      "notes": "把单线程等同于没有并发问题，还建议当数据库用，属于明确的事实错误。"
+    },
+    {
+      "case_id": "low-03-index-key",
+      "type": "low",
+      "topic": "索引与执行计划",
+      "difficulty": "mid",
+      "question": "MySQL 索引是什么？为什么能加速查询？",
+      "answer": "MySQL 索引就是给字段加个 key，查得快，具体原理没了解过。",
+      "expected_points": ["B+ 树索引结构"],
+      "expected_band": 1,
+      "expected_scores": {
+        "correctness": 2,
+        "depth": 1,
+        "engineering_judgment": 1,
+        "structure": 2,
+        "evidence_credibility": 1
+      },
+      "notes": "只知道索引能加速，没有结构、回表或代价概念，信息量接近为零。"
+    },
+    {
+      "case_id": "low-04-mutex",
+      "type": "low",
+      "topic": "并发安全",
+      "difficulty": "mid",
+      "question": "Go 里怎么保证并发安全？",
+      "answer": "并发安全就是加 mutex，锁住整个函数，性能不重要，不出事就行。",
+      "expected_points": ["并发安全与锁粒度"],
+      "expected_band": 1,
+      "expected_scores": {
+        "correctness": 2,
+        "depth": 1,
+        "engineering_judgment": 1,
+        "structure": 2,
+        "evidence_credibility": 1
+      },
+      "notes": "方向不算错，但只会全函数加锁且明确不考虑性能，缺少原子操作、channel、锁粒度等任何展开。"
+    },
+    {
+      "case_id": "empty-01-forgot",
+      "type": "empty",
+      "topic": "缓存模式与一致性",
+      "difficulty": "mid",
+      "question": "缓存雪崩和缓存击穿有什么区别？怎么处理？",
+      "answer": "嗯……这个我有点忘了，大概就是加个缓存吧，具体怎么弄记不清了。",
+      "expected_points": ["缓存穿透、击穿、雪崩"],
+      "expected_band": 1,
+      "expected_scores": {
+        "correctness": 1,
+        "depth": 1,
+        "engineering_judgment": 1,
+        "structure": 2,
+        "evidence_credibility": 1
+      },
+      "notes": "没有区分两种失效场景，也没有任何处理方案，属于明显空洞。"
+    },
+    {
+      "case_id": "empty-02-fluff",
+      "type": "empty",
+      "topic": "缓存模式与一致性",
+      "difficulty": "mid",
+      "question": "缓存和数据库的数据不一致，你们是怎么处理的？",
+      "answer": "这个问题我觉得还是要看具体业务场景，不同的场景有不同的方案，不能一概而论，要结合团队情况和历史包袱来选择，合适的就是最好的。",
+      "expected_points": ["缓存与数据库一致性"],
+      "expected_band": 1,
+      "expected_scores": {
+        "correctness": 2,
+        "depth": 1,
+        "engineering_judgment": 1,
+        "structure": 2,
+        "evidence_credibility": 1
+      },
+      "notes": "全是正确但无信息量的套话，没有任何具体手段，按空洞处理；长度不短，专门用来检验评估是否能识别空话。"
+    },
+    {
+      "case_id": "exag-01-cache-scale",
+      "type": "exaggerated",
+      "topic": "高可用与集群",
+      "difficulty": "senior",
+      "question": "你们的缓存是怎么扛住大流量的？",
+      "answer": "我们缓存集群单集群 200 万 QPS，命中率 99.99%，P99 只有 0.3ms，双十一零点一刻都没抖，全是我主导重构的，之前那套根本没法用。热点 key 我们也没做特殊处理，就是加机器，机器够多就不会有问题。其实也没什么难的，就是把 Redis 从 3 主 3 从扩到 30 主 30 从，成本不是问题，老板很支持。",
+      "expected_points": ["热 key 与大 key 治理", "Cluster 槽位与迁移"],
+      "expected_band": 1,
+      "expected_scores": {
+        "correctness": 2,
+        "depth": 2,
+        "engineering_judgment": 2,
+        "structure": 3,
+        "evidence_credibility": 1
+      },
+      "notes": "数字明显违背常识且无任何验证方式，还把热点治理简化成加机器，属于典型夸大；结构尚可但不能掩盖可信度问题。"
+    },
+    {
+      "case_id": "exag-02-mysql-scale",
+      "type": "exaggerated",
+      "topic": "慢查询优化",
+      "difficulty": "senior",
+      "question": "单表数据量很大时，你们怎么做查询优化？",
+      "answer": "我们订单系统每天 10 亿单，从不丢单，数据库单表 20 亿行查询还是 1ms，没做过分库分表，也没出过事故。真的，只要 SQL 写得好、索引建得对，MySQL 其实很能扛，我们也没做过什么压测，凭经验就知道没问题。",
+      "expected_points": ["统计信息与索引选择", "分页与排序优化"],
+      "expected_band": 1,
+      "expected_scores": {
+        "correctness": 2,
+        "depth": 2,
+        "engineering_judgment": 2,
+        "structure": 2,
+        "evidence_credibility": 1
+      },
+      "notes": "20 亿行单表 1ms 且不做分片，数据无法自洽，还明确表示没有压测，夸大特征明显。"
+    },
+    {
+      "case_id": "exag-03-short-brag",
+      "type": "exaggerated",
+      "topic": "工程经验",
+      "difficulty": "mid",
+      "question": "你做过最有挑战的项目是什么？",
+      "answer": "这个我做过，很简单，我们线上每天几十亿请求，从来没出过问题。",
+      "expected_points": ["项目复盘与量化结果"],
+      "expected_band": 1,
+      "expected_scores": {
+        "correctness": 2,
+        "depth": 1,
+        "engineering_judgment": 1,
+        "structure": 2,
+        "evidence_credibility": 1
+      },
+      "notes": "只有结论性吹嘘，没有背景、方案和可追问细节，属于短句式夸大。"
+    },
+    {
+      "case_id": "off-01-k8s",
+      "type": "off_topic",
+      "topic": "缓存模式与一致性",
+      "difficulty": "mid",
+      "question": "Redis 缓存穿透怎么解决？",
+      "answer": "我觉得做技术最重要的是沟通，我们团队每周都开复盘会，大家都很配合。K8s 集群是我搭的，用了 Helm 和 ArgoCD，发布效率提升很多，之前手工发布要半小时，现在一键发布五分钟就好了。平时我也会写一些文档，推动团队规范化，领导也比较认可我的工作。",
+      "expected_points": ["缓存穿透、击穿、雪崩"],
+      "expected_band": 1,
+      "expected_scores": {
+        "correctness": 1,
+        "depth": 2,
+        "engineering_judgment": 2,
+        "structure": 3,
+        "evidence_credibility": 1
+      },
+      "notes": "完全没有回答缓存穿透，转到沟通、K8s 和个人评价，属于跑题；表达本身有条理。"
+    },
+    {
+      "case_id": "off-02-business",
+      "type": "off_topic",
+      "topic": "事务与 MVCC",
+      "difficulty": "mid",
+      "question": "MySQL 事务的 MVCC 是怎么实现的？",
+      "answer": "我平时主要是做业务开发，对数据库底层研究不多。我觉得做后端更重要的是业务理解，代码能跑通就行，性能这些可以后面再优化，实在不行就加机器，云厂商扩容很快的。",
+      "expected_points": ["Read View 与 undo log", "隔离级别与可见性"],
+      "expected_band": 1,
+      "expected_scores": {
+        "correctness": 1,
+        "depth": 1,
+        "engineering_judgment": 1,
+        "structure": 3,
+        "evidence_credibility": 1
+      },
+      "notes": "用业务理解替代技术回答，并给出加机器这种与 MVCC 无关的结论，属于跑题。"
+    }
+  ]
+}
