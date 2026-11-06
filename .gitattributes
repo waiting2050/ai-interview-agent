@@ -1,0 +1,6 @@
+# CI 在 Linux 上运行 gofmt，按 LF 判定格式。Windows 工作区若以 CRLF 检出，
+# gofmt -l 会把大量文件误报为未格式化。强制 Go 源码以 LF 检出/提交。
+*.go text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf

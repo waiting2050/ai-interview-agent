@@ -26,11 +26,8 @@ jobs:
 
       - name: gofmt
         run: |
-          unformatted="$(gofmt -l .)"
-          if [ -n "$unformatted" ]; then
-            echo "the following files are not gofmt-formatted:"
-            echo "$unformatted"
-            exit 1
+          if [ -n "$(gofmt -l .)" ]; then
+            gofmt -d . && exit 1
           fi
 
       - name: go vet
