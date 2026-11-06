@@ -58,6 +58,7 @@ type sessionDTO struct {
 	CandidateName string         `json:"candidate_name"`
 	TargetRole    string         `json:"target_role"`
 	ResumeProfile resume.Profile `json:"resume_profile"`
+	Config        session.Config `json:"config"`
 	Status        string         `json:"status"`
 	Phase         string         `json:"phase"`
 	StateVersion  uint64         `json:"state_version"`
@@ -76,6 +77,7 @@ func toSessionDTO(s *session.Session) sessionDTO {
 		CandidateName: s.CandidateName,
 		TargetRole:    s.TargetRole,
 		ResumeProfile: s.ResumeProfile,
+		Config:        s.Config,
 		Status:        string(s.Status),
 		Phase:         string(s.Phase),
 		StateVersion:  s.StateVersion,

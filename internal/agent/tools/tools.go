@@ -107,17 +107,23 @@ func (q *Query) Breakdown() map[string]int {
 func (q *Query) Calls() int { return q.calls }
 
 // TurnBrief is the compact per-question row. It never carries the full answer.
+// The score decomposition is included so the report can show its arithmetic.
 type TurnBrief struct {
-	TurnID      string   `json:"turn_id"`
-	Seq         int      `json:"seq"`
-	Topic       string   `json:"topic"`
-	Kind        string   `json:"kind"`
-	Depth       int      `json:"depth"`
-	Question    string   `json:"question"`
-	Score       float64  `json:"score"`
-	Degraded    bool     `json:"degraded"`
-	Missing     int      `json:"missing_points"`
-	MissingList []string `json:"-"`
+	TurnID      string                  `json:"turn_id"`
+	Seq         int                     `json:"seq"`
+	Topic       string                  `json:"topic"`
+	Kind        string                  `json:"kind"`
+	Depth       int                     `json:"depth"`
+	Question    string                  `json:"question"`
+	Score       float64                 `json:"score"`
+	Scores      map[string]int          `json:"scores,omitempty"`
+	BaseScore   float64                 `json:"base_score,omitempty"`
+	Bonus       []evaluation.Adjustment `json:"bonus,omitempty"`
+	Penalty     []evaluation.Adjustment `json:"penalty,omitempty"`
+	Evidence    []evaluation.Evidence   `json:"evidence,omitempty"`
+	Degraded    bool                    `json:"degraded"`
+	Missing     int                     `json:"missing_points"`
+	MissingList []string                `json:"-"`
 }
 
 // TurnSummary adds a bounded answer excerpt for prompt evidence.
@@ -314,6 +320,11 @@ func (q *Query) SessionOverview(ctx context.Context) (Overview, error) {
 			brief.Degraded = rec.Degraded
 			brief.Missing = len(rec.MissingPoints)
 			brief.MissingList = clean(rec.MissingPoints)
+			brief.Scores = dimensionScores(rec.Scores)
+			brief.BaseScore = rec.BaseScore
+			brief.Bonus = rec.Bonus
+			brief.Penalty = rec.Penalty
+			brief.Evidence = rec.Evidence
 			if rec.Degraded {
 				overview.DegradedTurns++
 			} else {
@@ -591,12 +602,28 @@ func summary(turn session.Turn, rec *evaluation.Record, maxResultRunes int) Turn
 			Depth:       turn.Depth,
 			Question:    truncateRunes(turn.Question, 120),
 			Score:       rec.WeightedScore,
+			Scores:      dimensionScores(rec.Scores),
+			BaseScore:   rec.BaseScore,
+			Bonus:       rec.Bonus,
+			Penalty:     rec.Penalty,
+			Evidence:    rec.Evidence,
 			Degraded:    rec.Degraded,
 			Missing:     len(rec.MissingPoints),
 			MissingList: clean(rec.MissingPoints),
 		},
 		AnswerExcerpt: truncateRunes(turn.AnswerText, answerCap),
 	}
+}
+
+func dimensionScores(in map[evaluation.Dimension]int) map[string]int {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]int, len(in))
+	for dimension, score := range in {
+		out[string(dimension)] = score
+	}
+	return out
 }
 
 func addWeakTopic(out map[string]float64, topic string, score float64) {

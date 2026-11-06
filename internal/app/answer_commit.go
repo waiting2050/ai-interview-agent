@@ -307,13 +307,20 @@ func appendEvaluationEvent(
 			"raw_output": truncateRaw(outcome.RawOutput, 800),
 		})
 	}
+	breakdown := evaluation.ComputeScore(rec.Scores, rec.Bonus, rec.Penalty)
 	return appendEvent(ctx, log, events, sessionID, runID, session.EventEvaluationDone, map[string]any{
 		"turn_id":        turnID,
 		"base_score":     rec.BaseScore,
 		"total_score":    rec.WeightedScore,
 		"scores":         rec.Scores,
-		"confidence":     rec.Confidence,
+		"bonus":          rec.Bonus,
+		"penalty":        rec.Penalty,
+		"bonus_points":   breakdown.Bonus,
+		"penalty_points": breakdown.Penalty,
+		"evidence":       rec.Evidence,
 		"missing_points": rec.MissingPoints,
+		"followup":       outcome.Result.Followup,
+		"confidence":     rec.Confidence,
 		"model":          rec.ModelName,
 		"prompt_version": rec.PromptVersion,
 	})

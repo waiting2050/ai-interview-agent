@@ -22,8 +22,18 @@ type DimensionScore struct {
 
 // Evidence quotes one answer fragment the review is based on.
 type Evidence struct {
-	TurnID string `json:"turn_id"`
+	TurnID    string `json:"turn_id"`
+	Dimension string `json:"dimension,omitempty"`
+	Quote     string `json:"quote"`
+	Reason    string `json:"reason,omitempty"`
+}
+
+// ScoreAdjustment is one bonus or penalty entry with its evidence quote. The
+// demo renders the scoring arithmetic from these fields.
+type ScoreAdjustment struct {
+	Type   string `json:"type"`
 	Quote  string `json:"quote"`
+	Points int    `json:"points"`
 	Reason string `json:"reason,omitempty"`
 }
 
@@ -31,18 +41,22 @@ type Evidence struct {
 // weighted score (0-100); degraded evaluations keep Degraded=true and are
 // excluded from aggregates.
 type QuestionReview struct {
-	TurnID        string     `json:"turn_id"`
-	Seq           int        `json:"seq"`
-	Topic         string     `json:"topic"`
-	Kind          string     `json:"kind"`
-	Depth         int        `json:"depth"`
-	Question      string     `json:"question"`
-	Score         float64    `json:"score"`
-	Degraded      bool       `json:"degraded,omitempty"`
-	Comment       string     `json:"comment,omitempty"`
-	StrongPoints  []string   `json:"strong_points,omitempty"`
-	MissingPoints []string   `json:"missing_points,omitempty"`
-	Evidence      []Evidence `json:"evidence,omitempty"`
+	TurnID        string            `json:"turn_id"`
+	Seq           int               `json:"seq"`
+	Topic         string            `json:"topic"`
+	Kind          string            `json:"kind"`
+	Depth         int               `json:"depth"`
+	Question      string            `json:"question"`
+	Score         float64           `json:"score"`
+	Scores        map[string]int    `json:"scores,omitempty"`
+	BaseScore     float64           `json:"base_score,omitempty"`
+	Bonus         []ScoreAdjustment `json:"bonus,omitempty"`
+	Penalty       []ScoreAdjustment `json:"penalty,omitempty"`
+	Degraded      bool              `json:"degraded,omitempty"`
+	Comment       string            `json:"comment,omitempty"`
+	StrongPoints  []string          `json:"strong_points,omitempty"`
+	MissingPoints []string          `json:"missing_points,omitempty"`
+	Evidence      []Evidence        `json:"evidence,omitempty"`
 }
 
 // Section is one progressively emitted report block. Sections are also

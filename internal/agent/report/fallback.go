@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/waiting2050/ai-interview-agent/internal/agent/tools"
+	"github.com/waiting2050/ai-interview-agent/internal/domain/evaluation"
 	domain "github.com/waiting2050/ai-interview-agent/internal/domain/report"
 )
 
@@ -37,6 +38,7 @@ func Fallback(ev tools.Bundle, now time.Time) domain.Report {
 		out.Dimensions = append(out.Dimensions, domain.DimensionScore{
 			Dimension: dim.Dimension,
 			Score:     dim.Score,
+			Weight:    evaluation.Weights[evaluation.Dimension(dim.Dimension)],
 			Comment:   dimensionComment(dim.Dimension, dim.Score),
 		})
 	}
@@ -50,8 +52,20 @@ func Fallback(ev tools.Bundle, now time.Time) domain.Report {
 			Depth:         turn.Depth,
 			Question:      turn.Question,
 			Score:         turn.Score,
+			Scores:        turn.Scores,
+			BaseScore:     turn.BaseScore,
+			Bonus:         adjustments(turn.Bonus),
+			Penalty:       adjustments(turn.Penalty),
 			Degraded:      turn.Degraded,
 			MissingPoints: append([]string(nil), turn.MissingList...),
+		}
+		for _, e := range turn.Evidence {
+			review.Evidence = append(review.Evidence, domain.Evidence{
+				TurnID:    turn.TurnID,
+				Dimension: string(e.Dimension),
+				Quote:     e.Quote,
+				Reason:    e.Reason,
+			})
 		}
 		switch {
 		case turn.Degraded:
@@ -125,6 +139,22 @@ func dimensionExtremes(dims []tools.DimensionSummary) (tools.DimensionSummary, t
 		}
 	}
 	return best, worst, true
+}
+
+func adjustments(in []evaluation.Adjustment) []domain.ScoreAdjustment {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]domain.ScoreAdjustment, 0, len(in))
+	for _, a := range in {
+		out = append(out, domain.ScoreAdjustment{
+			Type:   a.Type,
+			Quote:  a.Quote,
+			Points: a.Points,
+			Reason: a.Reason,
+		})
+	}
+	return out
 }
 
 func dimensionComment(dimension string, score float64) string {
