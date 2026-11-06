@@ -17,6 +17,7 @@ import (
 	httpapi "github.com/waiting2050/ai-interview-agent/internal/api/http"
 	"github.com/waiting2050/ai-interview-agent/internal/app"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/jd"
+	"github.com/waiting2050/ai-interview-agent/internal/domain/review"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/config"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/jobfetch"
 	platformlock "github.com/waiting2050/ai-interview-agent/internal/platform/lock"
@@ -154,6 +155,7 @@ func run() error {
 				}
 				return jd.Fetched{URL: result.URL, Text: result.Text, FetchedAt: result.FetchedAt}, nil
 			}),
+			Reviewer: review.New(store.Repos().Reviews),
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}

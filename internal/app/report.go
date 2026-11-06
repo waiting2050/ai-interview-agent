@@ -9,6 +9,7 @@ import (
 	"github.com/waiting2050/ai-interview-agent/internal/agent/tools"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/domainpack"
 	domainreport "github.com/waiting2050/ai-interview-agent/internal/domain/report"
+	"github.com/waiting2050/ai-interview-agent/internal/domain/review"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/session"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/idgen"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/reqctx"
@@ -348,6 +349,14 @@ func (r *Runner) commitReport(ctx context.Context, run *session.Run, outcome rep
 		}
 		if !created {
 			return repos.Runs.MarkFinished(ctx, run.ID, session.RunStatusSucceeded, "", now)
+		}
+
+		// M11: weak points become review cards in the same transaction that
+		// persists the report. Card creation is deterministic and model-free.
+		if cards := review.BuildCards(sess.ID, &doc, now); len(cards) > 0 {
+			if err := repos.Reviews.SaveMany(ctx, cards); err != nil {
+				return fmt.Errorf("persist review cards: %w", err)
+			}
 		}
 
 		for _, section := range doc.Sections {

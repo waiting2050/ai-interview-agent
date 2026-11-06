@@ -1059,7 +1059,7 @@ data: {"event_id":43,"session_id":"01H...","run_id":"01H...","type":"question.as
 - 边界：AI 助手仅做接口占位与 UI 入口，不接真实模型。
 - 验收：规则表单测覆盖典型组合与边界；API 返回来源字段；前端能显示并尊重 manual 覆盖。
 
-### M11 复习与间隔重复（计划，R3 后按 M9 → M12 → M13 → M14 顺序实施）
+### M11 复习与间隔重复（已完成）
 
 - 理由：一次面试的价值应在面试后延续；把低分点变成可复习卡片，形成「面试 → 复习 → 再测」闭环。
 - 复习卡生成：每场面试结束时，用 `missing_points` 与低分维度确定性拼装复习卡（考点 / 用户当时的答法摘要 / 标准要点 / 来源 `turn_id`），不调用模型；模型生成留可选开关。
@@ -1069,6 +1069,15 @@ data: {"event_id":43,"session_id":"01H...","run_id":"01H...","type":"question.as
 - 前端：首页/侧栏「今天该复习 N 张」入口；复习页正面 → 展开答案 → 自评 0–5 → 下一张；报告页增加「遗忘曲线预测」小图（按 SM-2 到期曲线绘制）。
 - 分层：算法放 `domain`，仓储接口放 `ports`，实现放 `store`，HTTP 放 `api`；前端继续单页原生实现。
 - 验收：排程单测覆盖 0/3/5 三种评分对应的间隔与 ease 变化、多次复习累积、到期计算与时区边界；接口测试覆盖 due 为空、正常提交、非法 grade 拒绝。
+
+**M11 实现记录（已完成）**
+
+- 卡片生成：`internal/domain/review/review.go` 的 `BuildCards` 在报告提交的同一事务内执行，从 `missing_points` 与每题最低维度确定性拼装卡片；`degraded` 题跳过；高分且无缺口与弱项（各维度 > 2）的题不生成。卡片保存考点、题目、答法摘要（优先取该维度 evidence 原文）、标准要点、来源 `turn_id`，全程不调用模型。
+- 排程：SM-2，初始 `ease_factor=2.5`；`GradeCard` 按 0–5 更新 EF（下限 1.3）、重复次数与间隔（1 / 6 / 上次间隔 × EF），grade<3 归零重来；返回并持久化 `Calculation`（前后 EF、间隔、次数、下次到期与公式文本），便于面试讲解。
+- 存储：`migrations/0007_m11.sql` 建 `review_cards`（`key_points` / `last_calculation` 为 JSONB，`(session_id, turn_id, topic)` 唯一索引保证重放不重复），`ports.ReviewRepository` + PostgreSQL 与内存实现；报告提交复用 `SaveMany`，重复插入 `ON CONFLICT DO NOTHING` 保留原排程。
+- 接口：`GET /v1/review/due`（`tz_offset_minutes` 默认 480，按调用方本地日结束时间过滤）、`GET /v1/review?session_id=`、`GET /v1/review/{id}`、`POST /v1/review/{id}/grade`（缺省/越界 grade 返回 400）、`GET /v1/review/{id}/retest`（按 `repetitions` 轮换三种规则问法，`model_called=false`）。
+- 前端：顶栏「今天该复习 N 张」入口；复习面板按「正面 → 展开参考答案 → 自评 0–5 → 下一张」推进，评分后提示新的 EF / 间隔 / 到期日；报告图表区新增「遗忘曲线预测」（SM-2 间隔 1/6/15/38/95/237 天）。
+- 测试：`internal/domain/review/review_test.go` 覆盖 0/3/5 评分、失败重置、EF 下限、多次累积、时区边界（15:59Z 属于当日、16:01Z 属于次日）与卡片生成/换问法轮换；`internal/api/http/review_test.go` 覆盖 due 为空、非法 grade 400、正常评分与排程、列表、404 与未启用 503。
 
 ### M12 简历诊断：评分 + 优化建议（计划，规则版先行）
 

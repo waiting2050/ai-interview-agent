@@ -22,6 +22,8 @@ type Deps struct {
 	// JDAnalyzer backs POST /v1/jd/analyze, GET /v1/jd/{id} and the M16
 	// application kit. Nil disables those routes with 503.
 	JDAnalyzer ports.JDAnalyzer
+	// Reviewer backs the M11 spaced-repetition routes. Nil disables them with 503.
+	Reviewer ports.Reviewer
 }
 
 // NewRouter wires the HTTP surface: health, metrics, session commands, answers
@@ -46,6 +48,11 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("POST /v1/jd/analyze", h.analyzeJD)
 	mux.HandleFunc("GET /v1/jd/{id}", h.getJD)
 	mux.HandleFunc("POST /v1/jd/{id}/kit", h.generateApplyKit)
+	mux.HandleFunc("GET /v1/review/due", h.listDueReviews)
+	mux.HandleFunc("GET /v1/review", h.listReviews)
+	mux.HandleFunc("GET /v1/review/{id}", h.getReview)
+	mux.HandleFunc("GET /v1/review/{id}/retest", h.retestReview)
+	mux.HandleFunc("POST /v1/review/{id}/grade", h.gradeReview)
 	mux.HandleFunc("GET /v1/domains", h.listDomains)
 	mux.HandleFunc("POST /v1/sessions", h.createSession)
 	mux.HandleFunc("GET /v1/sessions/{id}", h.getSession)

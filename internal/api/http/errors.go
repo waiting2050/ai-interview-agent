@@ -7,6 +7,7 @@ import (
 	"github.com/waiting2050/ai-interview-agent/internal/app"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/jd"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/resume"
+	"github.com/waiting2050/ai-interview-agent/internal/domain/review"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/session"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/reqctx"
 	"github.com/waiting2050/ai-interview-agent/internal/ports"
@@ -133,6 +134,17 @@ func (h *handlers) writeError(w http.ResponseWriter, r *http.Request, err error)
 		body.Details = map[string]any{"error": err.Error()}
 		body.Retryable = true
 		writeJSON(w, http.StatusBadGateway, body)
+
+	case errors.Is(err, review.ErrInvalidGrade), errors.Is(err, review.ErrInvalidArgument):
+		body.Code = "invalid_argument"
+		body.Message = err.Error()
+		body.Details = map[string]any{"grade_range": []int{0, 5}}
+		writeJSON(w, http.StatusBadRequest, body)
+
+	case errors.Is(err, review.ErrNotFound):
+		body.Code = "review_card_not_found"
+		body.Message = "复习卡不存在"
+		writeJSON(w, http.StatusNotFound, body)
 
 	default:
 		h.deps.Logger.Error("http handler error", "request_id", body.RequestID, "error", err)

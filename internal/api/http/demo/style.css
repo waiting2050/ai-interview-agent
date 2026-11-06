@@ -1442,3 +1442,34 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
   * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
   html { scroll-behavior: auto; }
 }
+
+/* ---------- M11 spaced repetition ---------- */
+.review-entry { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; }
+.review-entry b { color: #3452e1; }
+.review-entry.has-due { border-color: #3452e1; color: #3452e1; }
+.review-panel { margin-top: 20px; }
+.review-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.review-head h2 { margin: 0; font-size: 16px; }
+.review-head .spacer { flex: 1; }
+.review-card { border: 1px solid #e3e9f3; border-radius: 12px; padding: 18px 20px; background: #fff; }
+.review-kicker { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.review-question { font-size: 16px; line-height: 1.65; font-weight: 600; color: #24324a; }
+.review-answer { margin: 12px 0 8px; }
+.review-answer summary { cursor: pointer; color: #3452e1; font-size: 13px; }
+.review-answer ul { margin: 8px 0 0; padding-left: 20px; line-height: 1.7; }
+.review-answer p { margin: 4px 0 0; line-height: 1.7; color: #24324a; }
+.review-retest { margin: 10px 0; padding: 10px 12px; background: #f6f8fc; border-radius: 8px; line-height: 1.7; }
+.grade-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+.grade-btn { width: 36px; height: 36px; border-radius: 50%; border: 1px solid #d5dfec; background: #fff; font-weight: 600; color: #24324a; cursor: pointer; }
+.grade-btn:hover:not(:disabled) { border-color: #3452e1; color: #3452e1; }
+.grade-btn:disabled { opacity: .5; cursor: wait; }
+.review-actions { display: flex; gap: 10px; margin-top: 12px; }
+.review-done { padding: 22px; text-align: center; line-height: 1.7; }
+.fc-bar { fill: #8fa3c8; }
+.fc-value { font-size: 11px; fill: #24324a; }
+.fc-label { font-size: 12px; fill: #5b6b82; }
+@media (max-width: 720px) {
+  .review-head { flex-wrap: wrap; }
+  .review-kicker { font-size: 12px; }
+  .grade-btn { width: 32px; height: 32px; }
+}

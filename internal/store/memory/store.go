@@ -15,6 +15,7 @@ import (
 	"github.com/waiting2050/ai-interview-agent/internal/domain/evaluation"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/jd"
 	domainreport "github.com/waiting2050/ai-interview-agent/internal/domain/report"
+	"github.com/waiting2050/ai-interview-agent/internal/domain/review"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/session"
 	"github.com/waiting2050/ai-interview-agent/internal/ports"
 )
@@ -32,6 +33,8 @@ type Store struct {
 	evals      map[string]*evaluation.Record   // turnID
 	reports    map[string]*domainreport.Record // sessionID
 	jdListings map[string]*jd.Listing          // listing id
+	reviewKeys map[string]string               // sessionID|turnID|topic -> cardID
+	reviews    map[string]*review.Card         // card id
 	subs       map[string]map[chan struct{}]struct{}
 
 	eventSeq int64
@@ -55,6 +58,8 @@ func New() *Store {
 		evals:      map[string]*evaluation.Record{},
 		reports:    map[string]*domainreport.Record{},
 		jdListings: map[string]*jd.Listing{},
+		reviewKeys: map[string]string{},
+		reviews:    map[string]*review.Card{},
 		subs:       map[string]map[chan struct{}]struct{}{},
 	}
 	s.repos = ports.Repositories{
@@ -67,6 +72,7 @@ func New() *Store {
 		Evaluations: &evaluationRepo{s: s},
 		Reports:     &reportRepo{s: s},
 		JDs:         &jdRepo{s: s},
+		Reviews:     &reviewRepo{s: s},
 	}
 	return s
 }
@@ -559,4 +565,96 @@ func (r *jdRepo) Get(_ context.Context, id string) (*jd.Listing, error) {
 	}
 	cp := *listing
 	return &cp, nil
+}
+
+type reviewRepo struct{ s *Store }
+
+func (r *reviewRepo) SaveMany(_ context.Context, cards []*review.Card) error {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	for _, card := range cards {
+		key := card.SessionID + "|" + card.TurnID + "|" + card.Topic
+		if existing, ok := r.s.reviewKeys[key]; ok {
+			// Mirrors ON CONFLICT DO NOTHING: an existing schedule wins.
+			if _, found := r.s.reviews[existing]; found {
+				continue
+			}
+		}
+		r.s.reviewKeys[key] = card.ID
+		r.s.reviews[card.ID] = cloneReviewCard(card)
+	}
+	return nil
+}
+
+func (r *reviewRepo) Get(_ context.Context, id string) (*review.Card, error) {
+	r.s.mu.RLock()
+	defer r.s.mu.RUnlock()
+	card, ok := r.s.reviews[id]
+	if !ok {
+		return nil, review.ErrNotFound
+	}
+	return cloneReviewCard(card), nil
+}
+
+func (r *reviewRepo) ListBySession(_ context.Context, sessionID string) ([]*review.Card, error) {
+	r.s.mu.RLock()
+	defer r.s.mu.RUnlock()
+	cards := make([]*review.Card, 0)
+	for _, card := range r.s.reviews {
+		if card.SessionID == sessionID {
+			cards = append(cards, cloneReviewCard(card))
+		}
+	}
+	sort.Slice(cards, func(i, j int) bool {
+		if cards[i].CreatedAt.Equal(cards[j].CreatedAt) {
+			return cards[i].ID < cards[j].ID
+		}
+		return cards[i].CreatedAt.Before(cards[j].CreatedAt)
+	})
+	return cards, nil
+}
+
+func (r *reviewRepo) ListDue(_ context.Context, before time.Time, limit int) ([]*review.Card, error) {
+	r.s.mu.RLock()
+	defer r.s.mu.RUnlock()
+	cards := make([]*review.Card, 0)
+	for _, card := range r.s.reviews {
+		if card.DueAt.Before(before) {
+			cards = append(cards, cloneReviewCard(card))
+		}
+	}
+	sort.Slice(cards, func(i, j int) bool {
+		if cards[i].DueAt.Equal(cards[j].DueAt) {
+			return cards[i].ID < cards[j].ID
+		}
+		return cards[i].DueAt.Before(cards[j].DueAt)
+	})
+	if limit > 0 && len(cards) > limit {
+		cards = cards[:limit]
+	}
+	return cards, nil
+}
+
+func (r *reviewRepo) Update(_ context.Context, card *review.Card) error {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	if _, ok := r.s.reviews[card.ID]; !ok {
+		return review.ErrNotFound
+	}
+	r.s.reviews[card.ID] = cloneReviewCard(card)
+	return nil
+}
+
+func cloneReviewCard(card *review.Card) *review.Card {
+	cp := *card
+	cp.KeyPoints = append([]string(nil), card.KeyPoints...)
+	if card.LastReviewedAt != nil {
+		at := *card.LastReviewedAt
+		cp.LastReviewedAt = &at
+	}
+	if card.LastCalculation != nil {
+		calc := *card.LastCalculation
+		cp.LastCalculation = &calc
+	}
+	return &cp
 }

@@ -16,6 +16,7 @@
     </div>
   </div>
   <div class="topbar-meta">
+    <button id="review-entry" class="ghost review-entry" type="button" hidden>今天该复习 <b id="review-due-count">0</b> 张</button>
     <span id="model-hint" class="pill muted">heuristic 模式可直接演示</span>
   </div>
 </header>
@@ -208,6 +209,16 @@
     <div id="run-info-body" class="run-info-body"></div>
   </details>
   <div id="report-sections" class="report-sections"></div>
+</section>
+
+<section id="review-panel" class="panel review-panel" hidden>
+  <div class="review-head">
+    <h2>今日复习</h2>
+    <span id="review-status" class="muted"></span>
+    <span class="spacer"></span>
+    <button id="review-close" class="ghost" type="button">关闭</button>
+  </div>
+  <div id="review-body" class="review-body"></div>
 </section>
 
 <footer class="footer">

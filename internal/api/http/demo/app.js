@@ -220,6 +220,11 @@
   const stepperTrack = $("stepper-track");
   const stepperCompact = $("stepper-compact");
   const stepperHint = $("stepper-hint");
+  const reviewPanel = $("review-panel");
+  const reviewBody = $("review-body");
+  const reviewStatus = $("review-status");
+  const reviewEntry = $("review-entry");
+  const reviewDueCount = $("review-due-count");
 
   let uid = 0;
 
@@ -1340,6 +1345,31 @@
     return `<svg viewBox="0 0 ${width} ${height}" width="100%" role="img" aria-label="逐题得分趋势">${rows}</svg>`;
   }
 
+  // SM-2 interval progression for a card answered correctly each time with
+  // EF 2.5: 1, 6, 15, 38, 95, 237 days. Pure rule arithmetic, no model.
+  function forgettingCurveSvg() {
+    const intervals = [1, 6, 15, 38, 95, 237];
+    const width = 880;
+    const height = 132;
+    const left = 46;
+    const bottom = 28;
+    const plotW = width - left * 2;
+    const plotH = height - bottom - 14;
+    const step = plotW / intervals.length;
+    const barW = step - 18;
+    const max = intervals[intervals.length - 1];
+    const bars = intervals.map((days, i) => {
+      const h = Math.max(4, (plotH * days) / max);
+      const x = left + i * step + 9;
+      const y = height - bottom - h;
+      return `<rect class="fc-bar" x="${x}" y="${y}" width="${barW}" height="${h}" rx="4"/>` +
+        `<text class="fc-value" x="${x + barW / 2}" y="${y - 5}" text-anchor="middle">${days}天</text>` +
+        `<text class="fc-label" x="${x + barW / 2}" y="${height - 9}" text-anchor="middle">第${i + 1}次</text>`;
+    }).join("");
+    return `<svg viewBox="0 0 ${width} ${height}" width="100%" role="img" aria-label="遗忘曲线预测">${bars}</svg>` +
+      `<div class="ring-caption">SM-2 预测：每次自评 4–5 分时的复习间隔（1 / 6 / 15 / 38 / 95 / 237 天）</div>`;
+  }
+
   function renderReportHero(structured, questions) {
     const score = Number(structured.overall_score || 0);
     const total = questions.length;
@@ -1357,7 +1387,8 @@
       `<div class="chart-card"><div class="chart-title">总分进度</div>${ringSvg(score)}` +
       `<div class="ring-caption">加权总分 · ${escapeHtml(structured.score_band || bandLabel(score))}</div></div>` +
       `<div class="chart-card"><div class="chart-title">维度雷达</div>${radarSvg(structured.dimensions || [])}</div>` +
-      `<div class="chart-card wide"><div class="chart-title">逐题得分趋势</div>${trendSvg(questions)}</div>`;
+      `<div class="chart-card wide"><div class="chart-title">逐题得分趋势</div>${trendSvg(questions)}</div>` +
+      `<div class="chart-card wide"><div class="chart-title">遗忘曲线预测</div>${forgettingCurveSvg()}</div>`;
   }
 
   function renderRunInfo(cost) {
@@ -1525,6 +1556,7 @@
       reportCharts.appendChild(banner);
     }
     refreshClamps();
+    refreshReviewEntry();
     if (scroll) {
       reportPanel.scrollIntoView({ behavior: "smooth", block: "start" });
     }
@@ -1625,6 +1657,144 @@
     refreshClamps();
   }
 
+
+  // ---------- M11 review (spaced repetition) ----------
+
+  // tz_offset_minutes is minutes east of UTC; JS returns the opposite sign.
+  const REVIEW_TZ_OFFSET = -new Date().getTimezoneOffset() || 480;
+  let reviewCards = [];
+  let reviewIndex = 0;
+
+  function reviewTzOffset() {
+    return REVIEW_TZ_OFFSET;
+  }
+
+  function formatReviewDue(value) {
+    const d = new Date(value);
+    if (isNaN(d.getTime())) {
+      return "今天";
+    }
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${mm}/${dd}`;
+  }
+
+  function gradeLabel(grade) {
+    return ["完全忘记", "几乎想不起", "勉强回忆", "想起要点", "比较熟练", "秒答"][grade] || String(grade);
+  }
+
+  async function refreshReviewEntry() {
+    if (state.sampleMode) {
+      return;
+    }
+    try {
+      const due = await api(`/v1/review/due?tz_offset_minutes=${reviewTzOffset()}&limit=1`);
+      const count = Number(due.count || 0);
+      reviewDueCount.textContent = String(count);
+      reviewEntry.hidden = false;
+      reviewEntry.classList.toggle("has-due", count > 0);
+      reviewEntry.title = count > 0 ? "点击开始今日复习" : "今天没有到期卡片";
+    } catch (err) {
+      // Review can be disabled (503) or unavailable in a minimal deployment.
+      reviewEntry.hidden = true;
+    }
+  }
+
+  async function openReview() {
+    reviewPanel.hidden = false;
+    reviewStatus.textContent = "正在加载…";
+    reviewBody.innerHTML = "";
+    try {
+      const due = await api(`/v1/review/due?tz_offset_minutes=${reviewTzOffset()}&limit=50`);
+      reviewCards = Array.isArray(due.cards) ? due.cards : [];
+      reviewIndex = 0;
+      renderReviewCard();
+    } catch (err) {
+      reviewStatus.textContent = "加载失败";
+      reviewBody.innerHTML = `<div class="notice warn">${escapeHtml(humanError(err))}</div>`;
+    }
+    reviewPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function renderReviewCard() {
+    if (reviewIndex >= reviewCards.length) {
+      reviewStatus.textContent = "今日复习完成";
+      reviewBody.innerHTML =
+        `<div class="review-done"><strong>今天的卡片已复习完</strong>` +
+        `<p class="muted">评分已写回 SM-2 排程，下次到期时会重新出现在这里。</p></div>`;
+      refreshReviewEntry();
+      return;
+    }
+    const card = reviewCards[reviewIndex];
+    const reps = Number(card.repetitions || 0);
+    reviewStatus.textContent = `第 ${reviewIndex + 1} / ${reviewCards.length} 张 · 到期 ${formatReviewDue(card.due_at)}`;
+    const points = (card.key_points || []).map((p) => `<li>${escapeHtml(p)}</li>`).join("");
+    reviewBody.innerHTML =
+      `<article class="review-card" data-card-id="${escapeHtml(card.id)}">` +
+      `<div class="review-kicker"><span class="chip primary">${escapeHtml(card.topic || "复习卡")}</span>` +
+      (card.dimension ? `<span class="chip">${escapeHtml(card.dimension)}</span>` : "") +
+      `<span class="muted">第 ${reps + 1} 次复习 · EF ${Number(card.ease_factor || 2.5).toFixed(2)}</span></div>` +
+      `<div class="review-question">${escapeHtml(card.question || "")}</div>` +
+      `<details class="review-answer"><summary>展开参考答案</summary>` +
+      (card.answer_digest ? `<div class="calc-label">你当时的答法</div><p>${escapeHtml(card.answer_digest)}</p>` : "") +
+      `<div class="calc-label">标准要点</div><ul>${points || "<li>补齐核心机制与边界条件</li>"}</ul>` +
+      `</details>` +
+      `<div class="review-retest" hidden></div>` +
+      `<div class="grade-row"><span class="muted">回忆质量 0–5：</span>` +
+      [0, 1, 2, 3, 4, 5].map((g) =>
+        `<button class="grade-btn" type="button" data-grade="${g}" title="${gradeLabel(g)}">${g}</button>`).join("") +
+      `</div>` +
+      `<div class="review-actions">` +
+      `<button class="ghost" type="button" data-review-action="retest">换问法再测</button>` +
+      `<button class="ghost" type="button" data-review-action="skip">稍后再复习</button>` +
+      `</div>` +
+      `</article>`;
+  }
+
+  async function gradeReview(grade) {
+    const card = reviewCards[reviewIndex];
+    if (!card) {
+      return;
+    }
+    const buttons = reviewBody.querySelectorAll(".grade-btn");
+    buttons.forEach((btn) => { btn.disabled = true; });
+    try {
+      const result = await api(`/v1/review/${encodeURIComponent(card.id)}/grade`, {
+        method: "POST",
+        body: JSON.stringify({ grade }),
+      });
+      const calc = result.calculation || {};
+      reviewCards[reviewIndex] = result.card || card;
+      showNotice("ok",
+        `已排程：EF ${Number(calc.new_ease || 0).toFixed(2)}，间隔 ${calc.new_interval_days} 天，下次 ${formatReviewDue(calc.due_at)}`,
+        { key: "review-grade", timeout: 2400 });
+      reviewIndex += 1;
+      renderReviewCard();
+    } catch (err) {
+      buttons.forEach((btn) => { btn.disabled = false; });
+      showNotice("error", "复习评分失败：" + humanError(err), { key: "review-grade" });
+    }
+  }
+
+  async function showReviewRetest() {
+    const card = reviewCards[reviewIndex];
+    if (!card) {
+      return;
+    }
+    const box = reviewBody.querySelector(".review-retest");
+    if (!box) {
+      return;
+    }
+    try {
+      const retest = await api(`/v1/review/${encodeURIComponent(card.id)}/retest`);
+      box.hidden = false;
+      box.innerHTML =
+        `<div class="calc-label">换问法（规则生成，未调用模型）</div>` +
+        `<p>${escapeHtml(retest.question || "")}</p>`;
+    } catch (err) {
+      showNotice("error", "换问法失败：" + humanError(err), { key: "review-retest" });
+    }
+  }
 
   // ---------- resume attachment (local parsing only) ----------
 
@@ -2452,6 +2622,33 @@
   });
   submitBtn.addEventListener("click", submitAnswer);
   finishBtn.addEventListener("click", finishInterview);
+
+  reviewEntry.addEventListener("click", openReview);
+  $("review-close").addEventListener("click", () => {
+    reviewPanel.hidden = true;
+  });
+  reviewPanel.addEventListener("click", (event) => {
+    const gradeBtn = event.target.closest("[data-grade]");
+    if (gradeBtn) {
+      gradeReview(Number(gradeBtn.getAttribute("data-grade")));
+      return;
+    }
+    const actionBtn = event.target.closest("[data-review-action]");
+    if (!actionBtn) {
+      return;
+    }
+    const action = actionBtn.getAttribute("data-review-action");
+    if (action === "retest") {
+      showReviewRetest();
+    } else if (action === "skip") {
+      reviewIndex += 1;
+      renderReviewCard();
+    } else if (action === "close") {
+      reviewPanel.hidden = true;
+    }
+  });
+  refreshReviewEntry();
+
   document.addEventListener("toggle", refreshClamps, true);
   document.addEventListener("click", (event) => {
     const btn = event.target.closest("[data-expand]");

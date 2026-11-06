@@ -12,6 +12,7 @@ import (
 	"github.com/waiting2050/ai-interview-agent/internal/domain/evaluation"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/jd"
 	domainreport "github.com/waiting2050/ai-interview-agent/internal/domain/report"
+	"github.com/waiting2050/ai-interview-agent/internal/domain/review"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/session"
 )
 
@@ -105,6 +106,25 @@ type JDAnalyzer interface {
 	Get(ctx context.Context, id string) (*jd.Listing, error)
 }
 
+// ReviewRepository persists M11 spaced-repetition cards and their SM-2 state.
+type ReviewRepository interface {
+	SaveMany(ctx context.Context, cards []*review.Card) error
+	Get(ctx context.Context, id string) (*review.Card, error)
+	ListBySession(ctx context.Context, sessionID string) ([]*review.Card, error)
+	ListDue(ctx context.Context, before time.Time, limit int) ([]*review.Card, error)
+	Update(ctx context.Context, card *review.Card) error
+}
+
+// Reviewer is the M11 review workflow used by the HTTP layer. Card generation
+// and scheduling are deterministic rule code and never call a model.
+type Reviewer interface {
+	Due(ctx context.Context, tzOffsetMinutes, limit int) (review.DueResult, error)
+	ListBySession(ctx context.Context, sessionID string) ([]*review.Card, error)
+	Get(ctx context.Context, id string) (*review.Card, error)
+	Grade(ctx context.Context, id string, grade int) (*review.GradeResult, error)
+	Retest(ctx context.Context, id string) (*review.Retest, error)
+}
+
 // Repositories is the set of repositories bound to either the pool or an
 // active transaction.
 type Repositories struct {
@@ -117,6 +137,7 @@ type Repositories struct {
 	Evaluations EvaluationRepository
 	Reports     ReportRepository
 	JDs         JDRepository
+	Reviews     ReviewRepository
 }
 
 // Store is the runtime persistence boundary. Repos returns repositories bound
