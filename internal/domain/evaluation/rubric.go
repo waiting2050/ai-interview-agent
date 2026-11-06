@@ -182,6 +182,29 @@ func isValidDimension(d Dimension) bool {
 	return ok
 }
 
+// UniqueEvidence collapses repeated quotes while keeping the first annotated
+// dimension. The heuristic evaluator cites one quote per expected point, so a
+// single answer fragment can otherwise appear several times in the same record.
+func UniqueEvidence(in []Evidence) []Evidence {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := make([]Evidence, 0, len(in))
+	for _, e := range in {
+		key := normalize(e.Quote)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, e)
+	}
+	return out
+}
+
 // Band maps a 0-100 weighted total to the coarse band used by the scoring
 // regression set: 1 covers the 1-2 range, 3 the 3 range, 5 the 4-5 range.
 // The cut points follow the rubric scale: 50 is a uniform 2.5, 80 a uniform 4.

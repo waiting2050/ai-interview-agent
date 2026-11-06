@@ -103,21 +103,36 @@
     </div>
 
     <div id="notices" class="notices" aria-live="polite"></div>
-    <div id="thread" class="thread">
+
+    <div id="focus" class="focus">
       <div class="empty-state" id="empty-state">
         <div class="empty-icon">🎤</div>
         <p>左侧填写岗位信息并开始，首题会通过 SSE 实时推送。</p>
       </div>
+
+      <article id="current-question" class="current-question" hidden></article>
+
+      <div id="answer-box" class="answer-box" hidden>
+        <div id="answer-context" class="answer-context"></div>
+        <textarea id="answer-input" rows="5" placeholder="用 STAR 结构作答：背景 → 方案 → 取舍 → 结果与量化指标"></textarea>
+        <div class="answer-actions">
+          <button id="submit-answer" class="primary" type="button">提交作答</button>
+          <span id="answer-tip" class="muted">提交后评估通过 SSE 实时返回</span>
+        </div>
+      </div>
+
+      <div id="result-slot" class="result-slot"></div>
     </div>
 
-    <div id="answer-box" class="answer-box" hidden>
-      <div id="answer-context" class="answer-context"></div>
-      <textarea id="answer-input" rows="5" placeholder="用 STAR 结构作答：背景 → 方案 → 取舍 → 结果与量化指标"></textarea>
-      <div class="answer-actions">
-        <button id="submit-answer" class="primary" type="button">提交作答</button>
-        <span id="answer-tip" class="muted">提交后评估通过 SSE 实时返回</span>
-      </div>
-    </div>
+    <details id="history-block" class="fold-block" hidden>
+      <summary><span>历史问答</span><span id="history-count" class="fold-count">0</span></summary>
+      <div id="history-body" class="fold-body"></div>
+    </details>
+
+    <details id="event-details" class="fold-block" hidden>
+      <summary><span>实时事件流</span><span id="event-count" class="fold-count">0</span></summary>
+      <div id="event-body" class="fold-body"></div>
+    </details>
 
     <div id="finish-bar" class="finish-bar" hidden>
       <button id="finish-btn" class="secondary" type="button">结束面试并生成报告</button>
@@ -132,6 +147,11 @@
     <div id="report-status" class="muted">正在生成…</div>
   </div>
   <div id="report-meta" class="report-meta"></div>
+  <div id="report-charts" class="report-charts"></div>
+  <details id="run-info" class="run-info" hidden>
+    <summary>运行信息 · 模型调用与 Token</summary>
+    <div id="run-info-body" class="run-info-body"></div>
+  </details>
   <div id="report-sections" class="report-sections"></div>
 </section>
 

@@ -266,7 +266,7 @@ func buildEvaluationRecord(snap AnswerSnapshot, outcome interview.Outcome, now t
 		Scores:        outcome.Result.Scores,
 		Bonus:         outcome.Result.Bonus,
 		Penalty:       outcome.Result.Penalty,
-		Evidence:      outcome.Result.Evidence,
+		Evidence:      evaluation.UniqueEvidence(outcome.Result.Evidence),
 		MissingPoints: outcome.Result.MissingPoints,
 		Confidence:    outcome.Result.Confidence,
 		ModelName:     outcome.ModelName,

@@ -20,11 +20,6 @@
   const BONUS_CAP = 8;
   const PENALTY_CAP = -10;
   const DIM_LABEL = Object.fromEntries(DIMENSIONS);
-  const EMPTY_STATE_HTML =
-    '<div class="empty-state" id="empty-state">' +
-    '<div class="empty-icon">🎤</div>' +
-    "<p>左侧填写岗位信息并开始，首题会通过 SSE 实时推送。</p>" +
-    "</div>";
   const EVENT_TYPES = [
     "session.created", "session.started", "session.phase", "session.aborted", "session.completed",
     "session.failed", "question.asked", "answer.received", "evaluation.completed",
@@ -48,19 +43,37 @@
     followupsUsed: 0,
     timer: null,
     lastEvalCard: null,
+    eventCount: 0,
+    historyCount: 0,
+    reportSectionsOpen: {},
+    reviewOpen: {},
+    reportCost: null,
   };
 
-  const threadEl = $("thread");
   const noticesEl = $("notices");
+  const emptyState = $("empty-state");
+  const currentQuestionEl = $("current-question");
+  const resultSlotEl = $("result-slot");
   const answerBox = $("answer-box");
   const answerInput = $("answer-input");
   const submitBtn = $("submit-answer");
   const finishBar = $("finish-bar");
   const finishBtn = $("finish-btn");
+  const historyBlock = $("history-block");
+  const historyBody = $("history-body");
+  const historyCountEl = $("history-count");
+  const eventDetails = $("event-details");
+  const eventBody = $("event-body");
+  const eventCountEl = $("event-count");
   const reportPanel = $("report-panel");
   const reportStatus = $("report-status");
   const reportMeta = $("report-meta");
+  const reportCharts = $("report-charts");
   const reportSections = $("report-sections");
+  const runInfo = $("run-info");
+  const runInfoBody = $("run-info-body");
+
+  let uid = 0;
 
   // ---------- generic helpers ----------
 
@@ -191,13 +204,65 @@
     return head;
   }
 
-  function appendCard(el) {
-    const empty = $("empty-state");
-    if (empty) {
-      empty.remove();
+  function hideEmptyState() {
+    if (emptyState) {
+      emptyState.hidden = true;
     }
-    threadEl.appendChild(el);
-    el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  function appendEventCard(el) {
+    eventDetails.hidden = false;
+    eventBody.appendChild(el);
+    state.eventCount += 1;
+    eventCountEl.textContent = String(state.eventCount);
+  }
+
+  function appendResult(el) {
+    resultSlotEl.appendChild(el);
+    refreshClamps();
+  }
+
+  function clampHtml(text, lines) {
+    const raw = String(text == null ? "" : text);
+    const id = `clamp-${++uid}`;
+    return `<div class="clamp" style="--clamp-lines:${lines || 3}" id="${id}">${escapeHtml(raw)}</div>` +
+      (raw.length > 40 ? `<button type="button" class="expand-btn" data-expand="${id}" hidden>展开全文</button>` : "");
+  }
+
+  // Reveal "展开全文" only when the clamped block actually overflows. Closed
+  // <details> report zero height, so this also runs on every toggle.
+  function refreshClamps() {
+    requestAnimationFrame(() => {
+      document.querySelectorAll(".clamp:not(.is-expanded)").forEach((el) => {
+        const btn = document.querySelector(`[data-expand="${el.id}"]`);
+        if (btn && el.scrollHeight > el.clientHeight + 2) {
+          btn.hidden = false;
+        }
+      });
+    });
+  }
+
+  function archiveFocus() {
+    const hasQuestion = currentQuestionEl.firstChild;
+    const hasResult = resultSlotEl.firstChild;
+    if (!hasQuestion && !hasResult) {
+      return;
+    }
+    const wrap = document.createElement("div");
+    wrap.className = "history-item";
+    while (currentQuestionEl.firstChild) {
+      wrap.appendChild(currentQuestionEl.firstChild);
+    }
+    while (resultSlotEl.firstChild) {
+      wrap.appendChild(resultSlotEl.firstChild);
+    }
+    historyBody.appendChild(wrap);
+    historyBlock.hidden = false;
+    state.historyCount += 1;
+    historyCountEl.textContent = String(state.historyCount);
+    currentQuestionEl.hidden = true;
+    currentQuestionEl.innerHTML = "";
+    resultSlotEl.innerHTML = "";
   }
 
   function showNotice(kind, text, options) {
@@ -407,7 +472,7 @@
     body.className = "card-body muted";
     body.textContent = text;
     el.appendChild(body);
-    appendCard(el);
+    resultSlotEl.appendChild(el);
   }
 
   function removeThinking() {
@@ -499,7 +564,7 @@
         body.textContent = "作答超过长度上限，已截断后评估。";
         el.appendChild(body);
       }
-      appendCard(el);
+      appendEventCard(el);
       setStatus("正在评估作答", "running");
     },
     "evaluation.completed": onEvaluation,
@@ -518,7 +583,8 @@
     "report.completed": (p) => {
       reportPanel.hidden = false;
       reportStatus.textContent = "报告已生成";
-      renderReportMeta(p);
+      state.reportCost = p;
+      renderRunInfo(p);
       if (state.sessionId) {
         loadReport(3);
       }
@@ -548,28 +614,35 @@
   function onQuestion(p) {
     state.pendingTurn = p.turn_id;
     removeThinking();
+    archiveFocus();
+    hideEmptyState();
     const followup = Boolean(p.is_followup);
     if (!followup) {
       state.primaryAsked += 1;
     }
     setProgress();
     const total = state.config && state.config.max_primary_questions ? state.config.max_primary_questions : "?";
-    const el = card("card-question");
-    el.appendChild(cardHead(followup ? "追问" : `第 ${state.primaryAsked} / 共 ${total} 题`, [
-      { text: followup ? "追问" : "主问题", kind: followup ? "followup" : "primary" },
-      { text: `深度 ${p.depth || 1}` },
-    ]));
+
+    currentQuestionEl.innerHTML = "";
+    currentQuestionEl.hidden = false;
+    const head = document.createElement("div");
+    head.className = "q-head";
+    head.innerHTML =
+      `<span class="chip ${followup ? "followup" : "primary"}">${followup ? "追问" : "主问题"}</span>` +
+      `<span class="muted">第 ${state.primaryAsked} / 共 ${total} 题</span>` +
+      `<span class="muted">追问 ${state.followupsUsed} / ${state.config && state.config.max_total_followups != null ? state.config.max_total_followups : "?"}</span>` +
+      `<span class="muted">深度 ${p.depth || 1}</span>`;
+    currentQuestionEl.appendChild(head);
     if (p.topic) {
       const topic = document.createElement("div");
-      topic.className = "muted";
+      topic.className = "q-topic muted";
       topic.textContent = "主题：" + p.topic;
-      el.appendChild(topic);
+      currentQuestionEl.appendChild(topic);
     }
     const body = document.createElement("div");
-    body.className = "card-body question-text";
-    body.textContent = p.text || "";
-    el.appendChild(body);
-    appendCard(el);
+    body.className = "q-text";
+    body.innerHTML = clampHtml(p.text || "", 3);
+    currentQuestionEl.appendChild(body);
 
     answerBox.hidden = false;
     $("answer-context").textContent =
@@ -581,6 +654,7 @@
     answerInput.focus();
     setStatus("等待作答", "running");
     $("phase-text").textContent = "等待作答";
+    refreshClamps();
   }
 
   function dimensionGrid(scores) {
@@ -679,16 +753,53 @@
     return `<ul class="adjust-list">${items}</ul>`;
   }
 
+  function uniqueEvidence(list) {
+    const seen = new Set();
+    const out = [];
+    (list || []).forEach((e) => {
+      const quote = String(e.quote || "").trim();
+      if (!quote) {
+        return;
+      }
+      const key = quote.replace(/[\s\p{P}\p{S}]/gu, "").toLowerCase();
+      if (!key || seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+      out.push(Object.assign({}, e, { quote }));
+    });
+    return out;
+  }
+
+  function evidenceHtml(list) {
+    const unique = uniqueEvidence(list);
+    if (unique.length === 0) {
+      return '<p class="decision-note">本轮没有可展示的证据摘录。</p>';
+    }
+    const dims = new Set(unique.map((e) => e.dimension || ""));
+    const item = (e) =>
+      `<li>${clampHtml(e.quote, 3)}<span class="dim-tag">支持：${escapeHtml(DIM_LABEL[e.dimension] || e.dimension || "未标注")}</span>` +
+      `${e.reason ? `<p class="evidence-reason">${escapeHtml(e.reason)}</p>` : ""}</li>`;
+    if (dims.size < 2) {
+      return `<ul class="evidence-list">${unique.map(item).join("")}</ul>`;
+    }
+    const groups = DIMENSIONS
+      .map(([key, label]) => ({ label, items: unique.filter((e) => e.dimension === key) }))
+      .filter((g) => g.items.length > 0);
+    const unknown = unique.filter((e) => !DIM_LABEL[e.dimension]);
+    if (unknown.length > 0) {
+      groups.push({ label: "未标注", items: unknown });
+    }
+    return groups.map((g) =>
+      `<div class="evidence-group"><div class="calc-label">${escapeHtml(g.label)} · ${g.items.length} 条</div>` +
+      `<ul class="evidence-list">${g.items.map(item).join("")}</ul></div>`).join("");
+  }
+
   function rationaleBodyHtml(src, withDecision) {
     const d = normalizeScoreData(src);
-    const evidence = src.evidence || [];
     const missing = src.missing_points || [];
     const followup = src.followup;
-    const evidenceHtml = evidence.length > 0
-      ? `<ul class="evidence-list">${evidence.map((e) =>
-        `<li>「${escapeHtml(e.quote || "")}」<span class="dim-tag">支持：${escapeHtml(DIM_LABEL[e.dimension] || e.dimension || "未标注")}</span>` +
-        `${e.reason ? "<br>" + escapeHtml(e.reason) : ""}</li>`).join("")}</ul>`
-      : '<p class="decision-note">本轮没有可展示的证据摘录。</p>';
+    const evidenceBlock = evidenceHtml(src.evidence || []);
     const missingHtml = missing.length > 0
       ? `<ul class="missing-list">${missing.map((m) => `<li>${escapeHtml(m)}</li>`).join("")}</ul>`
       : '<p class="decision-note">关键点已覆盖。</p>';
@@ -708,12 +819,15 @@
       ${adjustmentListHtml(d.penaltyList, "penalty")}
       <div class="formula">total = base + bonus + penalty = ${d.base.toFixed(1)} + ${d.bonus.toFixed(1)} + ${d.penalty.toFixed(1)} = ${d.total.toFixed(1)}</div>
       <div class="calc-label">证据摘录</div>
-      ${evidenceHtml}
+      ${evidenceBlock}
       <div class="calc-label">缺失要点</div>
       ${missingHtml}
       ${withDecision === false ? "" : `<div class="calc-label">决策与理由</div>
       <p class="decision-note" id="decision-${escapeHtml(src.turn_id || "")}">决策尚未返回，评估完成后会在这里显示动作与理由。</p>`}
       ${followupHtml}
+      ${src.model || src.prompt_version ? `<details class="run-info"><summary>运行信息 · 模型与 Prompt</summary>` +
+        `<div class="run-info-body"><span>模型：${escapeHtml(src.model || "-")}</span>` +
+        `<span>Prompt：${escapeHtml(src.prompt_version || "-")}</span></div></details>` : ""}
     `;
   }
 
@@ -722,66 +836,62 @@
     const details = document.createElement("details");
     details.className = "rationale";
     details.innerHTML =
-      `<summary><span class="rationale-title">评分依据</span>` +
-      `<span class="human-line">${escapeHtml(humanScoreLine(d))}</span></summary>` +
-      `<div class="rationale-body">${rationaleBodyHtml(src, withDecision)}</div>`;
+      `<summary><span class="rationale-title">查看评分依据 ⌄</span></summary>` +
+      `<div class="rationale-body"><p class="human-line">${escapeHtml(humanScoreLine(d))}</p>` +
+      `${rationaleBodyHtml(src, withDecision)}</div>`;
     return details;
+  }
+
+  function scoreSummaryOf(p, d) {
+    if (p.degraded) {
+      return "模型输出不可用，本题不计入总分，流程继续。";
+    }
+    const missing = (p.missing_points || []).length;
+    const covered = missing === 0 ? "关键点覆盖完整" : `${missing} 个要点未覆盖`;
+    if (d.total >= 85) {
+      return `表现优秀：${covered}，可直接进入下一题。`;
+    }
+    if (d.total >= 70) {
+      return `表现良好：${covered}，补充取舍与数据细节会更稳。`;
+    }
+    if (d.total >= 60) {
+      return `基本达标：${covered}，深度与工程判断仍需补强。`;
+    }
+    return `需要补强：${covered}，建议按「结论-原理-取舍-数据」重答。`;
   }
 
   function onEvaluation(p) {
     removeThinking();
-    const el = card("card-eval");
-    el.appendChild(cardHead("评估结果", [{ text: `turn ${String(p.turn_id || "").slice(0, 8)}` }]));
-    const score = Number(p.total_score || 0);
-    const row = document.createElement("div");
-    row.className = "eval-score-row";
-    const scoreEl = document.createElement("span");
-    scoreEl.className = "eval-score";
-    scoreEl.textContent = score.toFixed(1);
-    const band = document.createElement("span");
-    band.className = "eval-band";
-    band.textContent = `${bandLabel(score)} · 加权总分 / 100`;
-    row.appendChild(scoreEl);
-    row.appendChild(band);
-    el.appendChild(row);
-    el.appendChild(dimensionGrid(p.scores));
+    const d = normalizeScoreData(p);
+    const el = card("card-eval result-card");
+    const top = document.createElement("div");
+    top.className = "result-top";
+    top.innerHTML =
+      `<div class="result-score-wrap"><span class="result-score">${d.total.toFixed(1)}</span>` +
+      `<span class="result-unit">/ 100</span></div>` +
+      `<div class="result-meta"><span class="band-pill">${bandLabel(d.total)}</span>` +
+      `<p class="result-summary">${escapeHtml(scoreSummaryOf(p, d))}</p></div>`;
+    el.appendChild(top);
+    const grid = dimensionGrid(p.scores);
+    grid.classList.add("compact");
+    el.appendChild(grid);
     el.appendChild(rationaleElement(p));
+    appendResult(el);
     state.lastEvalCard = el;
-
-    const missing = p.missing_points || [];
-    if (missing.length > 0) {
-      const box = document.createElement("div");
-      box.className = "missing";
-      box.innerHTML = `<strong>${missing.length} 个要点未覆盖</strong><ul>${missing.map((m) => `<li>${escapeHtml(m)}</li>`).join("")}</ul>`;
-      el.appendChild(box);
-    } else {
-      const ok = document.createElement("div");
-      ok.className = "missing";
-      ok.style.background = "var(--ok-soft)";
-      ok.innerHTML = "<strong>要点覆盖完整</strong><ul><li>本轮没有明显遗漏的关键点。</li></ul>";
-      el.appendChild(ok);
-    }
-    if (p.model || p.prompt_version) {
-      const meta = document.createElement("div");
-      meta.className = "muted";
-      meta.style.marginTop = "8px";
-      meta.textContent = `模型：${p.model || "-"} · prompt：${p.prompt_version || "-"}`;
-      el.appendChild(meta);
-    }
-    appendCard(el);
     submitBtn.disabled = true;
     answerBox.hidden = true;
   }
 
   function onEvaluationDegraded(p) {
     removeThinking();
-    const el = card("card-eval degraded");
-    el.appendChild(cardHead("评估降级", [{ text: reasonLabel(p.code) }]));
-    const body = document.createElement("div");
-    body.className = "card-body";
-    body.textContent = "本轮模型输出不可用，评分已跳过；该题不计入总分，系统会继续推进。";
-    el.appendChild(body);
-    appendCard(el);
+    const el = card("card-eval degraded result-card");
+    el.innerHTML =
+      `<div class="result-top"><div class="result-score-wrap"><span class="result-score degraded">—</span></div>` +
+      `<div class="result-meta"><span class="band-pill warn">评估降级</span>` +
+      `<p class="result-summary">模型输出不可用，本题不计入总分，流程继续。</p></div></div>` +
+      `<details class="rationale"><summary><span class="rationale-title">查看详情 ⌄</span></summary>` +
+      `<div class="rationale-body"><p class="decision-note">错误码：${escapeHtml(reasonLabel(p.code))}</p></div></details>`;
+    appendResult(el);
     showNotice("warn", `评估降级：${reasonLabel(p.code)}。该题不计分，流程继续。`, { key: "eval-degraded" });
     submitBtn.disabled = true;
     answerBox.hidden = true;
@@ -805,7 +915,7 @@
       body.textContent = p.reason;
       el.appendChild(body);
     }
-    appendCard(el);
+    appendEventCard(el);
 
     if (p.action === "finish") {
       promptFinish();
@@ -852,51 +962,177 @@
 
   // ---------- report ----------
 
-  function renderReportMeta(p) {
-    const score = Number(p.overall_score || 0);
-    const meta = [
-      ["综合得分", `${score.toFixed(1)} / 100`],
-      ["等级", bandLabel(score)],
-      ["模型调用", `${p.model_calls == null ? "-" : p.model_calls} 次`],
-      ["Token", `${p.total_tokens == null ? "-" : p.total_tokens}（in ${p.prompt_tokens || 0} / out ${p.completion_tokens || 0}）`],
-    ];
-    reportMeta.innerHTML = "";
-    meta.forEach(([label, value]) => {
-      const box = document.createElement("div");
-      box.className = "meta-box";
-      box.innerHTML = `${escapeHtml(label)}<strong>${escapeHtml(value)}</strong>`;
-      reportMeta.appendChild(box);
+  function ringSvg(score) {
+    const size = 150;
+    const cx = 75;
+    const cy = 75;
+    const r = 58;
+    const circ = 2 * Math.PI * r;
+    const pct = Math.max(0, Math.min(100, Number(score || 0))) / 100;
+    return `<svg viewBox="0 0 ${size} ${size}" width="${size}" role="img" aria-label="总分 ${score}">` +
+      `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#e6ecf5" stroke-width="12"/>` +
+      `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#3452e1" stroke-width="12" stroke-linecap="round" ` +
+      `stroke-dasharray="${(circ * pct).toFixed(1)} ${circ.toFixed(1)}" transform="rotate(-90 ${cx} ${cy})"/>` +
+      `<text x="${cx}" y="${cy + 2}" text-anchor="middle" class="ring-value">${Number(score || 0).toFixed(1)}</text>` +
+      `<text x="${cx}" y="${cy + 26}" text-anchor="middle" class="ring-label">/ 100</text></svg>`;
+  }
+
+  function radarSvg(dims) {
+    const size = 250;
+    const cx = 125;
+    const cy = 118;
+    const r = 80;
+    const angle = (i) => -Math.PI / 2 + i * 2 * Math.PI / 5;
+    const point = (i, ratio) => {
+      const x = cx + Math.cos(angle(i)) * r * ratio;
+      const y = cy + Math.sin(angle(i)) * r * ratio;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    };
+    const values = DIMENSIONS.map(([key]) => {
+      const found = (dims || []).find((d) => d.dimension === key);
+      return Math.max(0, Math.min(100, Number(found ? found.score : 0))) / 100;
     });
-    if (p.degraded) {
-      const banner = document.createElement("div");
-      banner.className = "notice warn";
-      banner.style.width = "100%";
-      banner.innerHTML = `报告降级：${escapeHtml(reasonLabel(p.error_code))}，以下内容由已有评估数据拼装。`;
-      reportMeta.appendChild(banner);
+    const rings = [0.25, 0.5, 0.75, 1].map((g) =>
+      `<polygon points="${[0, 1, 2, 3, 4].map((i) => point(i, g)).join(" ")}" fill="none" stroke="#e3e9f3" stroke-width="1"/>`).join("");
+    const axes = [0, 1, 2, 3, 4].map((i) => {
+      const p = point(i, 1).split(",");
+      return `<line x1="${cx}" y1="${cy}" x2="${p[0]}" y2="${p[1]}" stroke="#e3e9f3"/>`;
+    }).join("");
+    const shape = `<polygon points="${[0, 1, 2, 3, 4].map((i) => point(i, values[i])).join(" ")}" ` +
+      `fill="rgba(52,82,225,0.16)" stroke="#3452e1" stroke-width="2"/>`;
+    const labels = DIMENSIONS.map(([, label], i) => {
+      const lx = cx + Math.cos(angle(i)) * (r + 22);
+      const ly = cy + Math.sin(angle(i)) * (r + 22);
+      return `<text x="${lx.toFixed(0)}" y="${ly.toFixed(0)}" text-anchor="middle" dominant-baseline="middle" ` +
+        `font-size="13" fill="#5b6b82">${escapeHtml(label)}</text>`;
+    }).join("");
+    return `<svg viewBox="0 0 ${size} 246" width="${size}" role="img" aria-label="维度雷达">${rings}${axes}${shape}${labels}</svg>`;
+  }
+
+  function trendSvg(questions) {
+    const list = questions || [];
+    if (list.length === 0) {
+      return '<p class="decision-note">暂无逐题数据。</p>';
     }
+    const width = 880;
+    const height = 176;
+    const base = 132;
+    const top = 24;
+    const barW = 22;
+    const step = list.length > 1 ? (width - 120) / (list.length - 1) : 0;
+    const bars = list.map((q, i) => {
+      const score = Math.max(0, Math.min(100, Number(q.score || 0)));
+      const h = (score / 100) * (base - top);
+      const x = list.length > 1 ? 60 + i * step - barW / 2 : width / 2 - barW / 2;
+      const y = base - h;
+      return `<rect x="${x}" y="${y}" width="${barW}" height="${h}" rx="3" fill="#8fa3c8"></rect>` +
+        `<text x="${x + barW / 2}" y="${y - 6}" text-anchor="middle" font-size="13" fill="#24324a">${score.toFixed(1)}</text>` +
+        `<text x="${x + barW / 2}" y="${base + 20}" text-anchor="middle" font-size="13" fill="#5b6b82">第${q.seq}题</text>`;
+    }).join("");
+    return `<svg viewBox="0 0 ${width} ${height}" width="100%" role="img" aria-label="逐题得分趋势">` +
+      `<line x1="24" y1="${base}" x2="${width - 16}" y2="${base}" stroke="#c8d3e3"/>${bars}</svg>`;
+  }
+
+  function renderReportHero(structured, questions) {
+    const score = Number(structured.overall_score || 0);
+    const total = questions.length;
+    const scored = questions.filter((q) => !q.degraded).length;
+    const coverage = total > 0 ? Math.round(scored / total * 100) : 0;
+    const meta = [
+      ["总分", score.toFixed(1), ""],
+      ["等级", structured.score_band || bandLabel(score), ""],
+      ["题数", `${total} 题`, ""],
+      ["覆盖率", `${coverage}%`, "有效评分题 / 总题数"],
+    ];
+    reportMeta.innerHTML = meta.map(([label, value, tip]) =>
+      `<div class="meta-box"${tip ? ` title="${escapeHtml(tip)}"` : ""}>${escapeHtml(label)}` +
+      `<strong>${escapeHtml(value)}</strong></div>`).join("");
+    reportCharts.innerHTML =
+      `<div class="chart-card"><div class="chart-title">总分进度</div>${ringSvg(score)}` +
+      `<div class="ring-caption">加权总分 · ${escapeHtml(structured.score_band || bandLabel(score))}</div></div>` +
+      `<div class="chart-card"><div class="chart-title">维度雷达</div>${radarSvg(structured.dimensions || [])}</div>` +
+      `<div class="chart-card wide"><div class="chart-title">逐题得分趋势</div>${trendSvg(questions)}</div>`;
+  }
+
+  function renderRunInfo(cost) {
+    if (!cost || (cost.model_calls == null && cost.total_tokens == null)) {
+      runInfo.hidden = true;
+      return;
+    }
+    const parts = [];
+    if (cost.model_calls != null) parts.push(`模型调用 ${cost.model_calls} 次`);
+    if (cost.total_tokens != null) {
+      parts.push(`Token ${cost.total_tokens}（in ${cost.prompt_tokens || 0} / out ${cost.completion_tokens || 0}）`);
+    }
+    if (cost.tool_calls != null) parts.push(`工具调用 ${cost.tool_calls} 次`);
+    if (cost.model_name) parts.push(`模型 ${cost.model_name}`);
+    if (cost.prompt_version) parts.push(`Prompt ${cost.prompt_version}`);
+    runInfoBody.innerHTML = parts.map((text) => `<span>${escapeHtml(text)}</span>`).join("");
+    runInfo.hidden = false;
+  }
+
+  function sectionPreview(section, questions) {
+    const idx = Number(section.index);
+    if (idx === 1) {
+      return "五维加权得分与短板说明，点击查看明细";
+    }
+    if (idx === 2 && questions.length > 0) {
+      return `共 ${questions.length} 题，点击查看逐题点评`;
+    }
+    const plain = String(section.markdown || "")
+      .replace(/[#>*`|]/g, " ")
+      .replace(/-{2,}/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    return plain.length > 80 ? plain.slice(0, 80) + "…" : plain;
+  }
+
+  function reportSectionElement(section, questions) {
+    const idx = Number(section.index || 0);
+    const details = document.createElement("details");
+    details.className = "section-fold";
+    details.dataset.index = String(idx);
+    details.open = Boolean(state.reportSectionsOpen[idx]);
+
+    const summary = document.createElement("summary");
+    summary.innerHTML =
+      `<span class="sec-title">${escapeHtml(section.title || `第 ${idx + 1} 段`)}</span>` +
+      `<span class="sec-preview">${escapeHtml(sectionPreview(section, questions))}</span>` +
+      `<span class="sec-toggle">${details.open ? "收起 ⌃" : "展开 ⌄"}</span>`;
+    details.appendChild(summary);
+
+    const body = document.createElement("div");
+    body.className = "sec-body";
+    if (idx === 2 && questions.length > 0) {
+      const list = document.createElement("div");
+      list.className = "q-list";
+      questions.forEach((q) => list.appendChild(questionReviewElement(q)));
+      body.appendChild(list);
+    } else {
+      const md = document.createElement("div");
+      md.className = "md";
+      md.innerHTML = renderMarkdown(section.markdown || "");
+      body.appendChild(md);
+    }
+    details.appendChild(body);
+    details.addEventListener("toggle", () => {
+      state.reportSectionsOpen[idx] = details.open;
+      summary.querySelector(".sec-toggle").textContent = details.open ? "收起 ⌃" : "展开 ⌄";
+    });
+    return details;
   }
 
   function renderLiveSection(p) {
     reportPanel.hidden = false;
     reportStatus.textContent = "正在生成报告…";
-    const id = `report-sec-${p.index}`;
-    const existing = $(id);
-    const wrap = document.createElement("div");
-    wrap.className = "report-section";
-    wrap.id = id;
-    const title = document.createElement("h3");
-    title.textContent = p.title || `第 ${p.index + 1} 段`;
-    const md = document.createElement("div");
-    md.className = "md";
-    md.innerHTML = renderMarkdown(p.markdown || "");
-    wrap.appendChild(title);
-    wrap.appendChild(md);
+    const idx = Number(p.index || 0);
+    const existing = reportSections.querySelector(`[data-index="${idx}"]`);
+    const el = reportSectionElement({ index: idx, title: p.title, markdown: p.markdown }, []);
     if (existing) {
-      existing.replaceWith(wrap);
+      existing.replaceWith(el);
     } else {
-      reportSections.appendChild(wrap);
+      reportSections.appendChild(el);
     }
-    wrap.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
 
   async function loadReport(retries) {
@@ -917,6 +1153,7 @@
   function questionReviewElement(q) {
     const details = document.createElement("details");
     details.className = "q-review";
+    details.open = Boolean(state.reviewOpen[q.turn_id]);
     const kind = q.kind === "followup" ? "追问" : "主问题";
     const score = Number(q.score || 0);
     const head = document.createElement("summary");
@@ -927,13 +1164,13 @@
     details.appendChild(head);
 
     const body = document.createElement("div");
-    body.className = "md";
+    body.className = "md q-body";
     let html = "";
     if (q.question) {
-      html += `<blockquote>${escapeHtml(q.question)}</blockquote>`;
+      html += `<div class="calc-label">题目</div>${clampHtml(q.question, 3)}`;
     }
     if (q.comment) {
-      html += `<p>${escapeHtml(q.comment)}</p>`;
+      html += `<div class="calc-label">点评</div>${clampHtml(q.comment, 3)}`;
     }
     if (q.strong_points && q.strong_points.length > 0) {
       html += `<p><strong>亮点：</strong>${escapeHtml(q.strong_points.join("；"))}</p>`;
@@ -947,52 +1184,35 @@
     if (!q.degraded) {
       details.appendChild(rationaleElement(q, false));
     }
+    details.addEventListener("toggle", () => {
+      state.reviewOpen[q.turn_id] = details.open;
+    });
     return details;
   }
 
   function renderReport(dto) {
     const structured = dto.structured || {};
-    reportPanel.hidden = false;
-    reportStatus.textContent = dto.degraded ? "已生成（降级拼装）" : "已生成";
-    renderReportMeta({
-      overall_score: structured.overall_score,
-      degraded: dto.degraded,
-      error_code: structured.error_code,
-      model_calls: structured.model_calls,
-      total_tokens: structured.total_tokens,
-      prompt_tokens: structured.prompt_tokens,
-      completion_tokens: structured.completion_tokens,
-    });
-
-    reportSections.innerHTML = "";
     const sections = structured.sections || [];
     const questions = structured.questions || [];
+    reportPanel.hidden = false;
+    reportStatus.textContent = dto.degraded ? "已生成（降级拼装）" : "已生成";
+    renderReportHero(structured, questions);
+    renderRunInfo(Object.assign({}, structured, state.reportCost || {}));
+
+    reportSections.innerHTML = "";
     if (sections.length > 0) {
-      sections.forEach((section) => {
-        const wrap = document.createElement("div");
-        wrap.className = "report-section";
-        const title = document.createElement("h3");
-        title.textContent = section.title || `第 ${(section.index || 0) + 1} 段`;
-        wrap.appendChild(title);
-        if (Number(section.index) === 2 && questions.length > 0) {
-          questions.forEach((q) => wrap.appendChild(questionReviewElement(q)));
-        } else {
-          const md = document.createElement("div");
-          md.className = "md";
-          md.innerHTML = renderMarkdown(section.markdown || "");
-          wrap.appendChild(md);
-        }
-        reportSections.appendChild(wrap);
-      });
+      sections.forEach((section) => reportSections.appendChild(reportSectionElement(section, questions)));
     } else if (dto.markdown) {
-      const wrap = document.createElement("div");
-      wrap.className = "report-section";
-      const md = document.createElement("div");
-      md.className = "md";
-      md.innerHTML = renderMarkdown(dto.markdown);
-      wrap.appendChild(md);
-      reportSections.appendChild(wrap);
+      reportSections.appendChild(reportSectionElement({ index: 0, title: "报告全文", markdown: dto.markdown }, questions));
     }
+    if (dto.degraded) {
+      const banner = document.createElement("div");
+      banner.className = "notice warn";
+      banner.style.gridColumn = "1 / -1";
+      banner.innerHTML = `报告降级：${escapeHtml(reasonLabel(structured.error_code))}，以下内容由已有评估数据拼装。`;
+      reportCharts.appendChild(banner);
+    }
+    refreshClamps();
     reportPanel.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
@@ -1075,7 +1295,7 @@
       state.followupsUsed = 0;
       $("session-meta").hidden = false;
       $("session-id").textContent = state.sessionId;
-      $("empty-state")?.remove();
+      hideEmptyState();
       $("setup-block").hidden = true;
       $("session-summary").hidden = false;
       $("progress-strip").hidden = false;
@@ -1108,8 +1328,22 @@
     state.primaryAsked = 0;
     state.followupsUsed = 0;
     state.lastEvalCard = null;
+    state.eventCount = 0;
+    state.historyCount = 0;
+    state.reportSectionsOpen = {};
+    state.reviewOpen = {};
+    state.reportCost = null;
 
-    threadEl.innerHTML = EMPTY_STATE_HTML;
+    emptyState.hidden = false;
+    currentQuestionEl.hidden = true;
+    currentQuestionEl.innerHTML = "";
+    resultSlotEl.innerHTML = "";
+    historyBody.innerHTML = "";
+    historyBlock.hidden = true;
+    historyCountEl.textContent = "0";
+    eventBody.innerHTML = "";
+    eventDetails.hidden = true;
+    eventCountEl.textContent = "0";
     noticesEl.innerHTML = "";
     answerBox.hidden = true;
     answerInput.value = "";
@@ -1120,6 +1354,9 @@
     finishBtn.classList.remove("pulse");
     reportPanel.hidden = true;
     reportMeta.innerHTML = "";
+    reportCharts.innerHTML = "";
+    runInfo.hidden = true;
+    runInfoBody.innerHTML = "";
     reportSections.innerHTML = "";
     reportStatus.textContent = "正在生成…";
     $("session-meta").hidden = true;
@@ -1150,9 +1387,10 @@
     answerCard.appendChild(cardHead("你的回答", [{ text: `${text.length} 字` }]));
     const body = document.createElement("div");
     body.className = "card-body";
-    body.textContent = text;
+    body.innerHTML = clampHtml(text, 3);
     answerCard.appendChild(body);
-    appendCard(answerCard);
+    currentQuestionEl.appendChild(answerCard);
+    refreshClamps();
 
     showThinking("正在评估作答…");
     try {
@@ -1191,7 +1429,7 @@
     reportPanel.hidden = false;
     reportStatus.textContent = "正在生成报告…";
     reportMeta.innerHTML = "";
-    reportSections.innerHTML = '<div class="report-section"><div class="md muted">报告生成中，实时分段会通过 SSE 推送…</div></div>';
+    reportSections.innerHTML = '<div class="decision-note">报告生成中，实时分段会通过 SSE 推送…</div>';
     setStatus("正在生成报告", "running");
     $("phase-text").textContent = "正在生成报告";
     answerBox.hidden = true;
@@ -1224,6 +1462,21 @@
   $("restart-btn").addEventListener("click", restartInterview);
   submitBtn.addEventListener("click", submitAnswer);
   finishBtn.addEventListener("click", finishInterview);
+  document.addEventListener("toggle", refreshClamps, true);
+  document.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-expand]");
+    if (!btn) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const target = $(btn.dataset.expand);
+    if (!target) {
+      return;
+    }
+    const expanded = target.classList.toggle("is-expanded");
+    btn.textContent = expanded ? "收起" : "展开全文";
+  });
   answerInput.addEventListener("keydown", (event) => {
     if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
       submitAnswer();

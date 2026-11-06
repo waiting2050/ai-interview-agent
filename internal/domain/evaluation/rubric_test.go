@@ -82,6 +82,28 @@ func TestSanitizeClearsFollowupWithoutTarget(t *testing.T) {
 	}
 }
 
+func TestUniqueEvidenceDropsRepeatedQuotes(t *testing.T) {
+	in := []Evidence{
+		{Dimension: DimensionCorrectness, Quote: "channel 控制并发", Reason: "first"},
+		{Dimension: DimensionCorrectness, Quote: " channel 控制并发 ", Reason: "spacing variant"},
+		{Dimension: DimensionDepth, Quote: "channel 控制并发", Reason: "other dimension"},
+		{Dimension: DimensionDepth, Quote: "压测 QPS 从 800 提升到 1500", Reason: "distinct quote"},
+	}
+	out := UniqueEvidence(in)
+	if len(out) != 2 {
+		t.Fatalf("expected 2 unique quotes, got %d: %+v", len(out), out)
+	}
+	if out[0].Reason != "first" {
+		t.Fatalf("first annotation must be kept, got %+v", out[0])
+	}
+	if out[1].Quote != "压测 QPS 从 800 提升到 1500" {
+		t.Fatalf("unexpected second quote: %+v", out[1])
+	}
+	if UniqueEvidence(nil) != nil {
+		t.Fatal("nil evidence must stay nil")
+	}
+}
+
 func TestValidateReportsContractViolations(t *testing.T) {
 	valid := Result{
 		SchemaVersion: SchemaVersion,

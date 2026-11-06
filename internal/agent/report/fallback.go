@@ -59,7 +59,7 @@ func Fallback(ev tools.Bundle, now time.Time) domain.Report {
 			Degraded:      turn.Degraded,
 			MissingPoints: append([]string(nil), turn.MissingList...),
 		}
-		for _, e := range turn.Evidence {
+		for _, e := range evaluation.UniqueEvidence(turn.Evidence) {
 			review.Evidence = append(review.Evidence, domain.Evidence{
 				TurnID:    turn.TurnID,
 				Dimension: string(e.Dimension),

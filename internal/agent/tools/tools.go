@@ -324,7 +324,7 @@ func (q *Query) SessionOverview(ctx context.Context) (Overview, error) {
 			brief.BaseScore = rec.BaseScore
 			brief.Bonus = rec.Bonus
 			brief.Penalty = rec.Penalty
-			brief.Evidence = rec.Evidence
+			brief.Evidence = evaluation.UniqueEvidence(rec.Evidence)
 			if rec.Degraded {
 				overview.DegradedTurns++
 			} else {
@@ -545,7 +545,7 @@ func (q *Query) Turn(ctx context.Context, turnID string) (TurnDetail, error) {
 		detail.Degraded = rec.Degraded
 		detail.MissingPoints = clean(rec.MissingPoints)
 		detail.Missing = len(detail.MissingPoints)
-		detail.Evidence = limitEvidence(rec.Evidence, 5)
+		detail.Evidence = limitEvidence(evaluation.UniqueEvidence(rec.Evidence), 5)
 	}
 
 	runes := estimateRunes(detail)
@@ -606,7 +606,7 @@ func summary(turn session.Turn, rec *evaluation.Record, maxResultRunes int) Turn
 			BaseScore:   rec.BaseScore,
 			Bonus:       rec.Bonus,
 			Penalty:     rec.Penalty,
-			Evidence:    rec.Evidence,
+			Evidence:    evaluation.UniqueEvidence(rec.Evidence),
 			Degraded:    rec.Degraded,
 			Missing:     len(rec.MissingPoints),
 			MissingList: clean(rec.MissingPoints),
