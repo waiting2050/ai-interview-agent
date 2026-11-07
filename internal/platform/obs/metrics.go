@@ -42,6 +42,11 @@ type Metrics struct {
 	reportDegraded     map[string]uint64
 	lockConflicts      uint64
 	runFailures        map[runFailureKey]uint64
+	deadLetters        map[runFailureKey]uint64
+	rateLimitRejected  map[string]uint64
+	rateLimitDegraded  map[string]uint64
+	workerClaims       uint64
+	leaseRenewFailures uint64
 	delivery           histogram
 
 	sseConnections atomic.Int64
@@ -55,6 +60,9 @@ func NewMetrics() *Metrics {
 		evaluationDegraded: map[string]uint64{},
 		reportDegraded:     map[string]uint64{},
 		runFailures:        map[runFailureKey]uint64{},
+		deadLetters:        map[runFailureKey]uint64{},
+		rateLimitRejected:  map[string]uint64{},
+		rateLimitDegraded:  map[string]uint64{},
 		delivery:           newHistogram(),
 	}
 }
@@ -150,6 +158,58 @@ func (m *Metrics) IncRunFailure(kind, class string) {
 	m.runFailures[runFailureKey{Kind: nonEmpty(kind), Class: nonEmpty(class)}]++
 }
 
+// IncDeadLetter counts one run that crossed the consecutive-failure threshold.
+func (m *Metrics) IncDeadLetter(kind, class string) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.deadLetters[runFailureKey{Kind: nonEmpty(kind), Class: nonEmpty(class)}]++
+}
+
+// IncWorkerClaim counts one run claimed by a worker.
+func (m *Metrics) IncWorkerClaim() {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.workerClaims++
+}
+
+// IncLeaseRenewFailure counts one failed lease heartbeat (lost ownership or
+// storage error).
+func (m *Metrics) IncLeaseRenewFailure() {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.leaseRenewFailures++
+}
+
+// IncRateLimitRejection counts one request rejected by the user rate limiter.
+func (m *Metrics) IncRateLimitRejection(action string) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.rateLimitRejected[nonEmpty(action)]++
+}
+
+// IncRateLimitDegraded counts one request allowed because the rate-limit
+// backend was unavailable (explicit fail-open).
+func (m *Metrics) IncRateLimitDegraded(action string) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.rateLimitDegraded[nonEmpty(action)]++
+}
+
 // ModelCallTotal is an accessor used by tests and ad-hoc checks.
 func (m *Metrics) ModelCallTotal(provider, model, result string) uint64 {
 	m.mu.Lock()
@@ -205,6 +265,41 @@ func (m *Metrics) RunFailureTotal(kind, class string) uint64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.runFailures[runFailureKey{Kind: nonEmpty(kind), Class: nonEmpty(class)}]
+}
+
+// DeadLetterTotal is an accessor used by tests.
+func (m *Metrics) DeadLetterTotal(kind, class string) uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.deadLetters[runFailureKey{Kind: nonEmpty(kind), Class: nonEmpty(class)}]
+}
+
+// WorkerClaimTotal is an accessor used by tests.
+func (m *Metrics) WorkerClaimTotal() uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.workerClaims
+}
+
+// LeaseRenewFailureTotal is an accessor used by tests.
+func (m *Metrics) LeaseRenewFailureTotal() uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.leaseRenewFailures
+}
+
+// RateLimitRejectionTotal is an accessor used by tests.
+func (m *Metrics) RateLimitRejectionTotal(action string) uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.rateLimitRejected[nonEmpty(action)]
+}
+
+// RateLimitDegradedTotal is an accessor used by tests.
+func (m *Metrics) RateLimitDegradedTotal(action string) uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.rateLimitDegraded[nonEmpty(action)]
 }
 
 // WriteText renders the registry in Prometheus text exposition format.
@@ -291,6 +386,49 @@ func (m *Metrics) WriteText(w io.Writer) error {
 	}
 	if err := writeFamily("ai_interview_run_failures_total",
 		"Failed runs by kind and error class.", "counter", failureLines); err != nil {
+		return err
+	}
+
+	var deadLines []string
+	for k, v := range m.deadLetters {
+		deadLines = append(deadLines, fmt.Sprintf(
+			`ai_interview_dead_letters_total{class="%s",kind="%s"} %d`,
+			escape(k.Class), escape(k.Kind), v))
+	}
+	if err := writeFamily("ai_interview_dead_letters_total",
+		"Runs that crossed the consecutive-failure threshold.", "counter", deadLines); err != nil {
+		return err
+	}
+
+	if err := writeFamily("ai_interview_worker_claims_total",
+		"Runs claimed by this instance.", "counter",
+		[]string{fmt.Sprintf("ai_interview_worker_claims_total %d", m.workerClaims)}); err != nil {
+		return err
+	}
+
+	if err := writeFamily("ai_interview_lease_renew_failures_total",
+		"Worker lease heartbeat failures.", "counter",
+		[]string{fmt.Sprintf("ai_interview_lease_renew_failures_total %d", m.leaseRenewFailures)}); err != nil {
+		return err
+	}
+
+	var rejectionLines []string
+	for action, v := range m.rateLimitRejected {
+		rejectionLines = append(rejectionLines, fmt.Sprintf(
+			`ai_interview_rate_limit_rejections_total{action="%s"} %d`, escape(action), v))
+	}
+	if err := writeFamily("ai_interview_rate_limit_rejections_total",
+		"Requests rejected by the user rate limiter.", "counter", rejectionLines); err != nil {
+		return err
+	}
+
+	var degradedLines []string
+	for action, v := range m.rateLimitDegraded {
+		degradedLines = append(degradedLines, fmt.Sprintf(
+			`ai_interview_rate_limit_degraded_total{action="%s"} %d`, escape(action), v))
+	}
+	if err := writeFamily("ai_interview_rate_limit_degraded_total",
+		"Requests allowed because the rate-limit backend was unavailable.", "counter", degradedLines); err != nil {
 		return err
 	}
 

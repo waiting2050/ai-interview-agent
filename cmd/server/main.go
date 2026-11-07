@@ -130,13 +130,33 @@ func run() error {
 		Locker:            locker,
 		Metrics:           metrics,
 		Usage:             usage,
+		MaxRunFailures:    cfg.RunMaxFailures,
 	})
 
+	// Runs are executed by a PostgreSQL-backed worker pool: commands only
+	// enqueue a run, and every instance claims work with SKIP LOCKED.
+	workers := app.NewWorkerPool(svc, app.WorkerOptions{
+		WorkerID:          cfg.WorkerID,
+		Concurrency:       cfg.WorkerConcurrency,
+		LeaseTTL:          cfg.WorkerLeaseTTL,
+		HeartbeatInterval: cfg.WorkerHeartbeatInterval,
+		PollInterval:      cfg.WorkerPollInterval,
+		MaxFailures:       cfg.RunMaxFailures,
+		Logger:            logger,
+		Metrics:           metrics,
+	})
+	defer workers.Stop()
+
+	// Reconcile before starting workers: stale runs are marked interrupted
+	// (event preserved) and then claimed from the same queue as fresh work.
 	if resumed, err := svc.Reconcile(ctx); err != nil {
 		logger.Error("startup reconciliation failed", "error", err)
 	} else if resumed > 0 {
-		logger.Warn("resumed interrupted runs", "count", resumed)
+		logger.Warn("interrupted runs queued for workers", "count", resumed)
 	}
+	workers.Start(ctx)
+	logger.Info("worker pool started", "concurrency", cfg.WorkerConcurrency,
+		"lease_ttl", cfg.WorkerLeaseTTL, "heartbeat", cfg.WorkerHeartbeatInterval)
 
 	// One fetcher instance keeps the per-host rate limiter and robots cache
 	// shared across requests, so frequent analyses cannot exceed the limit.
@@ -152,6 +172,20 @@ func run() error {
 	}
 	authSvc := auth.New(store.Repos().Users, signer)
 
+	// User quotas live in Redis. If Redis is unreachable the limiter returns
+	// errors and the HTTP layer explicitly fails open, logging and counting the
+	// degradation (see RATE_LIMIT_DEGRADED metrics).
+	rateLimiter := redis.NewRateLimiter(cfg.RedisAddr, cfg.RedisPassword, cfg.RedisDB)
+	defer rateLimiter.Close()
+	ratePingCtx, cancelRatePing := context.WithTimeout(ctx, 2*time.Second)
+	if err := rateLimiter.Ping(ratePingCtx); err != nil {
+		logger.Warn("redis unavailable, user rate limiting will fail open and be counted",
+			"addr", cfg.RedisAddr, "error", err)
+	} else {
+		logger.Info("user rate limiter ready", "backend", "redis", "addr", cfg.RedisAddr)
+	}
+	cancelRatePing()
+
 	srv := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: httpapi.NewRouter(httpapi.Deps{
@@ -162,6 +196,16 @@ func run() error {
 			Metrics:         metrics,
 			DemoLoginLimit:  cfg.DemoLoginLimit,
 			DemoLoginWindow: cfg.DemoLoginWindow,
+			RateLimiter:     rateLimiter,
+			RateLimits: httpapi.RateLimitConfig{
+				Window:      cfg.RateLimitWindow,
+				Session:     cfg.RateLimitSession,
+				Answer:      cfg.RateLimitAnswer,
+				Report:      cfg.RateLimitReport,
+				DemoSession: cfg.DemoRateLimitSession,
+				DemoAnswer:  cfg.DemoRateLimitAnswer,
+				DemoReport:  cfg.DemoRateLimitReport,
+			},
 			JDAnalyzer: jd.New(store.Repos().JDs, func(ctx context.Context, rawURL string) (jd.Fetched, error) {
 				result, err := jobFetcher.Fetch(ctx, rawURL)
 				if err != nil {
@@ -199,8 +243,10 @@ func run() error {
 		return fmt.Errorf("shutdown http server: %w", err)
 	}
 
+	workers.Stop()
 	waitDone := make(chan struct{})
 	go func() {
+		workers.Wait()
 		svc.Wait()
 		close(waitDone)
 	}()

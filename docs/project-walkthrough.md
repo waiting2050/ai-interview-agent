@@ -167,14 +167,17 @@
 - 幂等 run：[repository.go:166-189](file:///c:/Users/waiting2050/Desktop/gotest/%E9%9D%A2%E8%AF%95/internal/store/postgres/repository.go#L166-L189) 的 `ON CONFLICT (session_id, kind, idempotency_key) DO NOTHING`，约束来自 `migrations/0001_init.sql`。
 - 唯一报告 / 复习卡：[repository_m4.go:20-45](file:///c:/Users/waiting2050/Desktop/gotest/%E9%9D%A2%E8%AF%95/internal/store/postgres/repository_m4.go#L20-L45)、[repository_m11.go:22-46](file:///c:/Users/waiting2050/Desktop/gotest/%E9%9D%A2%E8%AF%95/internal/store/postgres/repository_m11.go#L22-L46)。
 - 事件：[repository.go:105-129](file:///c:/Users/waiting2050/Desktop/gotest/%E9%9D%A2%E8%AF%95/internal/store/postgres/repository.go#L105-L129) 插入后同事务 `pg_notify`；跨实例通知在 [notifier.go:114-159](file:///c:/Users/waiting2050/Desktop/gotest/%E9%9D%A2%E8%AF%95/internal/store/postgres/notifier.go#L114-L159)。
-- 迁移：`migrations/0001_init.sql` 到 `0007_m11.sql`（会话/事件/run、turn/plan/evaluation、report、domain、jd、review）。
+- 迁移：`migrations/0001_init.sql` 到 `0009_worker.sql`（会话/事件/run、turn/plan/evaluation、report、domain、jd、review、鉴权归属、worker 租约与失败字段）。
+- 跨实例 run 认领：[internal/store/postgres/repository.go](file:///c:/Users/waiting2050/Desktop/gotest/%E9%9D%A2%E8%AF%95/internal/store/postgres/repository.go) 的 `Claim` 用 `WITH candidates … FOR UPDATE SKIP LOCKED`；可认领条件是 `status IN ('running','interrupted')` 且租约为空或已过期，并用 `NOT EXISTS` 排除同会话已有活跃租约的 run。
+- 租约与 fencing：[internal/app/worker.go](file:///c:/Users/waiting2050/Desktop/gotest/%E9%9D%A2%E8%AF%95/internal/app/worker.go) 递归续租，失败即取消本地 ctx；终态写入 `MarkFinishedOwned` / `RecordFailure` 都带 `lease_id` 条件，过期 owner 不能覆盖新 owner。
 
-**为什么这么设计（含代价）**：Redis 锁把「同一会话的写」串行化，PG 约束做最后一道防线：锁 TTL 到了、实例挂了，唯一键和 `state_version` 仍能拦住重复 turn / 重复报告。事件写入同一事务并 `NOTIFY`，保证「事务提交才可见」。代价是 Redis 成为可选单点（回退进程锁后只能单实例）；锁的粒度是整场会话，长 run 会挡住同会话的其他写；没有分布式事务，跨库一致性靠「先落库、后发通知」。
+**为什么这么设计（含代价）**：Redis 锁把「同一会话的写」串行化，PG 约束做最后一道防线：锁 TTL 到了、实例挂了，唯一键和 `state_version` 仍能拦住重复 turn / 重复报告。事件写入同一事务并 `NOTIFY`，保证「事务提交才可见」。run 队列同样落在 PG：`SKIP LOCKED` 让多实例并行认领且互不重复，租约过期即可被接管，崩溃恢复与正常消费共用一条路径（`Reconcile` 只标记 interrupted 并通知队列，不另起一套执行逻辑）。代价是 Redis 成为可选单点（回退进程锁后只能单实例）；锁的粒度是整场会话，长 run 会挡住同会话的其他写；空队列靠轮询而不是跨实例推送；没有分布式事务，跨库一致性靠「先落库、后发通知」。
 
 **面试官可能追问**：
 1. **「锁已经互斥了，为什么还要唯一约束？」** 锁可能因 TTL、网络分区或进程崩溃失效；唯一约束是数据库层的硬保证，重复请求会命中幂等键直接重放，不会写出第二个 turn/report。
 2. **「`state_version` 冲突怎么处理？」** 返回 409 `state_conflict`，客户端重读会话或换幂等键重试；服务端不会覆盖别人的写，也不会自动把旧状态合并。
 3. **「事件为什么要 `LISTEN/NOTIFY`，SSE 直接查库不行吗？」** 可以查，但轮询延迟高。`NOTIFY` 只负责唤醒，真正的顺序与回放仍由 `session_events` 的单调 `event_id` + `Last-Event-ID` 保证；通知丢了也只是晚一点，不会丢事件。
+4. **「两个 worker 同时抢同一个 run，会重复执行吗？」** 不会。认领是一条带 `FOR UPDATE SKIP LOCKED` 的 `UPDATE … RETURNING`，两个事务要么只有一个拿到行，要么另一个跳过；认领时写入唯一 `lease_id`，后续终态写入以 `lease_id` 做条件，旧 owner 即使醒来也写不进去。租约过期只意味着可以重新认领，重跑仍从最后一个成功 `run_step` 继续。
 
 ---
 
@@ -183,9 +186,9 @@
 **它解决什么问题**：异步 run 出错时，能从一个 request 追到 session、run、turn、step 和模型调用；能看模型调用次数、token、降级和锁冲突；演示页能靠 SSE 实时出题。
 
 **关键代码在哪**：
-- 关联 ID：[internal/platform/reqctx/reqctx.go:15-87](file:///c:/Users/waiting2050/Desktop/gotest/%E9%9D%A2%E8%AF%95/internal/platform/reqctx/reqctx.go#L15-L87) 注入 `request_id/session_id/run_id/turn_id`，`Attrs` 转 slog 字段。
+- 关联 ID：[internal/platform/reqctx/reqctx.go:15-87](file:///c:/Users/waiting2050/Desktop/gotest/%E9%9D%A2%E8%AF%95/internal/platform/reqctx/reqctx.go#L15-L87) 注入 `request_id/session_id/run_id/turn_id`，worker 路径再补 `worker_id/lease_id`，`Attrs` 转 slog 字段。
 - 请求日志：[internal/api/http/middleware.go:12-33](file:///c:/Users/waiting2050/Desktop/gotest/%E9%9D%A2%E8%AF%95/internal/api/http/middleware.go#L12-L33)。
-- 指标：[internal/platform/obs/metrics.go:63-210](file:///c:/Users/waiting2050/Desktop/gotest/%E9%9D%A2%E8%AF%95/internal/platform/obs/metrics.go#L63-L210) 统计模型调用、token、评估/报告降级、锁冲突、SSE 连接数、事件投递耗时、run 失败分类；文本输出在 211-300。
+- 指标：[internal/platform/obs/metrics.go](file:///c:/Users/waiting2050/Desktop/gotest/%E9%9D%A2%E8%AF%95/internal/platform/obs/metrics.go) 统计模型调用、token、评估/报告降级、锁冲突、SSE 连接数、事件投递耗时、run 失败分类，以及 worker 认领、租约续租失败、限流拒绝 / 降级、死信；Prometheus 文本输出在同一文件。
 - 用量：[internal/platform/obs/usage.go:38-82](file:///c:/Users/waiting2050/Desktop/gotest/%E9%9D%A2%E8%AF%95/internal/platform/obs/usage.go#L38-L82) 按 session 聚合 purpose/prompt/completion/total。
 - 模型埋点：[internal/agent/llm/instrument.go:42-63](file:///c:/Users/waiting2050/Desktop/gotest/%E9%9D%A2%E8%AF%95/internal/agent/llm/instrument.go#L42-L63)：每次调用记 result、token，并把本次用量记到 session。
 - 报告用量快照：[internal/app/report.go:295](file:///c:/Users/waiting2050/Desktop/gotest/%E9%9D%A2%E8%AF%95/internal/app/report.go#L295)（token 与调用次数，不计算金额）。
@@ -234,8 +237,8 @@
 3. **图片简历与扫描版 PDF 没有 OCR（没做）**：`document.Extract` 直接拒绝图片类型，扫描版 PDF 提不出文字；用户只能粘贴文本。
 4. **报告证据包有截断、只有一轮点评（做浅了）**：回答摘要、弱项条数、搜索结果都有上限；没有跨场次趋势、没有多轮修订、没有模型自检。模型不可用或输出不合法即降级。
 5. **复习只有 SM-2 + 自评（做浅了）**：没有每日上限、优先级、预测和长期统计；grade 是用户自报，系统不做客观回忆验证；时区靠请求参数，默认 +8。
-6. **run 队列在进程内（没做持久队列）**：`launch` 起 goroutine，没有 worker pool、背压和跨实例消费；崩溃后靠 `Reconcile` 扫 stale run 恢复，恢复粒度是 step，不是精确断点。
-7. **可观测性只在进程内（做浅了）**：指标重启归零，没有集中日志、分布式追踪、告警；多实例下各看各的。
+6. **队列是 PostgreSQL 认领（做浅了）**：`SKIP LOCKED` + 租约已支持多实例消费与崩溃接管，`Reconcile` 与正常消费共用一条恢复路径；但空队列靠 `WORKER_POLL_INTERVAL` 轮询（跨实例唤醒未接 `LISTEN/NOTIFY`），没有优先级、延迟队列与指数退避，恢复粒度仍是 step。
+7. **可观测性只在进程内（做浅了）**：指标重启归零，没有集中日志、分布式追踪、告警；多实例下各看各的。worker / 限流 / 死信指标已补齐，但仍是进程内聚合。
 8. **JD URL 抓取只适配静态 HTML（做浅了）**：不执行 JS、不做站点适配、不碰登录墙和验证码；抓不到就要求粘贴，这是策略也是限制。
 9. **演示页是手写单文件（做浅了）**：`app.js` 体量大、没有构建链和前端单测；改 UI 靠人工回归截图。
 10. **模型输出容错有限（做浅了）**：只做 JSON 抽取 + 一次修复提示，没有 schema 约束解码；复杂输出仍可能降级。

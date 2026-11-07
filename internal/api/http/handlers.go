@@ -129,6 +129,9 @@ func (h *handlers) listDomains(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handlers) createSession(w http.ResponseWriter, r *http.Request) {
+	if !h.allowRateLimit(w, r, rateActionSession) {
+		return
+	}
 	var req createSessionRequest
 	if err := decodeJSON(w, r, &req); err != nil {
 		h.writeError(w, r, err)
@@ -205,6 +208,9 @@ func (h *handlers) submitAnswer(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.requireSessionOwner(w, r); !ok {
 		return
 	}
+	if !h.allowRateLimit(w, r, rateActionAnswer) {
+		return
+	}
 	var req submitAnswerRequest
 	if err := decodeJSON(w, r, &req); err != nil {
 		h.writeError(w, r, err)
@@ -239,6 +245,9 @@ func (h *handlers) finishSession(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.requireSessionOwner(w, r); !ok {
 		return
 	}
+	if !h.allowRateLimit(w, r, rateActionReport) {
+		return
+	}
 	result, err := h.deps.Service.Finish(r.Context(), app.FinishCommand{
 		SessionID:      r.PathValue("id"),
 		IdempotencyKey: r.Header.Get("Idempotency-Key"),
@@ -252,6 +261,9 @@ func (h *handlers) finishSession(w http.ResponseWriter, r *http.Request) {
 
 func (h *handlers) generateReport(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.requireSessionOwner(w, r); !ok {
+		return
+	}
+	if !h.allowRateLimit(w, r, rateActionReport) {
 		return
 	}
 	result, err := h.deps.Service.Report(r.Context(), app.FinishCommand{
@@ -346,6 +358,71 @@ func (h *handlers) retryRun(w http.ResponseWriter, r *http.Request) {
 		"run_id": runID,
 		"status": "accepted",
 	})
+}
+
+type runDTO struct {
+	RunID        string     `json:"run_id"`
+	SessionID    string     `json:"session_id"`
+	Kind         string     `json:"kind"`
+	Status       string     `json:"status"`
+	Attempt      int        `json:"attempt"`
+	FailureCount int        `json:"failure_count"`
+	ErrorCode    string     `json:"error_code,omitempty"`
+	ErrorClass   string     `json:"error_class,omitempty"`
+	LastError    string     `json:"last_error,omitempty"`
+	LastStep     string     `json:"last_step,omitempty"`
+	LeaseWorker  string     `json:"lease_worker,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+	FinishedAt   *time.Time `json:"finished_at,omitempty"`
+	DeadAt       *time.Time `json:"dead_at,omitempty"`
+}
+
+func toRunDTO(run session.Run) runDTO {
+	return runDTO{
+		RunID:        run.ID,
+		SessionID:    run.SessionID,
+		Kind:         string(run.Kind),
+		Status:       string(run.Status),
+		Attempt:      run.Attempt,
+		FailureCount: run.FailureCount,
+		ErrorCode:    run.ErrorCode,
+		ErrorClass:   run.LastErrorClass,
+		LastError:    run.LastError,
+		LastStep:     run.LastStep,
+		LeaseWorker:  run.LeaseWorker,
+		CreatedAt:    run.CreatedAt,
+		UpdatedAt:    run.UpdatedAt,
+		FinishedAt:   run.FinishedAt,
+		DeadAt:       run.DeadAt,
+	}
+}
+
+// listRuns exposes the caller's failed/interrupted/dead runs. status is
+// optional; an empty value means all unhealthy states. Retrying a dead run
+// uses POST /v1/sessions/{id}/runs/{run_id}/retry.
+func (h *handlers) listRuns(w http.ResponseWriter, r *http.Request) {
+	identity, ok := identityFrom(r.Context())
+	if !ok {
+		writeUnauthorized(w, r, "缺少访问令牌")
+		return
+	}
+	limit := 50
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil {
+			limit = parsed
+		}
+	}
+	runs, err := h.deps.Service.ListRuns(r.Context(), identity.UserID, r.URL.Query().Get("status"), limit)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	items := make([]runDTO, 0, len(runs))
+	for _, run := range runs {
+		items = append(items, toRunDTO(run))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"runs": items})
 }
 
 type eventEnvelope struct {

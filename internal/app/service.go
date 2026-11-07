@@ -82,6 +82,9 @@ type Options struct {
 	// Synchronous executes the run inline. Used by unit tests; the server
 	// keeps the default asynchronous behaviour.
 	Synchronous bool
+	// MaxRunFailures is the consecutive-failure threshold after which a run
+	// becomes a dead letter. Zero uses the default (3).
+	MaxRunFailures int
 }
 
 type Service struct {
@@ -91,6 +94,8 @@ type Service struct {
 	now         func() time.Time
 	staleAfter  time.Duration
 	synchronous bool
+	workerMode  bool
+	wake        func()
 	metrics     *obs.Metrics
 
 	locks ports.Locker
@@ -149,7 +154,7 @@ func New(store ports.Store, opts Options) *Service {
 	return &Service{
 		store: store,
 		runner: NewRunner(store, opts.Steps, answerSteps, answerGraph, opts.ReportGenerator,
-			opts.Now, opts.Logger, opts.Metrics, opts.Usage),
+			opts.Now, opts.Logger, opts.Metrics, opts.Usage, opts.MaxRunFailures),
 		log:         opts.Logger,
 		now:         opts.Now,
 		staleAfter:  opts.RunStaleAfter,
@@ -536,15 +541,54 @@ func (s *Service) Retry(ctx context.Context, sessionID, runID string) error {
 		return fmt.Errorf("%w: run already succeeded", ports.ErrStateConflict)
 	}
 
+	// A dead run is resurrected explicitly by an operator and gets a fresh
+	// failure budget; failed/interrupted runs keep their counter so repeated
+	// retries can still reach the dead-letter threshold.
+	dead := run.Status == session.RunStatusDead
+	if err := s.store.Repos().Runs.Requeue(ctx, run.ID, dead, s.now().UTC()); err != nil {
+		return err
+	}
 	s.launch(ctx, run.ID)
 	return nil
 }
 
+// ListRuns returns the caller's failed, interrupted or dead runs together with
+// the stored error class/message. An empty status means all unhealthy states.
+func (s *Service) ListRuns(ctx context.Context, userID, status string, limit int) ([]session.Run, error) {
+	if userID == "" {
+		return nil, ports.ErrNotFound
+	}
+	var statuses []session.RunStatus
+	switch status {
+	case "", "all":
+		statuses = []session.RunStatus{
+			session.RunStatusFailed,
+			session.RunStatusInterrupted,
+			session.RunStatusDead,
+		}
+	case string(session.RunStatusFailed):
+		statuses = []session.RunStatus{session.RunStatusFailed}
+	case string(session.RunStatusInterrupted):
+		statuses = []session.RunStatus{session.RunStatusInterrupted}
+	case string(session.RunStatusDead):
+		statuses = []session.RunStatus{session.RunStatusDead}
+	default:
+		return nil, fmt.Errorf("%w: unknown run status %q", ErrInvalidArgument, status)
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	return s.store.Repos().Runs.ListUnhealthy(ctx, userID, statuses, limit)
+}
+
 // Reconcile detects runs left running by a crashed process, marks them
-// interrupted, emits an event and resumes them from the last succeeded step.
+// interrupted and emits an event. In worker mode the run is left for the claim
+// queue (lease expired), so recovery has a single owner; in synchronous/test
+// mode it resumes inline.
 func (s *Service) Reconcile(ctx context.Context) (int, error) {
-	cutoff := s.now().UTC().Add(-s.staleAfter)
-	runs, err := s.store.Repos().Runs.ListStaleRunning(ctx, cutoff, 50)
+	now := s.now().UTC()
+	cutoff := now.Add(-s.staleAfter)
+	runs, err := s.store.Repos().Runs.ListStaleRunning(ctx, cutoff, now, 50)
 	if err != nil {
 		return 0, fmt.Errorf("list stale runs: %w", err)
 	}
@@ -565,12 +609,21 @@ func (s *Service) Reconcile(ctx context.Context) (int, error) {
 			s.logger(runCtx).Error("append run interrupted event", "error", err)
 		}
 
+		if s.workerMode {
+			s.logger(runCtx).Warn("interrupted run queued for a worker", "last_step", run.LastStep)
+			resumed++
+			continue
+		}
+
 		s.logger(runCtx).Warn("resuming interrupted run", "last_step", run.LastStep)
 		if err := s.runner.Execute(runCtx, run.ID); err != nil {
 			s.logger(runCtx).Error("resume interrupted run", "error", err)
 			continue
 		}
 		resumed++
+	}
+	if s.workerMode && resumed > 0 {
+		s.wakeWorkers()
 	}
 	return resumed, nil
 }
@@ -592,6 +645,10 @@ func (s *Service) launch(ctx context.Context, runID string) {
 		execute(ctx)
 		return
 	}
+	if s.workerMode {
+		s.wakeWorkers()
+		return
+	}
 
 	s.wg.Add(1)
 	go func() {
@@ -601,6 +658,12 @@ func (s *Service) launch(ctx context.Context, runID string) {
 		defer cancel()
 		execute(ctx)
 	}()
+}
+
+func (s *Service) wakeWorkers() {
+	if s.wake != nil {
+		s.wake()
+	}
 }
 
 func (s *Service) logger(ctx context.Context) *slog.Logger {

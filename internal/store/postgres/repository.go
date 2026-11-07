@@ -160,8 +160,9 @@ func (r *eventRepository) ListAfter(ctx context.Context, sessionID string, after
 
 type runRepository struct{ q querier }
 
-const runColumns = `id, session_id, kind, status, idempotency_key, request_hash,
-	input_json, attempt, error_code, last_step, created_at, updated_at, finished_at`
+const runColumns = `runs.id, runs.session_id, runs.kind, runs.status, runs.idempotency_key, runs.request_hash,
+	runs.input_json, runs.attempt, runs.error_code, runs.last_step, runs.created_at, runs.updated_at, runs.finished_at,
+	runs.lease_id, runs.lease_worker, runs.lease_expires_at, runs.failure_count, runs.last_error, runs.last_error_class, runs.dead_at`
 
 func (r *runRepository) Create(ctx context.Context, run *session.Run) (bool, *session.Run, error) {
 	input := run.Input
@@ -259,7 +260,8 @@ func (r *runRepository) MarkRunning(ctx context.Context, id string, attempt int,
 func (r *runRepository) MarkFinished(ctx context.Context, id string, status session.RunStatus, errorCode string, at time.Time) error {
 	tag, err := r.q.Exec(ctx, `
 		UPDATE runs
-		SET status = $2, error_code = $3, updated_at = $4, finished_at = $4
+		SET status = $2, error_code = $3, updated_at = $4, finished_at = $4,
+			lease_id = '', lease_worker = '', lease_expires_at = NULL
 		WHERE id = $1`,
 		id, string(status), errorCode, at)
 	if err != nil {
@@ -271,11 +273,29 @@ func (r *runRepository) MarkFinished(ctx context.Context, id string, status sess
 	return nil
 }
 
+func (r *runRepository) MarkFinishedOwned(ctx context.Context, id, leaseID string, status session.RunStatus, errorCode string, at time.Time) error {
+	tag, err := r.q.Exec(ctx, `
+		UPDATE runs
+		SET status = $3, error_code = $4, updated_at = $5, finished_at = $5,
+			lease_id = '', lease_worker = '', lease_expires_at = NULL
+		WHERE id = $1 AND lease_id = $2`,
+		id, leaseID, string(status), errorCode, at)
+	if err != nil {
+		return fmt.Errorf("mark run finished (owned): %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ports.ErrStateConflict
+	}
+	return nil
+}
+
 func (r *runRepository) MarkInterrupted(ctx context.Context, id, lastStep string, at time.Time) error {
 	tag, err := r.q.Exec(ctx, `
 		UPDATE runs
-		SET status = $2, last_step = $3, updated_at = $4, finished_at = $4
-		WHERE id = $1 AND status = $5`,
+		SET status = $2, last_step = $3, updated_at = $4, finished_at = $4,
+			lease_id = '', lease_worker = '', lease_expires_at = NULL
+		WHERE id = $1 AND status = $5
+			AND (lease_expires_at IS NULL OR lease_expires_at < now())`,
 		id, string(session.RunStatusInterrupted), lastStep, at, string(session.RunStatusRunning))
 	if err != nil {
 		return fmt.Errorf("mark run interrupted: %w", err)
@@ -286,15 +306,16 @@ func (r *runRepository) MarkInterrupted(ctx context.Context, id, lastStep string
 	return nil
 }
 
-func (r *runRepository) ListStaleRunning(ctx context.Context, staleBefore time.Time, limit int) ([]session.Run, error) {
+func (r *runRepository) ListStaleRunning(ctx context.Context, staleBefore, now time.Time, limit int) ([]session.Run, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
 	rows, err := r.q.Query(ctx, `
 		SELECT `+runColumns+` FROM runs
 		WHERE status = $1 AND updated_at < $2
+			AND (lease_expires_at IS NULL OR lease_expires_at < $3)
 		ORDER BY updated_at
-		LIMIT $3`, string(session.RunStatusRunning), staleBefore, limit)
+		LIMIT $4`, string(session.RunStatusRunning), staleBefore, now, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list stale runs: %w", err)
 	}
@@ -314,6 +335,172 @@ func (r *runRepository) ListStaleRunning(ctx context.Context, staleBefore time.T
 	return runs, nil
 }
 
+// Claim leases queued or expired runs. SKIP LOCKED lets every instance take
+// different rows without blocking; the NOT EXISTS guard keeps a second run of
+// the same session from executing concurrently.
+func (r *runRepository) Claim(ctx context.Context, workerID, leaseID string, now, leaseUntil time.Time, limit int) ([]session.Run, error) {
+	if limit <= 0 {
+		limit = 1
+	}
+	rows, err := r.q.Query(ctx, `
+		WITH candidates AS (
+			SELECT r.id
+			FROM runs r
+			WHERE r.status IN ($5, $6)
+				AND (r.lease_expires_at IS NULL OR r.lease_expires_at < $1)
+				AND NOT EXISTS (
+					SELECT 1 FROM runs other
+					WHERE other.session_id = r.session_id
+						AND other.id <> r.id
+						AND other.lease_expires_at IS NOT NULL
+						AND other.lease_expires_at >= $1
+				)
+			ORDER BY r.updated_at, r.created_at
+			FOR UPDATE SKIP LOCKED
+			LIMIT $7
+		)
+		UPDATE runs
+		SET status = $5, lease_id = $2, lease_worker = $3, lease_expires_at = $4,
+			attempt = attempt + 1, updated_at = $1, finished_at = NULL
+		FROM candidates
+		WHERE runs.id = candidates.id
+		RETURNING `+runColumns,
+		now, leaseID, workerID, leaseUntil,
+		string(session.RunStatusRunning), string(session.RunStatusInterrupted), limit)
+	if err != nil {
+		return nil, fmt.Errorf("claim runs: %w", err)
+	}
+	defer rows.Close()
+
+	runs := make([]session.Run, 0, limit)
+	for rows.Next() {
+		run, err := scanRun(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan claimed run: %w", err)
+		}
+		runs = append(runs, *run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate claimed runs: %w", err)
+	}
+	return runs, nil
+}
+
+func (r *runRepository) RenewLease(ctx context.Context, id, leaseID string, until time.Time) (bool, error) {
+	tag, err := r.q.Exec(ctx, `
+		UPDATE runs
+		SET lease_expires_at = $3, updated_at = $4
+		WHERE id = $1 AND lease_id = $2 AND status = $5`,
+		id, leaseID, until, time.Now().UTC(), string(session.RunStatusRunning))
+	if err != nil {
+		return false, fmt.Errorf("renew run lease: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+func (r *runRepository) ReleaseLease(ctx context.Context, id, leaseID string) error {
+	_, err := r.q.Exec(ctx, `
+		UPDATE runs
+		SET lease_id = '', lease_worker = '', lease_expires_at = NULL
+		WHERE id = $1 AND lease_id = $2`, id, leaseID)
+	if err != nil {
+		return fmt.Errorf("release run lease: %w", err)
+	}
+	return nil
+}
+
+func (r *runRepository) RecordFailure(ctx context.Context, id, leaseID, errorCode, errorClass, lastError string, at time.Time, maxFailures int) (bool, int, error) {
+	if maxFailures <= 0 {
+		maxFailures = 3
+	}
+	query := `
+		UPDATE runs
+		SET failure_count = failure_count + 1,
+			status = CASE WHEN failure_count + 1 >= $7 THEN $5 ELSE $6 END,
+			error_code = $2, last_error = $3, last_error_class = $4,
+			lease_id = '', lease_worker = '', lease_expires_at = NULL,
+			updated_at = $1, finished_at = $1,
+			dead_at = CASE WHEN failure_count + 1 >= $7 THEN $1 ELSE dead_at END
+		WHERE id = $8`
+	if leaseID != "" {
+		query += ` AND lease_id = $9`
+	}
+	query += ` RETURNING status, failure_count`
+
+	args := []any{at, errorCode, lastError, errorClass,
+		string(session.RunStatusDead), string(session.RunStatusFailed), maxFailures, id}
+	if leaseID != "" {
+		args = append(args, leaseID)
+	}
+
+	var status string
+	var count int
+	err := r.q.QueryRow(ctx, query, args...).Scan(&status, &count)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, 0, ports.ErrStateConflict
+	}
+	if err != nil {
+		return false, 0, fmt.Errorf("record run failure: %w", err)
+	}
+	return session.RunStatus(status) == session.RunStatusDead, count, nil
+}
+
+func (r *runRepository) Requeue(ctx context.Context, id string, resetFailures bool, at time.Time) error {
+	reset := 0
+	if resetFailures {
+		reset = 1
+	}
+	tag, err := r.q.Exec(ctx, `
+		UPDATE runs
+		SET status = $2,
+			failure_count = CASE WHEN $3 = 1 THEN 0 ELSE failure_count END,
+			dead_at = CASE WHEN $3 = 1 THEN NULL ELSE dead_at END,
+			lease_id = '', lease_worker = '', lease_expires_at = NULL,
+			finished_at = NULL, updated_at = $4
+		WHERE id = $1 AND status IN ($5, $6, $7)`,
+		id, string(session.RunStatusRunning), reset, at,
+		string(session.RunStatusFailed), string(session.RunStatusInterrupted), string(session.RunStatusDead))
+	if err != nil {
+		return fmt.Errorf("requeue run: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ports.ErrStateConflict
+	}
+	return nil
+}
+
+func (r *runRepository) ListUnhealthy(ctx context.Context, userID string, statuses []session.RunStatus, limit int) ([]session.Run, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	values := make([]string, 0, len(statuses))
+	for _, status := range statuses {
+		values = append(values, string(status))
+	}
+	rows, err := r.q.Query(ctx, `
+		SELECT `+runColumns+` FROM runs
+		WHERE user_id = $1 AND status = ANY($2::text[])
+		ORDER BY updated_at DESC
+		LIMIT $3`, userID, values, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list unhealthy runs: %w", err)
+	}
+	defer rows.Close()
+
+	runs := make([]session.Run, 0, limit)
+	for rows.Next() {
+		run, err := scanRun(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan unhealthy run: %w", err)
+		}
+		runs = append(runs, *run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate unhealthy runs: %w", err)
+	}
+	return runs, nil
+}
+
 func scanRun(row pgx.Row) (*session.Run, error) {
 	var (
 		run    session.Run
@@ -323,6 +510,8 @@ func scanRun(row pgx.Row) (*session.Run, error) {
 	if err := row.Scan(
 		&run.ID, &run.SessionID, &kind, &status, &run.IdempotencyKey, &run.RequestHash,
 		&run.Input, &run.Attempt, &run.ErrorCode, &run.LastStep, &run.CreatedAt, &run.UpdatedAt, &run.FinishedAt,
+		&run.LeaseID, &run.LeaseWorker, &run.LeaseExpiresAt, &run.FailureCount,
+		&run.LastError, &run.LastErrorClass, &run.DeadAt,
 	); err != nil {
 		return nil, err
 	}

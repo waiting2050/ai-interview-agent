@@ -244,7 +244,7 @@ func (r *Runner) executeReport(ctx context.Context, run *session.Run) error {
 	// only needs to mark the run succeeded.
 	if _, err := r.store.Repos().Reports.GetBySession(ctx, run.SessionID); err == nil {
 		now := r.now().UTC()
-		if err := r.store.Repos().Runs.MarkFinished(ctx, run.ID, session.RunStatusSucceeded, "", now); err != nil {
+		if err := markRunSucceeded(ctx, r.store.Repos(), run, now); err != nil {
 			return fmt.Errorf("mark replayed report run: %w", err)
 		}
 		return nil
@@ -318,7 +318,7 @@ func (r *Runner) commitReport(ctx context.Context, run *session.Run, outcome rep
 
 		if _, err := repos.Reports.GetBySession(ctx, run.SessionID); err == nil {
 			// A concurrent or replayed commit already persisted the report.
-			return repos.Runs.MarkFinished(ctx, run.ID, session.RunStatusSucceeded, "", now)
+			return markRunSucceeded(ctx, repos, run, now)
 		}
 
 		expected := sess.StateVersion
@@ -358,7 +358,7 @@ func (r *Runner) commitReport(ctx context.Context, run *session.Run, outcome rep
 			return fmt.Errorf("persist report: %w", err)
 		}
 		if !created {
-			return repos.Runs.MarkFinished(ctx, run.ID, session.RunStatusSucceeded, "", now)
+			return markRunSucceeded(ctx, repos, run, now)
 		}
 
 		// M11: weak points become review cards in the same transaction that
@@ -426,6 +426,6 @@ func (r *Runner) commitReport(ctx context.Context, run *session.Run, outcome rep
 		}); err != nil {
 			return err
 		}
-		return repos.Runs.MarkFinished(ctx, run.ID, session.RunStatusSucceeded, "", now)
+		return markRunSucceeded(ctx, repos, run, now)
 	})
 }

@@ -17,6 +17,9 @@ const (
 	RunStatusSucceeded   RunStatus = "succeeded"
 	RunStatusFailed      RunStatus = "failed"
 	RunStatusInterrupted RunStatus = "interrupted"
+	// RunStatusDead is terminal: the run failed more than the configured
+	// consecutive-failure threshold and must be re-queued explicitly.
+	RunStatusDead RunStatus = "dead"
 )
 
 // Run is one graph execution. (session_id, kind, idempotency_key) is unique;
@@ -30,13 +33,24 @@ type Run struct {
 	RequestHash    string
 	// Input is the command payload (turn_id + answer) persisted so an answer
 	// run can be resumed after a crash. Start runs keep it empty.
-	Input      []byte
-	Attempt    int
-	ErrorCode  string
-	LastStep   string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	FinishedAt *time.Time
+	Input     []byte
+	Attempt   int
+	ErrorCode string
+	LastStep  string
+	// Lease fields describe which worker currently owns the run. A queued run
+	// has an empty lease; an expired lease may be reclaimed by another worker.
+	LeaseID        string
+	LeaseWorker    string
+	LeaseExpiresAt *time.Time
+	// FailureCount counts consecutive failed executions. A success ends the
+	// run, so the counter only grows through retries until it hits the threshold.
+	FailureCount   int
+	LastError      string
+	LastErrorClass string
+	DeadAt         *time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	FinishedAt     *time.Time
 }
 
 type StepStatus string

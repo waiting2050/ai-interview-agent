@@ -44,7 +44,9 @@ Go 1.25 + [cloudwego/eino](https://github.com/cloudwego/eino) + PostgreSQL + Red
 | 幂等 | 同一 `Idempotency-Key` 只产生一个 run；重复作答返回原 run 并带 `Idempotent-Replayed: true` |
 | 跨实例锁 | Redis `SET NX PX` + token 比较释放；抢锁失败返回可重试的 `409 lock_busy` |
 | 崩溃恢复 | `runs` / `run_steps` 节点级产物，从最后一个成功节点续跑；启动时把超时 `running` run 标记 `interrupted` |
-| 可观测 | 8 个 Prometheus 指标；结构化日志带 `request_id / session_id / run_id / turn_id`；报告含 token 与调用次数（不计算金额） |
+| 队列消费 | PostgreSQL `FOR UPDATE SKIP LOCKED` 认领 + `lease_expires_at` 租约；多实例并行不重复，崩溃后租约过期可被其他实例接管 |
+| 限流与死信 | 按用户 + 动作的 Redis 固定窗口（创建会话 / 提交作答 / 生成报告），超限 429 `rate_limited`；匿名 demo 更严格；连续失败超阈值进入 `dead`，可查询、可人工重试 |
+| 可观测 | Prometheus 指标覆盖模型、SSE、锁、run 失败、worker 认领 / 租约、限流与死信；结构化日志带 `request_id / session_id / run_id / turn_id / worker_id / lease_id`；报告含 token 与调用次数（不计算金额） |
 
 ---
 
@@ -114,6 +116,19 @@ go run ./cmd/server
 | `JWT_TTL` | `24h` | 访问令牌有效期 |
 | `DEMO_LOGIN_LIMIT` | `5` | 单 IP 在窗口内允许的匿名 demo 登录次数 |
 | `DEMO_LOGIN_WINDOW` | `1h` | 匿名 demo 限流窗口 |
+| `WORKER_ID` | 主机名-PID-ULID | worker 实例标识；多实例部署时显式区分 |
+| `WORKER_CONCURRENCY` | `2` | 单实例同时处理的 run 数上限，超出的留在队列 |
+| `WORKER_LEASE_TTL` | `30s` | 认领租约时长；进程崩溃后到期可被其他实例接管 |
+| `WORKER_HEARTBEAT_INTERVAL` | `10s` | 处理中续租间隔；续租失败即放弃本地 run |
+| `WORKER_POLL_INTERVAL` | `1s` | 空队列时的轮询间隔 |
+| `RUN_MAX_FAILURES` | `3` | 连续失败达到该次数进入 `dead`（死信） |
+| `RATE_LIMIT_WINDOW` | `1h` | 单用户限流窗口 |
+| `RATE_LIMIT_SESSION` | `20` | 每窗口创建会话次数 |
+| `RATE_LIMIT_ANSWER` | `120` | 每窗口提交作答次数 |
+| `RATE_LIMIT_REPORT` | `10` | 每窗口生成报告次数 |
+| `DEMO_RATE_LIMIT_SESSION` | `3` | 匿名 demo 创建会话额度（更严格） |
+| `DEMO_RATE_LIMIT_ANSWER` | `20` | 匿名 demo 提交作答额度（更严格） |
+| `DEMO_RATE_LIMIT_REPORT` | `3` | 匿名 demo 生成报告额度（更严格） |
 
 ---
 
@@ -124,7 +139,8 @@ HTTP / SSE  →  应用服务（事务 / 幂等 / 锁）  →  eino 图（Agent 
 ```
 
 - **PostgreSQL 是唯一运行期事实源**：会话、题纲、回合、评估、run / run_step、事件、JD、复习卡全部落库；内存实现只做测试替身。
-- **Redis 不是正确性依赖**：只做跨进程锁，不可达时回退进程内锁，此时只保证单实例正确。
+- **Redis 不是正确性依赖**：做跨进程锁与限流计数；锁不可达时回退进程内锁（此时只保证单实例正确），限流不可达时 fail-open 并打 `WARN` + 指标。
+- **队列也在 PostgreSQL 里**：worker 用 `SELECT … FOR UPDATE SKIP LOCKED` 认领 + 租约续租，不引入额外消息中间件；单实例并发由 `WORKER_CONCURRENCY` 限制，超出留在队列。
 - **恢复不依赖 eino checkpoint**：用 `runs` / `run_steps` 的节点级产物，从最后成功节点续跑。
 - **回合制短图**：每次 HTTP 命令触发一次 `compose.Graph`，执行完即结束；人类作答跨请求，不依赖长驻 Agent。
 
@@ -133,13 +149,13 @@ HTTP / SSE  →  应用服务（事务 / 幂等 / 锁）  →  eino 图（Agent 
 | `cmd/server/` | 入口：配置、依赖组装、迁移、HTTP 启动、优雅退出 |
 | `cmd/evalrunner/` | 评分回归集批量跑分 |
 | `internal/api/http/` | 路由、DTO、参数校验、错误映射、SSE 写出、`request_id` |
-| `internal/app/` | 用例编排：事务、幂等、锁、状态提交、事件发布、run 执行与恢复 |
+| `internal/app/` | 用例编排：事务、幂等、锁、状态提交、事件发布、run 执行与恢复；`worker.go` 为跨实例认领 / 租约 / 死信消费 |
 | `internal/auth/` | 密码哈希、HS256 JWT 签发与校验、注册 / 登录 / 匿名 demo |
 | `internal/agent/` | eino 图、prompt、模型调用、评估 / 出题 / 报告、只读工具 |
 | `internal/domain/` | 会话、评估、报告、追问、领域包、题纲、简历、JD、复习规则 |
-| `internal/ports/` | 仓储 / 模型 / 事件 / 锁接口与事务边界 |
+| `internal/ports/` | 仓储 / 模型 / 事件 / 锁 / 限流接口与事务边界 |
 | `internal/platform/` | 配置、日志、ID、可观测性、公开页面抓取 |
-| `internal/store/` | PostgreSQL / Redis 实现与内存测试替身 |
+| `internal/store/` | PostgreSQL / Redis 实现与内存测试替身；`redis/ratelimit.go` 固定窗口计数 |
 | `internal/transport/sse/` | SSE 帧、心跳、断线续播 |
 | `internal/api/http/demo/` | 演示页静态资源（`//go:embed`，无构建链） |
 | `domainpacks/` | 内嵌领域包：`go-backend` / `java-backend` / `ai-agent` |
@@ -175,7 +191,8 @@ HTTP / SSE  →  应用服务（事务 / 幂等 / 锁）  →  eino 图（Agent 
 | POST | `/v1/sessions/{id}/report` | 对已收尾会话补生成报告 |
 | GET | `/v1/sessions/{id}/report` | 取报告（JSON + Markdown） |
 | GET | `/v1/sessions/{id}/events` | SSE 事件流 |
-| POST | `/v1/sessions/{id}/runs/{run_id}/retry` | 显式重试失败 run |
+| POST | `/v1/sessions/{id}/runs/{run_id}/retry` | 显式重试失败 / 中断 / 死信 run（重新入队） |
+| GET | `/v1/runs` | 查询本人的异常 run（`status` 取 `all` / `failed` / `interrupted` / `dead`，含失败原因与最后错误） |
 | GET | `/v1/review/due` | 到期复习卡（`tz_offset_minutes`，默认 480） |
 | GET | `/v1/review` | 按 `session_id` 列出复习卡 |
 | GET | `/v1/review/{id}` | 复习卡详情 |
@@ -186,7 +203,11 @@ HTTP / SSE  →  应用服务（事务 / 幂等 / 锁）  →  eino 图（Agent 
 
 除 `/healthz`、`/metrics`、`/demo` 与三个 `/v1/auth/*` 端点外，所有 `/v1` 接口都要求 `Authorization: Bearer <token>`；缺失或过期返回 `401 unauthorized`。跨账号访问统一返回 **404**，不泄露资源是否存在；SSE 订阅前同样校验归属。EventSource 无法自定义 Header，因此 `GET /v1/sessions/{id}/events` 额外接受 `?access_token=`（其他路径不接受查询参数令牌）。
 
-**数据归属与旧数据**：`sessions / runs / run_steps / session_events / turns / evaluations / reports / review_cards / jd_listings` 均带 `user_id` 与索引。迁移 `0008_auth.sql` 把历史行回填到占位用户 `usr_legacy`；该用户密码哈希为空，任何登录路径都无法认证为它，因此旧数据不会暴露给新注册账号。新行必须显式写入 owner，迁移后的列已去掉默认值，漏写会直接失败。
+**限流**：按「用户 + 动作」在 Redis 做固定窗口计数，动作分 `create_session` / `submit_answer` / `generate_report` 三类，各自独立额度；匿名 demo 用户走更严格的一组额度。超限返回 **429**，错误码 `rate_limited`，`Retry-After` 头与 `details` 里给出动作、额度、窗口与剩余等待秒数。Redis 不可用时 **fail-open**（放行请求），同时打 `WARN` 日志并累加 `rate_limit_degraded_total{action}`，既不静默也不整站拒绝。
+
+**失败与死信**：run 每次失败记录 `last_error` / `last_error_class`（`model` / `state_conflict` / `internal` / `panic` 等），失败计数达到 `RUN_MAX_FAILURES` 后进入终止状态 `dead`。`GET /v1/runs` 可查询本人失败的 run 及原因；`POST /v1/sessions/{id}/runs/{run_id}/retry` 对 `dead` run 会重置失败计数并重新入队（获得全新重试预算），对 `failed` / `interrupted` 则保留计数继续累计。
+
+**数据归属与旧数据**：`sessions / runs / run_steps / session_events / turns / evaluations / reports / review_cards / jd_listings` 均带 `user_id` 与索引。迁移 `0008_auth.sql` 把历史行回填到占位用户 `usr_legacy`；该用户密码哈希为空，任何登录路径都无法认证为它，因此旧数据不会暴露给新注册账号。新行必须显式写入 owner，迁移后的列已去掉默认值，漏写会直接失败。迁移 `0009_worker.sql` 给 `runs` 加租约与失败字段：历史行的 lease 为空、失败计数为 0，因此旧的 `running` run 可被 worker 立即认领；`Reconcile` 仍先把超时 run 标为 `interrupted` 并保留原事件，历史失败 run 不会自动进入死信。
 
 <details>
 <summary>命令行完整流程（PowerShell / curl）</summary>
@@ -251,12 +272,12 @@ go run ./cmd/evalrunner -provider openai
 
 ## 已知不足
 
-- **鉴权是最小实现**：只有邮箱密码 + JWT，没有 RBAC、找回密码、第三方登录与刷新令牌；匿名 demo 限流是单进程内存计数，多副本需改用 Redis。
+- **鉴权是最小实现**：只有邮箱密码 + JWT，没有 RBAC、找回密码、第三方登录与刷新令牌；匿名 demo 的业务动作限流已走 Redis，但 demo 登录次数仍是单进程 IP 计数，多副本需统一到 Redis。
 - **简历 / JD 仍是规则语义**：正则与关键词可复现，但同义词、隐性技能、复杂排版会漏判；没有 embedding 语义匹配。
 - **图片简历与扫描版 PDF 没有 OCR**：附件只支持 txt / md / docx / pdf；PNG / JPG 返回 `image_requires_ocr`，扫描版 PDF 提不出文字。
 - **报告证据包有截断**：回答摘要、弱项条数、搜索结果都有上限；只有一轮模型点评，无跨场趋势与多轮修订。
 - **复习只有 SM-2 + 自评**：没有每日上限、优先级与长期统计；0–5 是用户自报，系统不做客观回忆验证。
-- **run 队列在进程内**：没有 worker pool、背压与跨实例消费；恢复粒度是 step，不是精确断点。
+- **队列是 PostgreSQL 认领（做浅了）**：`SKIP LOCKED` + 租约已支持多实例与崩溃接管，但空队列靠轮询（跨实例唤醒未接 `LISTEN/NOTIFY`），没有优先级、延迟队列与指数退避；恢复粒度是 step，不是精确断点。
 - **可观测性只在进程内**：指标重启归零，没有集中日志、分布式追踪与告警；多实例各看各的。
 - **JD 抓取只适配静态 HTML**：不执行 JS、不碰登录墙与验证码；抓不到就要求粘贴。
 
@@ -272,4 +293,4 @@ go run ./cmd/evalrunner -provider openai
 | [设计取舍](docs/design-rationale.md) | 13 节 + 附录：为什么这样写、换一种做法会怎样 |
 | [拆解读物](docs/project-walkthrough.md) | 9 个模块 + 10 分钟演示脚本 + 12 条已知不足 |
 
-已实现 M0–M9、M11–M17（M10 未做），演示页视觉轮次 R2–R5。每个里程碑的可运行验收点见[开发计划第 12 节](docs/development-plan.md#12-里程碑与验收点)。
+已实现 M0–M9、M11–M18（M10 未做），演示页视觉轮次 R2–R5。每个里程碑的可运行验收点见[开发计划第 12 节](docs/development-plan.md#12-里程碑与验收点)。

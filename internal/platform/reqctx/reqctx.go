@@ -10,6 +10,8 @@ type key struct{}
 type sessionKey struct{}
 type runKey struct{}
 type turnKey struct{}
+type workerKey struct{}
+type leaseKey struct{}
 
 // With attaches the inbound request id.
 func With(ctx context.Context, requestID string) context.Context {
@@ -58,6 +60,30 @@ func WithTurn(ctx context.Context, turnID string) context.Context {
 	return context.WithValue(ctx, turnKey{}, turnID)
 }
 
+// WithWorker attaches the worker and lease that own the current run.
+func WithWorker(ctx context.Context, workerID, leaseID string) context.Context {
+	ctx = context.WithValue(ctx, workerKey{}, workerID)
+	return context.WithValue(ctx, leaseKey{}, leaseID)
+}
+
+// WorkerID returns the worker id, or "".
+func WorkerID(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	id, _ := ctx.Value(workerKey{}).(string)
+	return id
+}
+
+// LeaseID returns the lease id, or "".
+func LeaseID(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	id, _ := ctx.Value(leaseKey{}).(string)
+	return id
+}
+
 // TurnID returns the turn id, or "".
 func TurnID(ctx context.Context) string {
 	if ctx == nil {
@@ -82,6 +108,12 @@ func Attrs(ctx context.Context) []any {
 	}
 	if v := TurnID(ctx); v != "" {
 		attrs = append(attrs, "turn_id", v)
+	}
+	if v := WorkerID(ctx); v != "" {
+		attrs = append(attrs, "worker_id", v)
+	}
+	if v := LeaseID(ctx); v != "" {
+		attrs = append(attrs, "lease_id", v)
 	}
 	return attrs
 }

@@ -1163,6 +1163,20 @@ data: {"event_id":43,"session_id":"01H...","run_id":"01H...","type":"question.as
 
 ---
 
+### M18 跨实例 worker、限流与死信（已完成）
+
+- **队列不引中间件**：新建 run 仍是 `running` + 空租约，即「已入队」；worker 用 `SELECT … FOR UPDATE SKIP LOCKED` 认领，可认领条件是 `status IN ('running','interrupted')` 且租约为空或已过期，同时用 `NOT EXISTS` 排除同会话已有活跃租约的 run。
+- **租约与续租**：认领时写 `lease_id / lease_worker / lease_expires_at` 并 `attempt+1`；处理中按 `WORKER_HEARTBEAT_INTERVAL` 续租。续租失败或返回 `false` 视为失去所有权，取消本地 run ctx；终态写入 `MarkFinishedOwned` / `RecordFailure` 均带 `lease_id` 条件做 fencing，过期 owner 不能覆盖新 owner。
+- **恢复统一**：worker 模式下 `Reconcile` 只把超时 `running` 标为 `interrupted`、发事件、通知队列，不直接执行；实际重跑由认领队列从最后一个成功 `run_step` 继续。`MarkInterrupted` 带租约过期条件，避免从活跃 worker 手里抢 run。
+- **并发上限**：单实例最多 `WORKER_CONCURRENCY` 个 run 并行，超出的留在队列；`WORKER_POLL_INTERVAL` 控制空队列轮询。
+- **限流**：Redis 固定窗口（`INCR` + `PEXPIRE`），key 为 `rl:<action>:<userID>`；动作分创建会话 / 提交作答 / 生成报告，各自额度可配；匿名 demo 用更严格的一组额度。超限 **429 `rate_limited`** + `Retry-After` + `details`。Redis 故障 fail-open，打 `WARN` 并记 `rate_limit_degraded_total{action}`。
+- **死信**：失败写 `last_error` / `last_error_class`（`model` / `state_conflict` / `internal` / `panic`），`failure_count` 达到 `RUN_MAX_FAILURES` 进入 `dead`；`GET /v1/runs` 查询本人失败 run 及原因，`POST …/runs/{run_id}/retry` 重新入队（`dead` 重置失败计数，`failed` / `interrupted` 保留累计）。
+- **可观测**：新增 `worker_claims_total`、`lease_renew_failures_total`、`rate_limit_rejections_total{action}`、`rate_limit_degraded_total{action}`、`dead_letters_total{class,kind}`；日志补 `worker_id` / `lease_id`。
+- **迁移**：`0009_worker.sql` 给 `runs` 加租约、失败与死信字段及索引；历史行 lease 空、失败计数 0，旧 `running` run 可立即认领，历史失败 run 不自动进入死信。
+- **验收**：两 worker 并发只认领一次、租约过期后重新认领、限流 429、连续失败进入死信、人工重试后重新执行均有测试覆盖；既有 202 + run_id 契约与事件顺序不变，评分逻辑、M6 阈值与回归集未改动。
+
+---
+
 ## 13. 不做清单（YAGNI）
 
 明确不做，避免范围蔓延：

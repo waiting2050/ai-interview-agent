@@ -33,9 +33,10 @@ type Runner struct {
 	log         *slog.Logger
 	metrics     *obs.Metrics
 	usage       *obs.UsageTracker
+	maxFailures int
 }
 
-func NewRunner(store ports.Store, steps StartSteps, answerSteps AnswerSteps, answerGraph *interview.AnswerGraph, reports report.Generator, now func() time.Time, log *slog.Logger, metrics *obs.Metrics, usage *obs.UsageTracker) *Runner {
+func NewRunner(store ports.Store, steps StartSteps, answerSteps AnswerSteps, answerGraph *interview.AnswerGraph, reports report.Generator, now func() time.Time, log *slog.Logger, metrics *obs.Metrics, usage *obs.UsageTracker, maxFailures int) *Runner {
 	if now == nil {
 		now = time.Now
 	}
@@ -48,13 +49,28 @@ func NewRunner(store ports.Store, steps StartSteps, answerSteps AnswerSteps, ans
 	if usage == nil {
 		usage = obs.NewUsageTracker()
 	}
+	if maxFailures <= 0 {
+		maxFailures = 3
+	}
 	return &Runner{
 		store: store, steps: steps, answerSteps: answerSteps, answerGraph: answerGraph,
 		reports: reports, now: now, log: log, metrics: metrics, usage: usage,
+		maxFailures: maxFailures,
 	}
 }
 
 func (r *Runner) Execute(ctx context.Context, runID string) error {
+	return r.execute(ctx, runID, "")
+}
+
+// ExecuteClaimed runs a run already leased by a worker. The claim incremented
+// the attempt, so this path must not call MarkRunning again; it also fences
+// the terminal write with the lease id.
+func (r *Runner) ExecuteClaimed(ctx context.Context, runID, leaseID string) error {
+	return r.execute(ctx, runID, leaseID)
+}
+
+func (r *Runner) execute(ctx context.Context, runID, leaseID string) error {
 	run, err := r.store.Repos().Runs.Get(ctx, runID)
 	if err != nil {
 		return fmt.Errorf("load run %s: %w", runID, err)
@@ -62,16 +78,24 @@ func (r *Runner) Execute(ctx context.Context, runID string) error {
 	if run.Status == session.RunStatusSucceeded {
 		return nil
 	}
+	if run.Status == session.RunStatusDead {
+		return fmt.Errorf("run %s is dead-lettered", runID)
+	}
 
 	// From here on every step, event and model call shares the run identity.
 	ctx = reqctx.WithSession(ctx, run.SessionID)
 	ctx = reqctx.WithRun(ctx, run.ID)
 
 	now := r.now().UTC()
-	if err := r.store.Repos().Runs.MarkRunning(ctx, run.ID, run.Attempt+1, now); err != nil {
-		return fmt.Errorf("mark run running: %w", err)
+	if leaseID == "" {
+		if err := r.store.Repos().Runs.MarkRunning(ctx, run.ID, run.Attempt+1, now); err != nil {
+			return fmt.Errorf("mark run running: %w", err)
+		}
+		run.Attempt++
+	} else if run.LeaseID != leaseID {
+		return fmt.Errorf("run %s is owned by another worker", runID)
 	}
-	r.logger(ctx).Info("run executing", "kind", string(run.Kind), "attempt", run.Attempt+1)
+	r.logger(ctx).Info("run executing", "kind", string(run.Kind), "attempt", run.Attempt)
 
 	switch run.Kind {
 	case session.RunKindStart:
@@ -84,6 +108,16 @@ func (r *Runner) Execute(ctx context.Context, runID string) error {
 		r.failRun(ctx, run, "dispatch", fmt.Errorf("unsupported run kind %q", run.Kind))
 		return fmt.Errorf("unsupported run kind %q", run.Kind)
 	}
+}
+
+// markRunSucceeded is the shared terminal write for all run kinds. Runs leased
+// by a worker use the fenced variant, so a stale owner cannot mark succeeded
+// after another worker reclaimed the run.
+func markRunSucceeded(ctx context.Context, repos ports.Repositories, run *session.Run, at time.Time) error {
+	if run.LeaseID != "" {
+		return repos.Runs.MarkFinishedOwned(ctx, run.ID, run.LeaseID, session.RunStatusSucceeded, "", at)
+	}
+	return repos.Runs.MarkFinished(ctx, run.ID, session.RunStatusSucceeded, "", at)
 }
 
 func (r *Runner) executeStart(ctx context.Context, run *session.Run) error {
@@ -205,26 +239,54 @@ func (r *Runner) commitStart(ctx context.Context, run *session.Run, plan PlanRes
 				ports.ErrStateConflict, sess.ID, sess.Status, sess.Phase)
 		}
 
-		return repos.Runs.MarkFinished(ctx, run.ID, session.RunStatusSucceeded, "", now)
+		return markRunSucceeded(ctx, repos, run, now)
 	})
 }
 
 func (r *Runner) failRun(ctx context.Context, run *session.Run, step string, cause error) {
 	class := failureClass(cause)
 	now := r.now().UTC()
-	if err := r.store.Repos().Runs.MarkFinished(ctx, run.ID, session.RunStatusFailed, runErrorStepFailed, now); err != nil {
-		r.logger(ctx).Error("mark run failed", "error", err)
+	dead, failureCount, err := r.store.Repos().Runs.RecordFailure(ctx, run.ID, run.LeaseID, runErrorStepFailed, class, truncateError(cause), now, r.maxFailures)
+	if err != nil {
+		// A stale owner whose lease was reclaimed must not append a second
+		// failure event; the repository fences the update by lease id.
+		r.logger(ctx).Error("record run failure", "error", err)
+		return
 	}
 	if err := appendEvent(ctx, r.logger(ctx), r.store.Repos().Events, run.SessionID, run.ID, session.EventRunFailed, map[string]any{
-		"run_id":    run.ID,
-		"step_name": step,
-		"code":      runErrorStepFailed,
-		"retryable": true,
+		"run_id":        run.ID,
+		"step_name":     step,
+		"code":          runErrorStepFailed,
+		"retryable":     !dead,
+		"error_class":   class,
+		"failure_count": failureCount,
+		"dead_letter":   dead,
 	}); err != nil {
 		r.logger(ctx).Error("append run failed event", "error", err)
 	}
 	r.metrics.IncRunFailure(string(run.Kind), class)
-	r.logger(ctx).Error("run failed", "step_name", step, "error_class", class, "error", cause)
+	if dead {
+		r.metrics.IncDeadLetter(string(run.Kind), class)
+		r.logger(ctx).Error("run dead-lettered", "step_name", step, "error_class", class,
+			"failure_count", failureCount, "max_failures", r.maxFailures, "error", cause)
+		return
+	}
+	r.logger(ctx).Error("run failed", "step_name", step, "error_class", class,
+		"failure_count", failureCount, "max_failures", r.maxFailures, "error", cause)
+}
+
+// truncateError keeps last_error bounded in the runs table; the full error is
+// still written to the execution log.
+func truncateError(err error) string {
+	if err == nil {
+		return ""
+	}
+	const maxLen = 1024
+	text := err.Error()
+	if len(text) <= maxLen {
+		return text
+	}
+	return text[:maxLen]
 }
 
 // failureClass maps an error to the low-cardinality label used by run metrics.

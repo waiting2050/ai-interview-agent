@@ -41,21 +41,58 @@ type Config struct {
 	// DemoLoginWindow.
 	DemoLoginLimit  int
 	DemoLoginWindow time.Duration
+
+	// WorkerID identifies this instance in runs.lease_worker and logs. Empty
+	// means hostname-pid-ulid is generated at startup.
+	WorkerID string
+	// WorkerConcurrency caps runs executed at the same time by this instance.
+	WorkerConcurrency int
+	// WorkerLeaseTTL is how long a claim survives without a heartbeat.
+	WorkerLeaseTTL time.Duration
+	// WorkerHeartbeatInterval renews a claim while the run executes.
+	WorkerHeartbeatInterval time.Duration
+	// WorkerPollInterval is the idle claim interval.
+	WorkerPollInterval time.Duration
+	// RunMaxFailures is the consecutive-failure threshold for dead letters.
+	RunMaxFailures int
+
+	// RateLimitWindow is the fixed user quota window.
+	RateLimitWindow time.Duration
+	// Per-user command quotas: create session, submit answer, generate report.
+	RateLimitSession int
+	RateLimitAnswer  int
+	RateLimitReport  int
+	// Demo accounts use stricter quotas.
+	DemoRateLimitSession int
+	DemoRateLimitAnswer  int
+	DemoRateLimitReport  int
 }
 
 func Load() (Config, error) {
 	cfg := Config{
-		HTTPAddr:           env("HTTP_ADDR", ":8080"),
-		DatabaseURL:        env("DATABASE_URL", "postgres://interview:interview@localhost:5433/interview?sslmode=disable"),
-		RedisAddr:          env("REDIS_ADDR", "localhost:6380"),
-		RedisPassword:      os.Getenv("REDIS_PASSWORD"),
-		ShutdownTimeout:    10 * time.Second,
-		RunStaleAfter:      60 * time.Second,
-		LockTTL:            10 * time.Second,
-		LockAcquireTimeout: 3 * time.Second,
-		JWTTTL:             24 * time.Hour,
-		DemoLoginLimit:     5,
-		DemoLoginWindow:    time.Hour,
+		HTTPAddr:                env("HTTP_ADDR", ":8080"),
+		DatabaseURL:             env("DATABASE_URL", "postgres://interview:interview@localhost:5433/interview?sslmode=disable"),
+		RedisAddr:               env("REDIS_ADDR", "localhost:6380"),
+		RedisPassword:           os.Getenv("REDIS_PASSWORD"),
+		ShutdownTimeout:         10 * time.Second,
+		RunStaleAfter:           60 * time.Second,
+		LockTTL:                 10 * time.Second,
+		LockAcquireTimeout:      3 * time.Second,
+		JWTTTL:                  24 * time.Hour,
+		DemoLoginLimit:          5,
+		DemoLoginWindow:         time.Hour,
+		WorkerConcurrency:       2,
+		WorkerLeaseTTL:          30 * time.Second,
+		WorkerHeartbeatInterval: 10 * time.Second,
+		WorkerPollInterval:      time.Second,
+		RunMaxFailures:          3,
+		RateLimitWindow:         time.Hour,
+		RateLimitSession:        20,
+		RateLimitAnswer:         120,
+		RateLimitReport:         10,
+		DemoRateLimitSession:    3,
+		DemoRateLimitAnswer:     20,
+		DemoRateLimitReport:     3,
 	}
 
 	var err error
@@ -79,6 +116,49 @@ func Load() (Config, error) {
 	}
 	if cfg.DemoLoginWindow, err = durationEnv("DEMO_LOGIN_WINDOW", cfg.DemoLoginWindow); err != nil {
 		return Config{}, err
+	}
+	if cfg.WorkerLeaseTTL, err = durationEnv("WORKER_LEASE_TTL", cfg.WorkerLeaseTTL); err != nil {
+		return Config{}, err
+	}
+	if cfg.WorkerHeartbeatInterval, err = durationEnv("WORKER_HEARTBEAT_INTERVAL", cfg.WorkerHeartbeatInterval); err != nil {
+		return Config{}, err
+	}
+	if cfg.WorkerPollInterval, err = durationEnv("WORKER_POLL_INTERVAL", cfg.WorkerPollInterval); err != nil {
+		return Config{}, err
+	}
+	if cfg.WorkerConcurrency, err = intEnv("WORKER_CONCURRENCY", cfg.WorkerConcurrency); err != nil {
+		return Config{}, err
+	}
+	if cfg.RunMaxFailures, err = intEnv("RUN_MAX_FAILURES", cfg.RunMaxFailures); err != nil {
+		return Config{}, err
+	}
+	if cfg.RateLimitWindow, err = durationEnv("RATE_LIMIT_WINDOW", cfg.RateLimitWindow); err != nil {
+		return Config{}, err
+	}
+	if cfg.RateLimitSession, err = intEnv("RATE_LIMIT_SESSION", cfg.RateLimitSession); err != nil {
+		return Config{}, err
+	}
+	if cfg.RateLimitAnswer, err = intEnv("RATE_LIMIT_ANSWER", cfg.RateLimitAnswer); err != nil {
+		return Config{}, err
+	}
+	if cfg.RateLimitReport, err = intEnv("RATE_LIMIT_REPORT", cfg.RateLimitReport); err != nil {
+		return Config{}, err
+	}
+	if cfg.DemoRateLimitSession, err = intEnv("DEMO_RATE_LIMIT_SESSION", cfg.DemoRateLimitSession); err != nil {
+		return Config{}, err
+	}
+	if cfg.DemoRateLimitAnswer, err = intEnv("DEMO_RATE_LIMIT_ANSWER", cfg.DemoRateLimitAnswer); err != nil {
+		return Config{}, err
+	}
+	if cfg.DemoRateLimitReport, err = intEnv("DEMO_RATE_LIMIT_REPORT", cfg.DemoRateLimitReport); err != nil {
+		return Config{}, err
+	}
+	cfg.WorkerID = os.Getenv("WORKER_ID")
+	if cfg.WorkerConcurrency <= 0 {
+		cfg.WorkerConcurrency = 2
+	}
+	if cfg.RunMaxFailures <= 0 {
+		cfg.RunMaxFailures = 3
 	}
 
 	cfg.JWTSecret = os.Getenv("JWT_SECRET")

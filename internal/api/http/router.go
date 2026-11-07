@@ -33,6 +33,10 @@ type Deps struct {
 	JDAnalyzer ports.JDAnalyzer
 	// Reviewer backs the M11 spaced-repetition routes. Nil disables them with 503.
 	Reviewer ports.Reviewer
+	// RateLimiter backs the three per-user command quotas. Nil disables them.
+	RateLimiter ports.RateLimiter
+	// RateLimits holds the per-command quotas (demo accounts are stricter).
+	RateLimits RateLimitConfig
 }
 
 // NewRouter wires the HTTP surface: health, metrics, session commands, answers
@@ -85,6 +89,7 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("GET /v1/sessions/{id}/report", h.getReport)
 	mux.HandleFunc("GET /v1/sessions/{id}/events", h.subscribeEvents)
 	mux.HandleFunc("POST /v1/sessions/{id}/runs/{run_id}/retry", h.retryRun)
+	mux.HandleFunc("GET /v1/runs", h.listRuns)
 
 	return withRequestID(withAuth(mux, deps.Auth), deps.Logger)
 }

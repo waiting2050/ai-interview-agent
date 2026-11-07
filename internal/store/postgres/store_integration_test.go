@@ -313,6 +313,95 @@ func TestAnswerFlowWithPostgres(t *testing.T) {
 	}
 }
 
+func TestClaimRunsWithPostgres(t *testing.T) {
+	store := openStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	sess := &session.Session{
+		ID: "sess-claim-pg", OwnerID: "usr-claim-pg",
+		TargetRole: "Go 后端", ResumeText: "resume", JDText: "jd",
+		Config: session.DefaultConfig(), Status: session.StatusCreated,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.Repos().Sessions.Create(ctx, sess); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	for _, id := range []string{"run-claim-a", "run-claim-b"} {
+		run := &session.Run{
+			ID: id, SessionID: sess.ID, Kind: session.RunKindStart,
+			Status: session.RunStatusRunning, IdempotencyKey: id,
+			RequestHash: "hash", CreatedAt: now, UpdatedAt: now,
+		}
+		if created, _, err := store.Repos().Runs.Create(ctx, run); err != nil || !created {
+			t.Fatalf("create run %s: created=%v err=%v", id, created, err)
+		}
+	}
+
+	// Two workers race over two runs: each run is claimed exactly once.
+	var wg sync.WaitGroup
+	claimed := make([][]session.Run, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			runs, err := store.Repos().Runs.Claim(ctx, "worker-pg", "lease-pg", now, now.Add(time.Minute), 2)
+			if err != nil {
+				t.Errorf("claim: %v", err)
+				return
+			}
+			claimed[i] = runs
+		}(i)
+	}
+	wg.Wait()
+
+	seen := map[string]int{}
+	for _, runs := range claimed {
+		for _, run := range runs {
+			seen[run.ID]++
+		}
+	}
+	if len(seen) != 2 || seen["run-claim-a"] != 1 || seen["run-claim-b"] != 1 {
+		t.Fatalf("runs must be claimed exactly once, got %v", seen)
+	}
+
+	// Active leases keep both runs out of the queue.
+	again, err := store.Repos().Runs.Claim(ctx, "worker-pg", "lease-pg-2", now.Add(10*time.Second), now.Add(time.Minute), 2)
+	if err != nil {
+		t.Fatalf("claim again: %v", err)
+	}
+	if len(again) != 0 {
+		t.Fatalf("active leases should block claims, got %d", len(again))
+	}
+
+	// An expired lease is reclaimable by another worker.
+	for id := range seen {
+		if err := store.Repos().Runs.ReleaseLease(ctx, id, "lease-pg"); err != nil {
+			t.Fatalf("release lease: %v", err)
+		}
+	}
+	expired, err := store.Repos().Runs.Claim(ctx, "worker-pg", "lease-expired",
+		now.Add(2*time.Minute), now.Add(2*time.Minute+100*time.Millisecond), 2)
+	if err != nil || len(expired) != 2 {
+		t.Fatalf("expire leases: len=%d err=%v", len(expired), err)
+	}
+	reclaim, err := store.Repos().Runs.Claim(ctx, "worker-pg-2", "lease-reclaim",
+		now.Add(2*time.Minute+time.Second), now.Add(3*time.Minute), 1)
+	if err != nil || len(reclaim) != 1 {
+		t.Fatalf("reclaim expired lease: len=%d err=%v", len(reclaim), err)
+	}
+	if reclaim[0].LeaseID != "lease-reclaim" || reclaim[0].Attempt != 3 {
+		t.Fatalf("unexpected reclaim result: lease=%s attempt=%d", reclaim[0].LeaseID, reclaim[0].Attempt)
+	}
+
+	// The lease-fenced terminal write rejects a stale owner.
+	dead, count, err := store.Repos().Runs.RecordFailure(ctx, reclaim[0].ID, "lease-stale",
+		"step_failed", "internal", "boom", now, 3)
+	if !errors.Is(err, ports.ErrStateConflict) {
+		t.Fatalf("stale failure write err=%v dead=%v count=%d", err, dead, count)
+	}
+}
+
 func TestReconcileWithPostgres(t *testing.T) {
 	store := openStore(t)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))

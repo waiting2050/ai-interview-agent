@@ -303,6 +303,29 @@ func (r *runRepo) MarkFinished(_ context.Context, id string, status session.RunS
 	run.ErrorCode = errorCode
 	run.UpdatedAt = at
 	run.FinishedAt = &at
+	run.LeaseID = ""
+	run.LeaseWorker = ""
+	run.LeaseExpiresAt = nil
+	return nil
+}
+
+func (r *runRepo) MarkFinishedOwned(_ context.Context, id, leaseID string, status session.RunStatus, errorCode string, at time.Time) error {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	run, ok := r.s.runs[id]
+	if !ok {
+		return ports.ErrNotFound
+	}
+	if run.LeaseID != leaseID {
+		return ports.ErrStateConflict
+	}
+	run.Status = status
+	run.ErrorCode = errorCode
+	run.UpdatedAt = at
+	run.FinishedAt = &at
+	run.LeaseID = ""
+	run.LeaseWorker = ""
+	run.LeaseExpiresAt = nil
 	return nil
 }
 
@@ -316,25 +339,198 @@ func (r *runRepo) MarkInterrupted(_ context.Context, id, lastStep string, at tim
 	if run.Status != session.RunStatusRunning {
 		return ports.ErrStateConflict
 	}
+	// Do not yank a run from a live worker: reconciliation only marks runs
+	// whose lease is empty or already expired.
+	if run.LeaseExpiresAt != nil && run.LeaseExpiresAt.After(time.Now().UTC()) {
+		return ports.ErrStateConflict
+	}
 	run.Status = session.RunStatusInterrupted
 	run.LastStep = lastStep
 	run.UpdatedAt = at
 	run.FinishedAt = &at
+	run.LeaseID = ""
+	run.LeaseWorker = ""
+	run.LeaseExpiresAt = nil
 	return nil
 }
 
-func (r *runRepo) ListStaleRunning(_ context.Context, staleBefore time.Time, limit int) ([]session.Run, error) {
+func (r *runRepo) ListStaleRunning(_ context.Context, staleBefore, now time.Time, limit int) ([]session.Run, error) {
 	r.s.mu.RLock()
 	defer r.s.mu.RUnlock()
 
 	var runs []session.Run
 	for _, run := range r.s.runs {
-		if run.Status == session.RunStatusRunning && run.UpdatedAt.Before(staleBefore) {
-			runs = append(runs, *run)
+		if run.Status != session.RunStatusRunning || !run.UpdatedAt.Before(staleBefore) {
+			continue
 		}
+		if run.LeaseExpiresAt != nil && !run.LeaseExpiresAt.Before(now) {
+			continue
+		}
+		runs = append(runs, *run)
 	}
 	sort.Slice(runs, func(i, j int) bool { return runs[i].UpdatedAt.Before(runs[j].UpdatedAt) })
 	if limit > 0 && len(runs) > limit {
+		runs = runs[:limit]
+	}
+	return runs, nil
+}
+
+func (r *runRepo) Claim(_ context.Context, workerID, leaseID string, now, leaseUntil time.Time, limit int) ([]session.Run, error) {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	if limit <= 0 {
+		limit = 1
+	}
+
+	busySessions := map[string]bool{}
+	for _, run := range r.s.runs {
+		if run.LeaseExpiresAt != nil && !run.LeaseExpiresAt.Before(now) {
+			busySessions[run.SessionID] = true
+		}
+	}
+
+	candidates := make([]*session.Run, 0)
+	for _, run := range r.s.runs {
+		if run.Status != session.RunStatusRunning && run.Status != session.RunStatusInterrupted {
+			continue
+		}
+		if run.LeaseExpiresAt != nil && !run.LeaseExpiresAt.Before(now) {
+			continue
+		}
+		if busySessions[run.SessionID] {
+			continue
+		}
+		candidates = append(candidates, run)
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].UpdatedAt.Equal(candidates[j].UpdatedAt) {
+			return candidates[i].CreatedAt.Before(candidates[j].CreatedAt)
+		}
+		return candidates[i].UpdatedAt.Before(candidates[j].UpdatedAt)
+	})
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+
+	claimed := make([]session.Run, 0, len(candidates))
+	for _, run := range candidates {
+		run.Status = session.RunStatusRunning
+		run.LeaseID = leaseID
+		run.LeaseWorker = workerID
+		expires := leaseUntil
+		run.LeaseExpiresAt = &expires
+		run.Attempt++
+		run.UpdatedAt = now
+		run.FinishedAt = nil
+		claimed = append(claimed, *run)
+	}
+	return claimed, nil
+}
+
+func (r *runRepo) RenewLease(_ context.Context, id, leaseID string, until time.Time) (bool, error) {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	run, ok := r.s.runs[id]
+	if !ok || run.LeaseID != leaseID || run.Status != session.RunStatusRunning {
+		return false, nil
+	}
+	expires := until
+	run.LeaseExpiresAt = &expires
+	run.UpdatedAt = time.Now().UTC()
+	return true, nil
+}
+
+func (r *runRepo) ReleaseLease(_ context.Context, id, leaseID string) error {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	if run, ok := r.s.runs[id]; ok && run.LeaseID == leaseID {
+		run.LeaseID = ""
+		run.LeaseWorker = ""
+		run.LeaseExpiresAt = nil
+	}
+	return nil
+}
+
+func (r *runRepo) RecordFailure(_ context.Context, id, leaseID, errorCode, errorClass, lastError string, at time.Time, maxFailures int) (bool, int, error) {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	if maxFailures <= 0 {
+		maxFailures = 3
+	}
+	run, ok := r.s.runs[id]
+	if !ok {
+		return false, 0, ports.ErrNotFound
+	}
+	if leaseID != "" && run.LeaseID != leaseID {
+		return false, 0, ports.ErrStateConflict
+	}
+	run.FailureCount++
+	run.LastError = lastError
+	run.LastErrorClass = errorClass
+	run.ErrorCode = errorCode
+	run.UpdatedAt = at
+	run.FinishedAt = &at
+	run.LeaseID = ""
+	run.LeaseWorker = ""
+	run.LeaseExpiresAt = nil
+	if run.FailureCount >= maxFailures {
+		run.Status = session.RunStatusDead
+		run.DeadAt = &at
+		return true, run.FailureCount, nil
+	}
+	run.Status = session.RunStatusFailed
+	return false, run.FailureCount, nil
+}
+
+func (r *runRepo) Requeue(_ context.Context, id string, resetFailures bool, at time.Time) error {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	run, ok := r.s.runs[id]
+	if !ok {
+		return ports.ErrNotFound
+	}
+	switch run.Status {
+	case session.RunStatusFailed, session.RunStatusInterrupted, session.RunStatusDead:
+	default:
+		return ports.ErrStateConflict
+	}
+	run.Status = session.RunStatusRunning
+	if resetFailures {
+		run.FailureCount = 0
+		run.DeadAt = nil
+	}
+	run.LeaseID = ""
+	run.LeaseWorker = ""
+	run.LeaseExpiresAt = nil
+	run.FinishedAt = nil
+	run.UpdatedAt = at
+	return nil
+}
+
+func (r *runRepo) ListUnhealthy(_ context.Context, userID string, statuses []session.RunStatus, limit int) ([]session.Run, error) {
+	r.s.mu.RLock()
+	defer r.s.mu.RUnlock()
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	wanted := map[session.RunStatus]bool{}
+	for _, status := range statuses {
+		wanted[status] = true
+	}
+
+	var runs []session.Run
+	for _, run := range r.s.runs {
+		if !wanted[run.Status] {
+			continue
+		}
+		sess, ok := r.s.sessions[run.SessionID]
+		if !ok || sess.OwnerID != userID {
+			continue
+		}
+		runs = append(runs, *run)
+	}
+	sort.Slice(runs, func(i, j int) bool { return runs[i].UpdatedAt.After(runs[j].UpdatedAt) })
+	if len(runs) > limit {
 		runs = runs[:limit]
 	}
 	return runs, nil

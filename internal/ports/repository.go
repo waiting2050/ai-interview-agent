@@ -57,10 +57,30 @@ type RunRepository interface {
 	SetLastStep(ctx context.Context, id, step string) error
 	MarkRunning(ctx context.Context, id string, attempt int, at time.Time) error
 	MarkFinished(ctx context.Context, id string, status session.RunStatus, errorCode string, at time.Time) error
+	// MarkFinishedOwned is the lease-fenced variant used by workers. A stale
+	// owner whose lease was reclaimed cannot overwrite the terminal state.
+	MarkFinishedOwned(ctx context.Context, id, leaseID string, status session.RunStatus, errorCode string, at time.Time) error
 	MarkInterrupted(ctx context.Context, id, lastStep string, at time.Time) error
+	// Claim atomically leases up to limit queued (running/interrupted) runs
+	// with an expired or empty lease. It uses SELECT ... FOR UPDATE SKIP
+	// LOCKED, so multiple instances never claim the same run.
+	Claim(ctx context.Context, workerID, leaseID string, now, leaseUntil time.Time, limit int) ([]session.Run, error)
+	// RenewLease extends the lease and reports false when the caller no longer
+	// owns the run (for example because the lease expired and was reclaimed).
+	RenewLease(ctx context.Context, id, leaseID string, until time.Time) (bool, error)
+	ReleaseLease(ctx context.Context, id, leaseID string) error
+	// RecordFailure increments the consecutive-failure counter, stores the
+	// error class/message and moves the run to dead when the threshold is hit.
+	RecordFailure(ctx context.Context, id, leaseID, errorCode, errorClass, lastError string, at time.Time, maxFailures int) (dead bool, failureCount int, err error)
+	// Requeue puts a failed/interrupted/dead run back in the claim queue.
+	// resetFailures is used when an operator explicitly resurrects a dead run.
+	Requeue(ctx context.Context, id string, resetFailures bool, at time.Time) error
+	// ListUnhealthy returns owner-scoped failed/interrupted/dead runs.
+	ListUnhealthy(ctx context.Context, userID string, statuses []session.RunStatus, limit int) ([]session.Run, error)
 	// ListStaleRunning returns running runs whose updated_at is older than
-	// staleBefore. Startup reconciliation uses it to detect crashed runs.
-	ListStaleRunning(ctx context.Context, staleBefore time.Time, limit int) ([]session.Run, error)
+	// staleBefore and whose lease is empty or expired. Startup reconciliation
+	// uses it to detect crashed runs.
+	ListStaleRunning(ctx context.Context, staleBefore, now time.Time, limit int) ([]session.Run, error)
 }
 
 type StepRepository interface {

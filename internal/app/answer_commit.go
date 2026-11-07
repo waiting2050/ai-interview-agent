@@ -114,7 +114,7 @@ func (r *Runner) commitAnswer(
 		// session. If the turn is already answered, a previous attempt reached
 		// the end and only the run status is missing.
 		if turn.Status == session.TurnStatusAnswered {
-			return repos.Runs.MarkFinished(ctx, run.ID, session.RunStatusSucceeded, "", now)
+			return markRunSucceeded(ctx, repos, run, now)
 		}
 		if sess.Status != session.StatusActive || sess.Phase != session.PhaseAwaitingAnswer ||
 			sess.PendingTurnID != turn.ID {
@@ -220,7 +220,7 @@ func (r *Runner) commitAnswer(
 			return err
 		}
 
-		return repos.Runs.MarkFinished(ctx, run.ID, session.RunStatusSucceeded, "", now)
+		return markRunSucceeded(ctx, repos, run, now)
 	})
 }
 
