@@ -12,6 +12,40 @@ type runKey struct{}
 type turnKey struct{}
 type workerKey struct{}
 type leaseKey struct{}
+type traceKey struct{}
+type spanKey struct{}
+
+// WithTrace attaches the end-to-end trace id. At the HTTP boundary it either
+// comes from X-Trace-Id or defaults to the request id, so the common case has a
+// single visible identifier instead of two unrelated ones.
+func WithTrace(ctx context.Context, traceID string) context.Context {
+	return context.WithValue(ctx, traceKey{}, traceID)
+}
+
+// TraceID returns the end-to-end trace id, or "".
+func TraceID(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	id, _ := ctx.Value(traceKey{}).(string)
+	return id
+}
+
+// WithSpan attaches the current in-process span id so child spans can point at
+// their parent in an OTLP export. It is deliberately not part of Attrs: span
+// ids are exporter detail, trace ids are the log correlation key.
+func WithSpan(ctx context.Context, spanID string) context.Context {
+	return context.WithValue(ctx, spanKey{}, spanID)
+}
+
+// SpanID returns the current span id, or "".
+func SpanID(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	id, _ := ctx.Value(spanKey{}).(string)
+	return id
+}
 
 // With attaches the inbound request id.
 func With(ctx context.Context, requestID string) context.Context {
@@ -96,7 +130,10 @@ func TurnID(ctx context.Context) string {
 // Attrs returns slog key-value pairs for every identifier present in ctx.
 // Empty identifiers are skipped so log lines stay stable and readable.
 func Attrs(ctx context.Context) []any {
-	attrs := make([]any, 0, 8)
+	attrs := make([]any, 0, 10)
+	if v := TraceID(ctx); v != "" {
+		attrs = append(attrs, "trace_id", v)
+	}
 	if v := From(ctx); v != "" {
 		attrs = append(attrs, "request_id", v)
 	}

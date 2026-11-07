@@ -437,11 +437,16 @@ type eventEnvelope struct {
 
 func (h *handlers) subscribeEvents(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
-	log := h.deps.Logger.With("session_id", sessionID, "request_id", reqctx.From(r.Context()))
+	log := h.deps.Logger.With(reqctx.Attrs(r.Context())...)
 	if _, ok := h.requireSessionOwner(w, r); !ok {
 		return
 	}
 
+	// A Last-Event-ID header means the EventSource reconnected after a drop;
+	// this is the only reliable reconnect signal the browser sends.
+	if r.Header.Get("Last-Event-ID") != "" {
+		h.deps.Metrics.IncSSEReconnect()
+	}
 	afterID := parseAfterID(r)
 	writer, err := sse.NewWriter(w)
 	if err != nil {

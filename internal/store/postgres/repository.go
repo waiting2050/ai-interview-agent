@@ -160,7 +160,7 @@ func (r *eventRepository) ListAfter(ctx context.Context, sessionID string, after
 
 type runRepository struct{ q querier }
 
-const runColumns = `runs.id, runs.session_id, runs.kind, runs.status, runs.idempotency_key, runs.request_hash,
+const runColumns = `runs.id, runs.session_id, runs.kind, runs.status, runs.idempotency_key, runs.request_hash, runs.trace_id,
 	runs.input_json, runs.attempt, runs.error_code, runs.last_step, runs.created_at, runs.updated_at, runs.finished_at,
 	runs.lease_id, runs.lease_worker, runs.lease_expires_at, runs.failure_count, runs.last_error, runs.last_error_class, runs.dead_at`
 
@@ -171,11 +171,11 @@ func (r *runRepository) Create(ctx context.Context, run *session.Run) (bool, *se
 	}
 	tag, err := r.q.Exec(ctx, `
 		INSERT INTO runs (id, session_id, user_id, kind, status, idempotency_key, request_hash,
-			input_json, attempt, error_code, last_step, created_at, updated_at, finished_at)
-		SELECT $1, $2, (SELECT user_id FROM sessions WHERE id = $2), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+			trace_id, input_json, attempt, error_code, last_step, created_at, updated_at, finished_at)
+		SELECT $1, $2, (SELECT user_id FROM sessions WHERE id = $2), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
 		ON CONFLICT (session_id, kind, idempotency_key) DO NOTHING`,
 		run.ID, run.SessionID, string(run.Kind), string(run.Status), run.IdempotencyKey, run.RequestHash,
-		string(input), run.Attempt, run.ErrorCode, run.LastStep, run.CreatedAt, run.UpdatedAt, run.FinishedAt)
+		run.TraceID, string(input), run.Attempt, run.ErrorCode, run.LastStep, run.CreatedAt, run.UpdatedAt, run.FinishedAt)
 	if err != nil {
 		return false, nil, fmt.Errorf("insert run: %w", err)
 	}
@@ -508,7 +508,7 @@ func scanRun(row pgx.Row) (*session.Run, error) {
 		status string
 	)
 	if err := row.Scan(
-		&run.ID, &run.SessionID, &kind, &status, &run.IdempotencyKey, &run.RequestHash,
+		&run.ID, &run.SessionID, &kind, &status, &run.IdempotencyKey, &run.RequestHash, &run.TraceID,
 		&run.Input, &run.Attempt, &run.ErrorCode, &run.LastStep, &run.CreatedAt, &run.UpdatedAt, &run.FinishedAt,
 		&run.LeaseID, &run.LeaseWorker, &run.LeaseExpiresAt, &run.FailureCount,
 		&run.LastError, &run.LastErrorClass, &run.DeadAt,

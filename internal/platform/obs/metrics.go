@@ -20,6 +20,12 @@ type modelCallKey struct {
 	Result   string
 }
 
+type modelFailureKey struct {
+	Provider string
+	Model    string
+	Class    string
+}
+
 type tokenKey struct {
 	Provider  string
 	Model     string
@@ -37,16 +43,20 @@ type Metrics struct {
 	mu sync.Mutex
 
 	modelCalls         map[modelCallKey]uint64
+	modelCallFailures  map[modelFailureKey]uint64
 	tokens             map[tokenKey]uint64
 	evaluationDegraded map[string]uint64
 	reportDegraded     map[string]uint64
+	lockAttempts       uint64
 	lockConflicts      uint64
 	runFailures        map[runFailureKey]uint64
 	deadLetters        map[runFailureKey]uint64
 	rateLimitRejected  map[string]uint64
 	rateLimitDegraded  map[string]uint64
 	workerClaims       uint64
+	leaseRenewAttempts uint64
 	leaseRenewFailures uint64
+	sseReconnects      uint64
 	delivery           histogram
 
 	sseConnections atomic.Int64
@@ -56,6 +66,7 @@ type Metrics struct {
 func NewMetrics() *Metrics {
 	return &Metrics{
 		modelCalls:         map[modelCallKey]uint64{},
+		modelCallFailures:  map[modelFailureKey]uint64{},
 		tokens:             map[tokenKey]uint64{},
 		evaluationDegraded: map[string]uint64{},
 		reportDegraded:     map[string]uint64{},
@@ -75,6 +86,51 @@ func (m *Metrics) IncModelCall(provider, model, result string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.modelCalls[modelCallKey{Provider: provider, Model: model, Result: result}]++
+}
+
+// IncModelCallFailure counts one failed model invocation by error class.
+// Together with ai_interview_model_calls_total{result="error"} it yields the
+// failure rate per error_class without duplicating the success counter.
+func (m *Metrics) IncModelCallFailure(provider, model, class string) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.modelCallFailures[modelFailureKey{Provider: provider, Model: model, Class: nonEmpty(class)}]++
+}
+
+// IncLockAttempt counts one session lock acquisition attempt. The contention
+// rate is lock_conflicts_total / lock_attempts_total.
+func (m *Metrics) IncLockAttempt() {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.lockAttempts++
+}
+
+// IncSSEReconnect counts one SSE subscription carrying Last-Event-ID, i.e. a
+// client that reconnected after a dropped stream.
+func (m *Metrics) IncSSEReconnect() {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sseReconnects++
+}
+
+// IncLeaseRenewAttempt counts one worker lease heartbeat. The renewal failure
+// rate is lease_renew_failures_total / lease_renew_attempts_total.
+func (m *Metrics) IncLeaseRenewAttempt() {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.leaseRenewAttempts++
 }
 
 // AddModelTokens adds input/output token usage reported by a model call.
@@ -217,6 +273,13 @@ func (m *Metrics) ModelCallTotal(provider, model, result string) uint64 {
 	return m.modelCalls[modelCallKey{Provider: provider, Model: model, Result: result}]
 }
 
+// ModelCallFailureTotal is an accessor used by tests.
+func (m *Metrics) ModelCallFailureTotal(provider, model, class string) uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.modelCallFailures[modelFailureKey{Provider: provider, Model: model, Class: nonEmpty(class)}]
+}
+
 // TokenTotal is an accessor used by tests and ad-hoc checks.
 func (m *Metrics) TokenTotal(provider, model, direction string) uint64 {
 	m.mu.Lock()
@@ -238,11 +301,25 @@ func (m *Metrics) ReportDegradedTotal(reason string) uint64 {
 	return m.reportDegraded[nonEmpty(reason)]
 }
 
+// LockAttemptTotal is an accessor used by tests.
+func (m *Metrics) LockAttemptTotal() uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.lockAttempts
+}
+
 // LockConflictTotal is an accessor used by tests.
 func (m *Metrics) LockConflictTotal() uint64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.lockConflicts
+}
+
+// SSEReconnectTotal is an accessor used by tests.
+func (m *Metrics) SSEReconnectTotal() uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.sseReconnects
 }
 
 // SSEConnectionCount returns the live SSE connection gauge.
@@ -279,6 +356,13 @@ func (m *Metrics) WorkerClaimTotal() uint64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.workerClaims
+}
+
+// LeaseRenewAttemptTotal is an accessor used by tests.
+func (m *Metrics) LeaseRenewAttemptTotal() uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.leaseRenewAttempts
 }
 
 // LeaseRenewFailureTotal is an accessor used by tests.
@@ -335,6 +419,17 @@ func (m *Metrics) WriteText(w io.Writer) error {
 		return err
 	}
 
+	var modelFailureLines []string
+	for k, v := range m.modelCallFailures {
+		modelFailureLines = append(modelFailureLines, fmt.Sprintf(
+			`ai_interview_model_call_failures_total{class="%s",model="%s",provider="%s"} %d`,
+			escape(k.Class), escape(k.Model), escape(k.Provider), v))
+	}
+	if err := writeFamily("ai_interview_model_call_failures_total",
+		"Failed model invocations by error class.", "counter", modelFailureLines); err != nil {
+		return err
+	}
+
 	var tokenLines []string
 	for k, v := range m.tokens {
 		tokenLines = append(tokenLines, fmt.Sprintf(
@@ -366,6 +461,12 @@ func (m *Metrics) WriteText(w io.Writer) error {
 		return err
 	}
 
+	if err := writeFamily("ai_interview_lock_attempts_total",
+		"Session lock acquisition attempts.", "counter",
+		[]string{fmt.Sprintf("ai_interview_lock_attempts_total %d", m.lockAttempts)}); err != nil {
+		return err
+	}
+
 	if err := writeFamily("ai_interview_lock_conflicts_total",
 		"Session lock acquisitions that returned busy.", "counter",
 		[]string{fmt.Sprintf("ai_interview_lock_conflicts_total %d", m.lockConflicts)}); err != nil {
@@ -375,6 +476,12 @@ func (m *Metrics) WriteText(w io.Writer) error {
 	if err := writeFamily("ai_interview_sse_connections",
 		"Live SSE connections.", "gauge",
 		[]string{fmt.Sprintf("ai_interview_sse_connections %d", m.sseConnections.Load())}); err != nil {
+		return err
+	}
+
+	if err := writeFamily("ai_interview_sse_reconnects_total",
+		"SSE subscriptions that resumed with Last-Event-ID.", "counter",
+		[]string{fmt.Sprintf("ai_interview_sse_reconnects_total %d", m.sseReconnects)}); err != nil {
 		return err
 	}
 
@@ -403,6 +510,12 @@ func (m *Metrics) WriteText(w io.Writer) error {
 	if err := writeFamily("ai_interview_worker_claims_total",
 		"Runs claimed by this instance.", "counter",
 		[]string{fmt.Sprintf("ai_interview_worker_claims_total %d", m.workerClaims)}); err != nil {
+		return err
+	}
+
+	if err := writeFamily("ai_interview_lease_renew_attempts_total",
+		"Worker lease heartbeat attempts.", "counter",
+		[]string{fmt.Sprintf("ai_interview_lease_renew_attempts_total %d", m.leaseRenewAttempts)}); err != nil {
 		return err
 	}
 

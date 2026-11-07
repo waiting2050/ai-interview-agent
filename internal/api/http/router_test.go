@@ -708,6 +708,41 @@ func eventTypesOf(events []session.Event) []string {
 	return types
 }
 
+func TestTraceIDHeaderDefaultsToRequestID(t *testing.T) {
+	srv, _, _ := newTestRouter(t)
+
+	resp, err := http.Get(srv.URL + "/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	traceID, requestID := resp.Header.Get("X-Trace-Id"), resp.Header.Get("X-Request-ID")
+	if traceID == "" || requestID == "" {
+		t.Fatalf("missing headers: trace=%q request=%q", traceID, requestID)
+	}
+	if traceID != requestID {
+		t.Fatalf("without an inbound trace header, trace_id must equal request_id: %q vs %q", traceID, requestID)
+	}
+
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/healthz", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("X-Trace-Id", "trace-from-client")
+	req.Header.Set("X-Request-ID", "req-from-client")
+	resp2, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp2.Body.Close()
+	if got := resp2.Header.Get("X-Trace-Id"); got != "trace-from-client" {
+		t.Fatalf("trace header = %q", got)
+	}
+	if got := resp2.Header.Get("X-Request-ID"); got != "req-from-client" {
+		t.Fatalf("request header = %q", got)
+	}
+}
+
 func decodeBody(r io.Reader, dst any) error {
 	body, err := io.ReadAll(r)
 	if err != nil {

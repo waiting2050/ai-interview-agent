@@ -30,6 +30,17 @@ func (l *ProcessLocker) Acquire(_ context.Context, key, token string) error {
 	return nil
 }
 
+// Refresh is a no-op for the in-process lock: it has no TTL, so ownership
+// cannot expire while the holder is alive.
+func (l *ProcessLocker) Refresh(_ context.Context, key, token string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if owner, ok := l.held[key]; !ok || owner != token {
+		return ports.ErrLockBusy
+	}
+	return nil
+}
+
 func (l *ProcessLocker) Release(_ context.Context, key, token string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()

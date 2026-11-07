@@ -217,7 +217,8 @@ active(ready_to_finalize) ──report──► reporting ──► completed �
 ### 3.4 并发控制
 
 - 跨进程：Redis `SET lock:session:{id} <token> NX PX <LOCK_TTL>`，默认 TTL 10s；释放用 Lua 比较 token 后删除，过期或换主后旧持有者无法误删。
-- 抢锁：默认最多等待 3s（`LOCK_ACQUIRE_TIMEOUT`，每 50ms 重试），仍失败返回 `ports.ErrLockBusy` → HTTP `409 lock_busy`（`retryable=true`），不静默丢弃命令。
+- **锁只保护命令的读检查-写临界区**：worker 模式下命令入队后立即释放，run 在锁外执行；同一 session 只跑一个 run 由 DB 约束（`Claim` 的 `NOT EXISTS running`）与 CAS 保证，不依赖锁跨越整个 run。同步内联模式下 run 在锁内执行，因此额外启动 watchdog，按 `LOCK_TTL/3` 调用 `Refresh` 续期；失去所有权时记录 `session lock lost during inline run`。
+- 抢锁：默认最多等待 3s（`LOCK_ACQUIRE_TIMEOUT`，每 50ms 重试），仍失败返回 `ports.ErrLockBusy` → HTTP `409 lock_busy`（`retryable=true`），不静默丢弃命令。每次尝试计 `lock_attempts_total`，失败计 `lock_conflicts_total`。
 - 重入：同一 token 再次 `Acquire` 只刷新 TTL，返回成功；不做嵌套计数，一次 `Release` 即释放。不同 token 一律互斥。app 层每个命令只取一次锁，不做嵌套。
 - 进程内：`platform/lock.ProcessLocker` 仅用于单测与 Redis 不可达时的单实例降级；运行期默认注入 Redis 实现。
 - 数据库兜底：`UPDATE sessions ... WHERE state_version = $2` 的 CAS、`turns` 的 `UPDATE ... WHERE status='pending'`、`(session_id, seq)` 与 `runs(session_id, kind, idempotency_key)` 唯一约束；即使锁失效也不会产生双写。
@@ -866,7 +867,8 @@ data: {"event_id":43,"session_id":"01H...","run_id":"01H...","type":"question.as
 
 | 字段 | 出现位置 | 说明 |
 | --- | --- | --- |
-| `request_id` | 所有请求 | 来自 `X-Request-ID`，缺失则服务端生成；异步 run 通过 `context.WithoutCancel` 继承 |
+| `trace_id` | 全链路 | 端到端关联根。HTTP 入口从 `X-Trace-Id` 取，缺失则等于本次 `request_id`；随 `runs.trace_id` 持久化，worker claim、重试与后续 run 均恢复同一值 |
+| `request_id` | 所有请求 | 单次 HTTP 请求标识。来自 `X-Request-ID`，缺失则服务端生成；不随 run 持久化 |
 | `session_id` | 会话相关 | HTTP 中间件从 `/v1/sessions/{id}` 解析；app 命令入口再次写入 ctx |
 | `run_id` | 会话相关 | `Runner.Execute` 载入 run 后写入 ctx |
 | `turn_id` | 作答/评估 | `Answer` 命令与 answer run 执行时写入 ctx |
@@ -876,16 +878,20 @@ data: {"event_id":43,"session_id":"01H...","run_id":"01H...","type":"question.as
 | `result` / `latency_ms` / `error_class` | 模型调用与失败路径 | 失败分类复用 `llm.Classify` |
 | `prompt_tokens` / `completion_tokens` / `total_tokens` | 模型调用成功 | 成本口径（见 10.4） |
 
-关键路径使用同一套字段：命令入队（`start/answer/report run accepted`）、步骤执行（`run step started/succeeded/replayed`）、模型调用（`model call`）、事件追加（`event appended`）、报告生成（`report run succeeded`）。
+关键路径使用同一套字段：命令入队（`start/answer/report run accepted`）、步骤执行（`run step started/succeeded/replayed`）、模型调用（`model call`）、工具调用（`tool call`）、事件追加（`event appended`）、报告生成（`report run succeeded`）。
 
 隐私约定：日志只记录 ID、长度、状态与计数，**不记录答案正文、API key 或模型请求/响应文本**；`appendEvent` 只打印事件元数据。
 
-### 10.2 run / turn 级链路
+### 10.2 trace_id 与 request_id 的分工
 
-- 一次 HTTP 命令生成 `request_id`；命令入队时写入 `session_id`（作答再写 `turn_id`），run 执行时写入 `run_id`，模型客户端从 ctx 读取全部字段。
-- run 内每个 step 形成 `run_id + step_name + attempt` 节点；一次 grep `request_id` 可还原「命令 → 步骤 → 模型调用 → 事件 → 响应」。
-- SSE 事件带 `event_id` 与 `run_id`，前端反馈可用 `event_id` 对应服务端日志。
-- 不接入 OpenTelemetry / Jaeger：`request_id + run_id` 的日志关联已满足当前规模，APM 仍在 YAGNI。
+两个 ID 不是并列的两套体系，而是「一条链路」和「其中一次请求」：
+
+- **`trace_id` 是根**：一次产品操作产生的所有 HTTP 请求（创建、开始、作答、订阅事件）、后台 run、步骤、模型调用、工具调用、事件写入共享同一个 `trace_id`。它由入口生成，也可以由客户端通过 `X-Trace-Id` 透传；命令入队时写入 `runs.trace_id`，worker claim 或重试时从库里恢复。
+- **`request_id` 是分支**：只标识单次 HTTP 请求。客户端用 `X-Request-ID` 可以给一次请求打标，但它不会传到 run。
+- **默认同一条，显式透传时是父子**：客户端只发一个请求且不带 trace 头时，服务端令 `trace_id = request_id`，日志里只看到一个值，避免「两个 ID 不知道看哪个」。同一业务链路跨多个请求时，重复发同一个 `X-Trace-Id`，`request_id` 每次不同，此时 trace 是父、request 是子。
+- 链路还原：`grep trace_id=<id>` 可覆盖「HTTP 命令 → 入队 → run 节点 → 模型/工具调用 → 事件写入」；`grep request_id=<id>` 只覆盖其中一次 HTTP 调用。
+
+**为什么先不引 collector**：结构化日志已经能按 `trace_id` 还原完整链路，当前单实例/小集群不需要 span 采样、聚合和跨服务依赖图。引入 OpenTelemetry SDK + collector 会增加运行依赖、部署组件和版本升级面，却换不来当前阶段可用的额外信息。因此 OTLP 是可选出口：配置 `OTLP_ENDPOINT`（或 `OTEL_EXPORTER_OTLP_ENDPOINT`）才启用，直接以 OTLP/HTTP JSON 发送 span（无 SDK、无 collector、无缓冲队列）；没配置时只写日志，零网络、零额外依赖。导出失败只记 Debug，不影响业务请求。
 
 ### 10.3 模型调用与 token 统计
 
@@ -895,12 +901,17 @@ data: {"event_id":43,"session_id":"01H...","run_id":"01H...","type":"question.as
 | 指标 | 类型 | 标签 |
 | --- | --- | --- |
 | `ai_interview_model_calls_total` | counter | `provider,model,result`（success/error） |
+| `ai_interview_model_call_failures_total` | counter | `provider,model,class`（`class` 复用 `llm.Classify`；失败率 = 本指标 / `model_calls_total{result="error"}` 的同口径明细） |
 | `ai_interview_model_tokens_total` | counter | `provider,model,direction`（input/output） |
 | `ai_interview_evaluation_degraded_total` | counter | `reason`（错误码） |
 | `ai_interview_report_degraded_total` | counter | `reason`（错误码） |
+| `ai_interview_lock_attempts_total` | counter | 无（争抢失败率 = `lock_conflicts_total / lock_attempts_total`） |
 | `ai_interview_lock_conflicts_total` | counter | 无 |
 | `ai_interview_sse_connections` | gauge | 无 |
+| `ai_interview_sse_reconnects_total` | counter | 无（带 `Last-Event-ID` 的订阅次数） |
 | `ai_interview_sse_event_delivery_seconds` | histogram | 无（查询事件到写出耗时） |
+| `ai_interview_lease_renew_attempts_total` | counter | 无（续租失败率 = `lease_renew_failures_total / lease_renew_attempts_total`） |
+| `ai_interview_lease_renew_failures_total` | counter | 无 |
 | `ai_interview_run_failures_total` | counter | `kind,class` |
 
 - `GET /metrics` 输出 `text/plain; version=0.0.4`，可直接被 Prometheus 抓取。
@@ -915,6 +926,7 @@ data: {"event_id":43,"session_id":"01H...","run_id":"01H...","type":"question.as
 ### 10.5 失败与降级计数
 
 - 计数与日志成对出现：评估降级、报告降级、锁冲突、run 失败都同时写指标与结构化日志。
+- 新补充的比率型口径：模型调用失败按 `error_class` 细分；锁争抢失败率 = `lock_conflicts_total / lock_attempts_total`；worker lease 续租失败率 = `lease_renew_failures_total / lease_renew_attempts_total`；SSE 断线重连次数取 `sse_reconnects_total`（以 `Last-Event-ID` 为准）。
 - SSE 连接数在订阅成功后 +1、handler 退出时 -1；事件投递延迟按「查询事件 → 写出成功」计时。
 - 不做实时告警、APM 接入或日志聚合平台；本地用 stdout JSON + grep 即可。
 

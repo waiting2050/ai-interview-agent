@@ -15,6 +15,7 @@ import (
 	"github.com/waiting2050/ai-interview-agent/internal/platform/idgen"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/obs"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/reqctx"
+	"github.com/waiting2050/ai-interview-agent/internal/platform/trace"
 	"github.com/waiting2050/ai-interview-agent/internal/ports"
 )
 
@@ -33,10 +34,11 @@ type Runner struct {
 	log         *slog.Logger
 	metrics     *obs.Metrics
 	usage       *obs.UsageTracker
+	tracer      *trace.Tracer
 	maxFailures int
 }
 
-func NewRunner(store ports.Store, steps StartSteps, answerSteps AnswerSteps, answerGraph *interview.AnswerGraph, reports report.Generator, now func() time.Time, log *slog.Logger, metrics *obs.Metrics, usage *obs.UsageTracker, maxFailures int) *Runner {
+func NewRunner(store ports.Store, steps StartSteps, answerSteps AnswerSteps, answerGraph *interview.AnswerGraph, reports report.Generator, now func() time.Time, log *slog.Logger, metrics *obs.Metrics, usage *obs.UsageTracker, tracer *trace.Tracer, maxFailures int) *Runner {
 	if now == nil {
 		now = time.Now
 	}
@@ -55,7 +57,7 @@ func NewRunner(store ports.Store, steps StartSteps, answerSteps AnswerSteps, ans
 	return &Runner{
 		store: store, steps: steps, answerSteps: answerSteps, answerGraph: answerGraph,
 		reports: reports, now: now, log: log, metrics: metrics, usage: usage,
-		maxFailures: maxFailures,
+		tracer: tracer, maxFailures: maxFailures,
 	}
 }
 
@@ -70,7 +72,7 @@ func (r *Runner) ExecuteClaimed(ctx context.Context, runID, leaseID string) erro
 	return r.execute(ctx, runID, leaseID)
 }
 
-func (r *Runner) execute(ctx context.Context, runID, leaseID string) error {
+func (r *Runner) execute(ctx context.Context, runID, leaseID string) (runErr error) {
 	run, err := r.store.Repos().Runs.Get(ctx, runID)
 	if err != nil {
 		return fmt.Errorf("load run %s: %w", runID, err)
@@ -83,8 +85,16 @@ func (r *Runner) execute(ctx context.Context, runID, leaseID string) error {
 	}
 
 	// From here on every step, event and model call shares the run identity.
+	if run.TraceID != "" {
+		ctx = reqctx.WithTrace(ctx, run.TraceID)
+	}
 	ctx = reqctx.WithSession(ctx, run.SessionID)
 	ctx = reqctx.WithRun(ctx, run.ID)
+	ctx, endSpan := r.tracer.Start(ctx, "run."+string(run.Kind), map[string]any{
+		"run.kind":    string(run.Kind),
+		"run.attempt": run.Attempt,
+	})
+	defer func() { endSpan(runErr) }()
 
 	now := r.now().UTC()
 	if leaseID == "" {

@@ -21,9 +21,14 @@ var (
 //     and extends the TTL, which is the only reentrant case.
 //   - Implementations must set an expiry so a crashed owner cannot block a
 //     session forever.
+//   - Refresh renews the TTL for the current owner without queueing. It returns
+//     ErrLockBusy when the token no longer owns the key (the lock expired and
+//     was taken by someone else), so a long-running command can detect that it
+//     lost ownership instead of writing under a stale guarantee.
 //   - Release only deletes the key when the token still matches. Releasing an
 //     expired or foreign lock is a no-op, not an error.
 type Locker interface {
 	Acquire(ctx context.Context, key, token string) error
+	Refresh(ctx context.Context, key, token string) error
 	Release(ctx context.Context, key, token string) error
 }

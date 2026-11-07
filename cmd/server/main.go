@@ -23,6 +23,7 @@ import (
 	"github.com/waiting2050/ai-interview-agent/internal/platform/jobfetch"
 	platformlock "github.com/waiting2050/ai-interview-agent/internal/platform/lock"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/obs"
+	"github.com/waiting2050/ai-interview-agent/internal/platform/trace"
 	"github.com/waiting2050/ai-interview-agent/internal/ports"
 	"github.com/waiting2050/ai-interview-agent/internal/store/postgres"
 	"github.com/waiting2050/ai-interview-agent/internal/store/redis"
@@ -120,6 +121,14 @@ func run() error {
 		logger.Info("session lock ready", "backend", "redis", "addr", cfg.RedisAddr)
 	}
 
+	// OTLP export is opt-in: without an endpoint this stays a no-op and only
+	// structured logs carry trace_id.
+	tracer := trace.New(cfg.OTLPEndpoint, "ai-interview-agent", logger)
+	defer tracer.Close()
+	if tracer.Enabled() {
+		logger.Info("otlp trace export enabled", "endpoint", cfg.OTLPEndpoint)
+	}
+
 	svc := app.New(store, app.Options{
 		Logger:            logger,
 		RunStaleAfter:     cfg.RunStaleAfter,
@@ -128,8 +137,10 @@ func run() error {
 		AnswerGraph:       answerGraph,
 		ReportGenerator:   reportGenerator,
 		Locker:            locker,
+		LockRenewInterval: cfg.LockTTL / 3,
 		Metrics:           metrics,
 		Usage:             usage,
+		Tracer:            tracer,
 		MaxRunFailures:    cfg.RunMaxFailures,
 	})
 
@@ -218,6 +229,7 @@ func run() error {
 			}),
 			Reviewer:       reviewer,
 			EvalResultsDir: cfg.EvalResultsDir,
+			Tracer:         tracer,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}

@@ -123,6 +123,30 @@ func (l *Locker) Acquire(ctx context.Context, key, token string) error {
 	}
 }
 
+var refreshScript = goredis.NewScript(`
+if redis.call("get", KEYS[1]) == ARGV[1] then
+  return redis.call("pexpire", KEYS[1], ARGV[2])
+end
+return 0
+`)
+
+// Refresh renews the TTL only when the caller still owns the key. It never
+// waits: losing ownership is reported immediately as ErrLockBusy.
+func (l *Locker) Refresh(ctx context.Context, key, token string) error {
+	ttl := l.ttl.Milliseconds()
+	if ttl <= 0 {
+		ttl = 1
+	}
+	result, err := refreshScript.Run(ctx, l.client, []string{key}, token, ttl).Int64()
+	if err != nil {
+		return fmt.Errorf("%w: %v", ports.ErrLockBackend, err)
+	}
+	if result == 0 {
+		return ports.ErrLockBusy
+	}
+	return nil
+}
+
 var releaseScript = goredis.NewScript(`
 if redis.call("get", KEYS[1]) == ARGV[1] then
   return redis.call("del", KEYS[1])

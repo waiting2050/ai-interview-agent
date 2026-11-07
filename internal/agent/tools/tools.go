@@ -8,12 +8,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/waiting2050/ai-interview-agent/internal/domain/evaluation"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/session"
+	"github.com/waiting2050/ai-interview-agent/internal/platform/reqctx"
 	"github.com/waiting2050/ai-interview-agent/internal/ports"
 )
 
@@ -243,7 +245,7 @@ func (q *Query) beginCall(ctx context.Context, tool, args string) (context.Conte
 	return callCtx, cancel, time.Now(), nil
 }
 
-func (q *Query) endCall(tool, args string, start time.Time, resultRunes int, truncated bool) {
+func (q *Query) endCall(ctx context.Context, tool, args string, start time.Time, resultRunes int, truncated bool) {
 	record := CallRecord{
 		Tool:         tool,
 		Args:         args,
@@ -253,6 +255,12 @@ func (q *Query) endCall(tool, args string, start time.Time, resultRunes int, tru
 		SectionLabel: q.sectionLabel,
 	}
 	q.records = append(q.records, record)
+	slog.Default().Info("tool call", append(reqctx.Attrs(ctx),
+		"tool", tool,
+		"duration_ms", record.DurationMS,
+		"result_runes", resultRunes,
+		"truncated", truncated,
+	)...)
 }
 
 func (q *Query) callError(tool string, ctx context.Context, err error) error {
@@ -386,7 +394,7 @@ func (q *Query) SessionOverview(ctx context.Context) (Overview, error) {
 	if truncated {
 		overview.Turns = limitTurns(overview.Turns, 20)
 	}
-	q.endCall("get_session_overview", q.sessionID, start, minInt(resultRunes, q.opts.MaxResultRunes), truncated)
+	q.endCall(ctx, "get_session_overview", q.sessionID, start, minInt(resultRunes, q.opts.MaxResultRunes), truncated)
 	return overview, nil
 }
 
@@ -440,7 +448,7 @@ func (q *Query) ListWeakTurns(ctx context.Context, limit int) (SearchResult, err
 	if capped {
 		truncated = true
 	}
-	q.endCall("list_weak_turns", fmt.Sprintf("limit=%d", limit), start, minInt(runes, q.opts.MaxResultRunes), truncated)
+	q.endCall(ctx, "list_weak_turns", fmt.Sprintf("limit=%d", limit), start, minInt(runes, q.opts.MaxResultRunes), truncated)
 	return SearchResult{Turns: out, Total: len(out), Truncated: truncated}, nil
 }
 
@@ -508,7 +516,7 @@ func (q *Query) SearchTurns(ctx context.Context, in SearchInput) (SearchResult, 
 	if capped {
 		truncated = true
 	}
-	q.endCall("search_turns", fmt.Sprintf("topic=%s query=%s limit=%d", in.Topic, in.Query, in.Limit), start, minInt(runes, q.opts.MaxResultRunes), truncated)
+	q.endCall(ctx, "search_turns", fmt.Sprintf("topic=%s query=%s limit=%d", in.Topic, in.Query, in.Limit), start, minInt(runes, q.opts.MaxResultRunes), truncated)
 	return SearchResult{Turns: out, Total: len(out), Truncated: truncated}, nil
 }
 
@@ -561,7 +569,7 @@ func (q *Query) Turn(ctx context.Context, turnID string) (TurnDetail, error) {
 	}
 
 	runes := estimateRunes(detail)
-	q.endCall("get_turn", turnID, start, minInt(runes, q.opts.MaxResultRunes), detail.Truncated)
+	q.endCall(ctx, "get_turn", turnID, start, minInt(runes, q.opts.MaxResultRunes), detail.Truncated)
 	return detail, nil
 }
 

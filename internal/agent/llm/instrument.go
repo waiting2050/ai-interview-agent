@@ -56,7 +56,9 @@ func (c *InstrumentedClient) Generate(ctx context.Context, req Request) (Respons
 	}
 
 	c.metrics.IncModelCall(c.provider, c.model, result)
-	if err == nil {
+	if err != nil {
+		c.metrics.IncModelCallFailure(c.provider, c.model, class)
+	} else {
 		c.metrics.AddModelTokens(c.provider, c.model, resp.PromptTokens, resp.CompletionTokens)
 		c.usage.Record(reqctx.SessionID(ctx), c.purpose, resp.PromptTokens, resp.CompletionTokens)
 	}

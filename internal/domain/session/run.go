@@ -31,6 +31,10 @@ type Run struct {
 	Status         RunStatus
 	IdempotencyKey string
 	RequestHash    string
+	// TraceID is the HTTP request trace that created the run. Workers restore
+	// it from storage so the run, its steps, model/tool calls and events keep
+	// one trace_id even though the originating request has already returned.
+	TraceID string
 	// Input is the command payload (turn_id + answer) persisted so an answer
 	// run can be resumed after a crash. Start runs keep it empty.
 	Input     []byte

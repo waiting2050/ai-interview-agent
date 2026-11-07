@@ -79,6 +79,33 @@ func TestLockerExpiresAndReleaseChecksToken(t *testing.T) {
 	}
 }
 
+func TestLockerRefreshOnlyForCurrentOwner(t *testing.T) {
+	opts := LockOptions{TTL: 500 * time.Millisecond, AcquireTimeout: 20 * time.Millisecond, RetryInterval: 5 * time.Millisecond}
+	locker, mr := newTestLocker(t, opts)
+	ctx := context.Background()
+
+	if err := locker.Acquire(ctx, "lock:session:s5", "token-a"); err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	if err := locker.Refresh(ctx, "lock:session:s5", "token-b"); !errors.Is(err, ports.ErrLockBusy) {
+		t.Fatalf("foreign refresh = %v, want ErrLockBusy", err)
+	}
+	mr.FastForward(400 * time.Millisecond)
+	if err := locker.Refresh(ctx, "lock:session:s5", "token-a"); err != nil {
+		t.Fatalf("refresh before expiry: %v", err)
+	}
+	mr.FastForward(400 * time.Millisecond)
+	// The refresh above restarted the 500ms TTL, so the lock is still ours.
+	if err := locker.Refresh(ctx, "lock:session:s5", "token-a"); err != nil {
+		t.Fatalf("refresh after renewed ttl: %v", err)
+	}
+
+	mr.FastForward(time.Second)
+	if err := locker.Refresh(ctx, "lock:session:s5", "token-a"); !errors.Is(err, ports.ErrLockBusy) {
+		t.Fatalf("refresh after expiry = %v, want ErrLockBusy", err)
+	}
+}
+
 func TestLockerBackendFailureIsNotBusy(t *testing.T) {
 	locker, _ := newTestLocker(t, DefaultLockOptions())
 	if err := locker.client.Close(); err != nil {

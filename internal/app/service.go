@@ -22,6 +22,7 @@ import (
 	platformlock "github.com/waiting2050/ai-interview-agent/internal/platform/lock"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/obs"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/reqctx"
+	"github.com/waiting2050/ai-interview-agent/internal/platform/trace"
 	"github.com/waiting2050/ai-interview-agent/internal/ports"
 )
 
@@ -75,10 +76,16 @@ type Options struct {
 	// Locker serialises session commands. The server injects the Redis
 	// implementation; nil falls back to the process-local test double.
 	Locker ports.Locker
+	// LockRenewInterval is how often the session lock is refreshed while a run
+	// executes inline. It must be shorter than the locker TTL; the server passes
+	// LOCK_TTL/3. Zero uses the 3s default (safe for the 10s default TTL).
+	LockRenewInterval time.Duration
 	// Metrics is the process-wide registry behind /metrics.
 	Metrics *obs.Metrics
 	// Usage aggregates model calls and tokens per session for the report.
 	Usage *obs.UsageTracker
+	// Tracer optionally exports run spans over OTLP. Nil keeps log-only tracing.
+	Tracer *trace.Tracer
 	// Synchronous executes the run inline. Used by unit tests; the server
 	// keeps the default asynchronous behaviour.
 	Synchronous bool
@@ -99,7 +106,9 @@ type Service struct {
 	metrics     *obs.Metrics
 
 	locks ports.Locker
-	wg    sync.WaitGroup
+	// lockRenew is the watchdog tick for inline runs; zero disables renewal.
+	lockRenew time.Duration
+	wg        sync.WaitGroup
 }
 
 func New(store ports.Store, opts Options) *Service {
@@ -123,6 +132,9 @@ func New(store ports.Store, opts Options) *Service {
 	}
 	if opts.Locker == nil {
 		opts.Locker = platformlock.NewProcessLocker()
+	}
+	if opts.LockRenewInterval <= 0 {
+		opts.LockRenewInterval = 3 * time.Second
 	}
 	if opts.Metrics == nil {
 		opts.Metrics = obs.NewMetrics()
@@ -154,13 +166,14 @@ func New(store ports.Store, opts Options) *Service {
 	return &Service{
 		store: store,
 		runner: NewRunner(store, opts.Steps, answerSteps, answerGraph, opts.ReportGenerator,
-			opts.Now, opts.Logger, opts.Metrics, opts.Usage, opts.MaxRunFailures),
+			opts.Now, opts.Logger, opts.Metrics, opts.Usage, opts.Tracer, opts.MaxRunFailures),
 		log:         opts.Logger,
 		now:         opts.Now,
 		staleAfter:  opts.RunStaleAfter,
 		synchronous: opts.Synchronous,
 		metrics:     opts.Metrics,
 		locks:       opts.Locker,
+		lockRenew:   opts.LockRenewInterval,
 	}
 }
 
@@ -307,6 +320,7 @@ func (s *Service) Start(ctx context.Context, cmd StartCommand) (StartResult, err
 		Status:         session.RunStatusRunning,
 		IdempotencyKey: key,
 		RequestHash:    requestHash,
+		TraceID:        reqctx.TraceID(ctx),
 		Attempt:        0,
 		CreatedAt:      now,
 		UpdatedAt:      now,
@@ -430,6 +444,7 @@ func (s *Service) Answer(ctx context.Context, cmd AnswerCommand) (StartResult, e
 		Status:         session.RunStatusRunning,
 		IdempotencyKey: key,
 		RequestHash:    requestHash,
+		TraceID:        reqctx.TraceID(ctx),
 		Input:          body,
 		CreatedAt:      now,
 		UpdatedAt:      now,
@@ -696,9 +711,17 @@ func requestHash(kind session.RunKind, sessionID string, body []byte) string {
 // acquireSession takes the cross-process session lock and returns a best-effort
 // release. A busy lock is surfaced as ports.ErrLockBusy so the API can answer
 // 409 + retryable instead of dropping the command.
+//
+// The lock TTL exists so a crashed owner cannot block a session forever. In
+// synchronous mode the run executes inline while this lock is held, so a run
+// longer than the TTL would silently lose mutual exclusion; a watchdog refreshes
+// the lock until the inline execution returns. In async/worker mode the lock is
+// released when the command returns and run-level writes are guarded by the DB
+// CAS / one-running-run constraint instead.
 func (s *Service) acquireSession(ctx context.Context, sessionID string) (func(), error) {
 	token := idgen.New()
 	key := "lock:session:" + sessionID
+	s.metrics.IncLockAttempt()
 	if err := s.locks.Acquire(ctx, key, token); err != nil {
 		if errors.Is(err, ports.ErrLockBusy) {
 			s.metrics.IncLockConflict()
@@ -706,7 +729,43 @@ func (s *Service) acquireSession(ctx context.Context, sessionID string) (func(),
 		s.logger(ctx).Warn("session lock acquire failed", "error_class", lockErrorClass(err))
 		return nil, err
 	}
+
+	var (
+		stopRenew chan struct{}
+		renewDone chan struct{}
+	)
+	if s.synchronous && s.lockRenew > 0 {
+		stopRenew = make(chan struct{})
+		renewDone = make(chan struct{})
+		go func() {
+			defer close(renewDone)
+			ticker := time.NewTicker(s.lockRenew)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-stopRenew:
+					return
+				case <-ticker.C:
+					// Detach from the request context: the watchdog must outlive
+					// cancellation of the command context.
+					renewCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.lockRenew)
+					err := s.locks.Refresh(renewCtx, key, token)
+					cancel()
+					if err != nil {
+						s.logger(ctx).Error("session lock lost during inline run",
+							"error_class", lockErrorClass(err))
+						return
+					}
+				}
+			}
+		}()
+	}
+
 	return func() {
+		if renewDone != nil {
+			close(stopRenew)
+			<-renewDone
+		}
 		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 		defer cancel()
 		if err := s.locks.Release(releaseCtx, key, token); err != nil {

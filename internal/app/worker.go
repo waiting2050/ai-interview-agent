@@ -173,7 +173,7 @@ func (p *WorkerPool) claimOne(ctx context.Context, workerID string) {
 	run := runs[0]
 	p.opts.Metrics.IncWorkerClaim()
 	p.opts.Logger.Info("run claimed",
-		"worker_id", workerID, "lease_id", leaseID, "run_id", run.ID,
+		"worker_id", workerID, "lease_id", leaseID, "run_id", run.ID, "trace_id", run.TraceID,
 		"session_id", run.SessionID, "kind", string(run.Kind), "attempt", run.Attempt)
 
 	p.runs.Add(1)
@@ -187,6 +187,9 @@ func (p *WorkerPool) runClaimed(parent context.Context, workerID, leaseID string
 	runCtx, cancel := context.WithTimeout(base, 5*time.Minute)
 	defer cancel()
 	runCtx = reqctx.WithWorker(runCtx, workerID, leaseID)
+	if run.TraceID != "" {
+		runCtx = reqctx.WithTrace(runCtx, run.TraceID)
+	}
 	runCtx = reqctx.WithRun(runCtx, run.ID)
 	runCtx = reqctx.WithSession(runCtx, run.SessionID)
 	log := p.opts.Logger
@@ -241,6 +244,7 @@ func (p *WorkerPool) renewLease(ctx context.Context, log *slog.Logger, runID, le
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			p.opts.Metrics.IncLeaseRenewAttempt()
 			callCtx, cancelCall := context.WithTimeout(ctx, 5*time.Second)
 			ok, err := p.store.Repos().Runs.RenewLease(callCtx, runID, leaseID, p.opts.Now().UTC().Add(p.opts.LeaseTTL))
 			cancelCall()

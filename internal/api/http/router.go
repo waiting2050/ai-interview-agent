@@ -9,6 +9,7 @@ import (
 	"github.com/waiting2050/ai-interview-agent/internal/app"
 	"github.com/waiting2050/ai-interview-agent/internal/auth"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/obs"
+	"github.com/waiting2050/ai-interview-agent/internal/platform/trace"
 	"github.com/waiting2050/ai-interview-agent/internal/ports"
 )
 
@@ -40,6 +41,8 @@ type Deps struct {
 	// EvalResultsDir backs the read-only /eval panel. Empty falls back to
 	// docs/eval-results relative to the process working directory.
 	EvalResultsDir string
+	// Tracer optionally exports request spans over OTLP. Nil only logs.
+	Tracer *trace.Tracer
 }
 
 // NewRouter wires the HTTP surface: health, metrics, session commands, answers
@@ -97,5 +100,5 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("POST /v1/sessions/{id}/runs/{run_id}/retry", h.retryRun)
 	mux.HandleFunc("GET /v1/runs", h.listRuns)
 
-	return withRequestID(withAuth(mux, deps.Auth), deps.Logger)
+	return withRequestID(withAuth(mux, deps.Auth), deps.Logger, deps.Tracer)
 }

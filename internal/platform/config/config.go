@@ -70,6 +70,10 @@ type Config struct {
 	// EvalResultsDir is the directory the read-only /eval panel reads result
 	// files from.
 	EvalResultsDir string
+	// OTLPEndpoint enables optional OTLP/HTTP span export when non-empty
+	// (OTLP_ENDPOINT, falling back to OTEL_EXPORTER_OTLP_ENDPOINT). Empty means
+	// log-only tracing with no exporter and no extra dependencies.
+	OTLPEndpoint string
 	// ReviewDailyLimit caps how many due cards the daily review queue shows.
 	// It never changes the persisted SM-2 due dates.
 	ReviewDailyLimit int
@@ -127,6 +131,7 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	cfg.EvalResultsDir = env("EVAL_RESULTS_DIR", cfg.EvalResultsDir)
+	cfg.OTLPEndpoint = env("OTLP_ENDPOINT", os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
 	if cfg.WorkerLeaseTTL, err = durationEnv("WORKER_LEASE_TTL", cfg.WorkerLeaseTTL); err != nil {
 		return Config{}, err
 	}

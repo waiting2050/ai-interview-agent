@@ -117,6 +117,7 @@ func (s *Service) startReport(ctx context.Context, cmd FinishCommand, allowAwait
 		Status:         session.RunStatusRunning,
 		IdempotencyKey: key,
 		RequestHash:    hash,
+		TraceID:        reqctx.TraceID(ctx),
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}

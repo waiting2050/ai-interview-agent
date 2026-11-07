@@ -7,20 +7,34 @@ import (
 
 	"github.com/waiting2050/ai-interview-agent/internal/platform/idgen"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/reqctx"
+	"github.com/waiting2050/ai-interview-agent/internal/platform/trace"
 )
 
-func withRequestID(next http.Handler, log *slog.Logger) http.Handler {
+func withRequestID(next http.Handler, log *slog.Logger, tracer *trace.Tracer) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestID := r.Header.Get("X-Request-ID")
 		if requestID == "" {
 			requestID = idgen.New()
 		}
+		// trace_id is the end-to-end correlation key; request_id identifies this
+		// single HTTP call. When the caller sends no trace header we reuse the
+		// request id, so the normal case shows one id instead of two unrelated ones.
+		traceID := strings.TrimSpace(r.Header.Get("X-Trace-Id"))
+		if traceID == "" {
+			traceID = requestID
+		}
 		w.Header().Set("X-Request-ID", requestID)
+		w.Header().Set("X-Trace-Id", traceID)
 
-		ctx := reqctx.With(r.Context(), requestID)
+		ctx := reqctx.WithTrace(reqctx.With(r.Context(), requestID), traceID)
 		if sessionID := sessionIDFromPath(r.URL.Path); sessionID != "" {
 			ctx = reqctx.WithSession(ctx, sessionID)
 		}
+		ctx, endSpan := tracer.Start(ctx, "http.request", map[string]any{
+			"http.method": r.Method,
+			"http.path":   r.URL.Path,
+		})
+		defer endSpan(nil)
 		r = r.WithContext(ctx)
 
 		attrs := append(reqctx.Attrs(ctx), "method", r.Method, "path", r.URL.Path)
