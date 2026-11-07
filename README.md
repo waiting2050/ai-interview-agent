@@ -5,7 +5,7 @@
 Go 1.25 + [cloudwego/eino](https://github.com/cloudwego/eino) + PostgreSQL + Redis。面试主链路可接任意 OpenAI 兼容模型；没有 key 时自动回退确定性 `heuristic`，演示与测试不依赖外部服务。简历解析、简历诊断、JD 匹配、申请材料包与复习排程是**本地规则实现，不调用模型**。
 
 > 已实现：M0–M9、M11–M16，以及演示页视觉轮次 R2–R5。
-> 设计单一事实源：[docs/development-plan.md](docs/development-plan.md)；关键取舍：[docs/design-rationale.md](docs/design-rationale.md)；按模块拆解、含 10 分钟演示脚本与已知不足：[docs/project-walkthrough.md](docs/project-walkthrough.md)。
+> 设计单一事实源：[docs/development-plan.md](docs/development-plan.md)；关键取舍（13 节 + 附录）：[docs/design-rationale.md](docs/design-rationale.md)；按模块拆解、含 10 分钟演示脚本与已知不足：[docs/project-walkthrough.md](docs/project-walkthrough.md)。
 > PostgreSQL 是唯一运行期事实源；Redis 只做跨进程会话锁；内存实现仅用于单测。
 
 ## 一条视觉主线
@@ -66,11 +66,11 @@ go run ./cmd/server
 
 1. **简历**：粘贴简历文本，或上传 PDF / DOCX / TXT / MD（≤ 5 MB，本地解析）得到结构化画像。
 2. **诊断**：点「诊断当前简历文本」，得到规则版问题清单与改写建议。
-3. **JD**：粘贴 JD 文本，或填公开岗位链接；解析后可匹配简历、生成「申请材料包」（定制摘要 / 开场 / 题纲 / 预演问题）。材料包只重排简历已有事实，不虚构，也不提供自动投递。
+3. **JD**：粘贴 JD 文本，或填公开岗位链接；解析后可匹配简历、生成「申请材料包」（定制摘要 / 开场 / 复用题纲 / 预演问题 / 缺口清单）。材料包只重排简历已有事实，不虚构，也不提供自动投递。
 4. **面试**：选目标岗位与主问题数，创建会话并开始；首题经 SSE 实时推送。
 5. **作答**：提交后依次出现评分、维度得分、缺失要点与决策（追问 / 下一题 / 收尾），直到题纲完成。
-6. **报告**：结束后生成综合分、等级、五段报告与 token / 成本摘要；模型不可用时给确定性降级报告，不中断整场。
-7. **复习**：报告提交的同一事务里，把低分题与 `missing_points` 转成 SM-2 复习卡；顶栏「今天该复习 N 张」进入正面 → 参考答案 → 自评 0–5 → 下一张。
+6. **报告**：结束后生成综合分、等级、五段报告与 token / 调用次数摘要；模型不可用时给确定性降级报告，不中断整场。
+7. **复习**：报告提交的同一事务里，把「有缺失要点 / 单题低于 60 / 最弱维度 ≤2」的题转成 SM-2 复习卡；顶栏「今天该复习 N 张」进入正面 → 参考答案 → 自评 0–5 → 下一张。
 
 ## 能力清单
 
@@ -80,7 +80,7 @@ go run ./cmd/server
 - 控制面 `POST` + 数据面 SSE：命令返回 `202 + run_id`，进度从独立 SSE 端点订阅；断线用 `Last-Event-ID` / `?after=` 续播。
 - 结构化评估：维度分、证据引用、加减分、`missing_points`、追问建议；非法 JSON 修复 2 次，仍失败则降级并记录事件。
 - 规则裁决：硬预算门（超时 / 题纲 / 追问总数 / 深度 / 单题追问 / 不会回答 / 评估降级）→ 覆盖门 → 模型建议 → 终裁，追问条数有硬上限。
-- 报告用只读工具回查（`get_session_overview` / `search_turns` / `list_weak_turns` / `get_turn`），不把整场 transcript 塞进 prompt。
+- 报告回查：`Collect` 先确定性调用 3 个只读工具（`get_session_overview` / `search_turns` / `list_weak_turns`），再把查好的 bundle 交给模型写点评，不把整场 transcript 塞进 prompt；`get_turn` 已实现但报告固定采集计划未使用。
 - 幂等：同一 `Idempotency-Key` 只产生一个 run；重复作答返回原 run 并带 `Idempotent-Replayed: true`。
 - 跨实例锁：Redis `SET NX PX` + token 比较释放；抢锁失败返回可重试的 `409 lock_busy`。
 - 崩溃恢复：`run_steps` 节点级产物，从最后一个成功节点续跑；启动时把超时 `running` run 标记 `interrupted`。
@@ -88,17 +88,17 @@ go run ./cmd/server
 
 ### 求职前后（规则版，无模型调用）
 
-- **M9 简历附件解析**：PDF / DOCX / TXT / MD / 图片走本地解析，失败给出可操作的提示。
+- **M9 简历附件解析**：PDF / DOCX / TXT / MD 走本地解析，失败给出可操作的提示；PNG / JPG 需要 OCR，当前不支持，会返回 `image_requires_ocr` 并引导改用文本或其它格式。
 - **M12 简历诊断**：问题清单、影响说明与改写方向，按维度确定性打分。
 - **M15 JD 采集与匹配**：粘贴文本或抓取公开页面（遵守 robots、按 host 限速、有大小与超时上限；不模拟登录、不绕验证码）；解析要求并与简历做覆盖匹配。
-- **M16 申请材料包**：定制摘要、开场、面试题纲与预演问题；只重排已有事实，不代投。
+- **M16 申请材料包**：定制摘要、开场、复用题纲、预演问题与缺口清单；只重排已有事实，不代投。
 - **M11 复习与间隔重复**：SM-2 排程（ease / 间隔 / 重复次数），评分 0–5；保存计算过程与下次到期；「换问法」按重复次数轮换三种规则模板。
 
 ### 演示与工程化
 
 - 领域包可插拔：`go-backend` / `java-backend` / `ai-agent`，会话创建时传 `domain`（默认 `go-backend`）；题纲、评分维度与报告维度都来自该包。
 - 非技术岗位设计样例（售前解决方案 / FDE / 增长运营）放在 [docs/domainpacks/solution-and-ops.md](docs/domainpacks/solution-and-ops.md)，示例 manifest 不会被运行时加载。
-- `/metrics` 暴露 Prometheus 文本指标；报告含模型调用数、token 与 `estimated_cost_usd`。
+- `/metrics` 暴露 Prometheus 文本指标；报告含模型调用数、调用明细与 token 快照（按 session 聚合，不计算金额）。
 - 评分回归集 + 批量跑分（见下方「验证」），结果写入 `docs/eval-results/`。
 
 ## HTTP 接口
@@ -277,7 +277,7 @@ HTTP / SSE  →  应用服务（事务 / 幂等 / 锁）  →  eino 图（Agent 
 
 ## 里程碑
 
-M0 骨架 → M1 真实存储 + 会话状态机 → M2 作答链路 + 结构化评估 + 规则裁决 → M3 真实模型 + 题纲出题 + `compose.Graph` → M4 收尾与报告 → M5 Redis 锁 + `LISTEN/NOTIFY` → M6 评分回归集 → M7 可观测性与成本 → M8 演示页 → M9 简历附件解析 → **M11 复习与间隔重复** → M12 规则版简历诊断 → M13 闯关式进度条 → M14 领域包机制 → **M15 JD 采集与匹配** → **M16 申请材料包**；演示页视觉轮次 R2 → R3 → **R4**。
+M0 骨架 → M1 真实存储 + 会话状态机 → M2 作答链路 + 结构化评估 + 规则裁决 → M3 真实模型 + 题纲出题 + `compose.Graph` → M4 收尾与报告 → M5 Redis 锁 + `LISTEN/NOTIFY` → M6 评分回归集 → M7 可观测性与成本 → M8 演示页 → M9 简历附件解析 → **M11 复习与间隔重复** → M12 规则版简历诊断 → M13 闯关式进度条 → M14 领域包机制 → **M15 JD 采集与匹配** → **M16 申请材料包**；演示页视觉轮次 R2 → R3 → R4 → **R5**。
 
 每个里程碑的可运行验收点见设计文档第 12 节。
 

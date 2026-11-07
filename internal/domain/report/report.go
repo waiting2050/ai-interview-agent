@@ -88,7 +88,7 @@ type Report struct {
 	Sections      []Section        `json:"sections"`
 	ToolCalls     int              `json:"tool_calls"`
 	ToolBreakdown map[string]int   `json:"tool_breakdown,omitempty"`
-	// Cost fields follow the tool_calls naming convention: a total plus an
+	// Usage fields follow the tool_calls naming convention: a total plus an
 	// optional per-purpose breakdown.
 	ModelCalls         int               `json:"model_calls"`
 	ModelCallBreakdown map[string]int    `json:"model_call_breakdown,omitempty"`

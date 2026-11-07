@@ -300,7 +300,7 @@ func (r *Runner) commitReport(ctx context.Context, run *session.Run, outcome rep
 	now := r.now().UTC()
 	doc := outcome.Report
 	doc.Sections = doc.RenderSections()
-	// The report is the authoritative per-session cost snapshot. It uses the
+	// The report is the authoritative per-session usage snapshot. It uses the
 	// same model_calls / *_breakdown naming as the M4 tool_calls fields.
 	usage := r.usage.Snapshot(run.SessionID)
 	doc.ModelCalls = usage.ModelCalls

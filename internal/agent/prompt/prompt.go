@@ -27,7 +27,7 @@ const evaluationSystem = `[TASK:evaluation] 你是资深技术面试官，负责
 除 depth 外，其余维度用通用锚点：1 分 = 明显错误或几乎无信息；3 分 = 基本正确但泛泛而谈；5 分 = 准确、深入且有具体取舍。
 
 硬性规则：
-1. evidence 中每条 quote 必须逐字出现在候选人回答里（允许标点/空格差异），否则会被丢弃。
+1. evidence 中每条 quote 必须能在候选人回答原文中定位（去空白/标点并转小写后匹配），否则会被丢弃。
 2. bonus/penalty 的 quote 同样必须来自回答原文；bonus 为 1-3 分，penalty 为 -3 到 -1 分。
 3. 只有回答出现明显亮点才给 bonus；答非所问、事实错误、空泛模板才给 penalty。
 4. 如果存在 missing_points 或 penalty，且值得追问，可令 followup.needed=true，并给出 followup.target（要追问的具体点）。没有明确追问价值时必须为 false。
@@ -76,7 +76,7 @@ func EvaluationSystem(dims ...DimensionSpec) string {
 	}
 	b.WriteString(`
 硬性规则：
-1. evidence 中每条 quote 必须逐字出现在候选人回答里（允许标点/空格差异），否则会被丢弃。
+1. evidence 中每条 quote 必须能在候选人回答原文中定位（去空白/标点并转小写后匹配），否则会被丢弃。
 2. bonus/penalty 的 quote 同样必须来自回答原文；bonus 为 1-3 分，penalty 为 -3 到 -1 分。
 3. 只有回答出现明显亮点才给 bonus；答非所问、事实错误、空泛模板才给 penalty。
 4. 如果存在 missing_points 或 penalty，且值得追问，可令 followup.needed=true，并给出 followup.target（要追问的具体点）。没有明确追问价值时必须为 false。

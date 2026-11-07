@@ -1,6 +1,6 @@
 # AI 模拟面试 Agent 开发计划
 
-> 状态：M0（设计基线 + 可编译骨架）、M1（真实存储 + 会话状态机）、M2（作答链路 + 结构化评估 + 规则裁决）、M3（真实模型 + 题纲出题 + compose.Graph）、M4（收尾与报告）、M5（Redis 会话锁 + LISTEN/NOTIFY 事件推送）、M6（评分回归集 + 批量跑分）、M7（可观测性与成本口径）、M8（最小可视化演示页）已完成。
+> 状态：M0（设计基线 + 可编译骨架）、M1（真实存储 + 会话状态机）、M2（作答链路 + 结构化评估 + 规则裁决）、M3（真实模型 + 题纲出题 + compose.Graph）、M4（收尾与报告）、M5（Redis 会话锁 + LISTEN/NOTIFY 事件推送）、M6（评分回归集 + 批量跑分）、M7（可观测性与成本口径）、M8（最小可视化演示页）、M9（简历附件上传与本地解析）、M11（复习与间隔重复）、M12（规则版简历诊断）、M13（闯关式进度条）、M14（领域包机制）、M15（JD 采集与匹配）、M16（申请材料包）已完成；M10 未做。
 > 本文档是后续实现与面试讲解的单一事实来源；代码目录、状态机、接口约定如与本文档冲突，先改文档再改代码。
 > eino 尚未到 1.0，本文档刻意不写死具体版本号，版本以 `go.mod` 锁定的小版本为准。
 
@@ -52,8 +52,8 @@ HTTP/SSE  →  应用服务（事务/幂等/锁）  →  eino 图（Agent 决策
 | 断线可续播 | SSE 带 `Last-Event-ID` 重连，事件不丢不乱序 |
 | 崩溃不重复计分 | 故障注入杀进程后重启，评估条数与分数不变 |
 | 追问有硬上限 | 任何配置下 `depth` / `followups_used` 不越界，单测覆盖 |
-| 评分档位稳定 | 20 条回归集跑分，档位完全命中率 ≥ 80%，相邻一档 ≥ 95%（见 6.5） |
-| 成本可估算 | 每场面试输出 token 数与 `estimated_cost_usd` 摘要（见 10.4） |
+| 评分档位稳定 | 30 条回归集跑分，档位完全命中率 ≥ 80%，相邻一档 ≥ 95%（见 6.5） |
+| 成本可估算 | 每场面试输出 token 数与模型调用次数摘要（不计算金额，见 10.4） |
 | 报告不全量塞上下文 | 报告链路只能通过工具按需取片段，prompt 有 token 上限 |
 
 ---
@@ -118,7 +118,7 @@ internal/api/http ──────► internal/app ──────► inter
 | ADR-002 | **控制面 POST + 数据面 SSE**：命令用 JSON POST 返回 `202 + run_id`，进度从独立 SSE 端点订阅 | 断线重连不影响执行；多标签页可共享；命令重试天然幂等 | 前端要维护两个连接 |
 | ADR-003 | **自管状态机 + 自管步骤日志**，不用框架 checkpoint | 恢复粒度可控到「节点产物」；不依赖未稳定 API；状态可查可审计 | 需要设计 `runs` / `run_steps` 表 |
 | ADR-004 | **结构化列 + JSONB 混合**：会话/评分核心字段建列，证据、分数、配置用 JSONB | 便于查询与约束，同时保留 LLM 输出的灵活结构 | JSONB 内容需应用层校验 |
-| ADR-005 | **报告用工具回查**，不拼全量 transcript | 控制 token、降低幻觉、报告结论可引用 turn_id | 需要实现检索工具与工具循环 |
+| ADR-005 | **报告用工具回查**，不拼全量 transcript | 控制 token、降低幻觉、报告结论可引用 turn_id | 固定采集计划由代码执行，模型不主动调用工具 |
 
 ---
 
@@ -563,7 +563,7 @@ ReportRun（同步或异步执行）
 | `get_session_overview` | 无 | 岗位、难度、题数、综合分、5 维平均分、逐题 `turn_id`/topic/score/缺失点数、弱主题 |
 | `search_turns` | `topic? / query? / min_score? / max_score? / limit ≤ 8` | 已答题摘要与答案片段（按结果上限截断） |
 | `list_weak_turns` | `limit ≤ 10` | `score ≤ 70` 且非 degraded 的低分题 |
-| `get_turn` | `turn_id` | 单题问答 + 评估 + 证据；答案按结果上限截断 |
+| `get_turn` | `turn_id` | 单题问答 + 评估 + 证据；答案按结果上限截断。已实现，但报告固定采集计划未调用 |
 
 约束与校验：
 
@@ -989,7 +989,7 @@ data: {"event_id":43,"session_id":"01H...","run_id":"01H...","type":"question.as
 - 内容：
   - 收尾状态机：`POST /finish` 覆盖 `active/awaiting_answer` 与 `active/ready_to_finalize`，迁移到 `reporting`；报告提交后 `completed`；`aborted/failed` 为终态。`POST /report` 只允许 `ready_to_finalize` 及以后，拒绝提前结束。
   - 报告幂等：run 幂等键 `(session, report, key)` + `reports.session_id UNIQUE` + 先查已落库报告三重保障；重复 finish 返回现有 run/报告，模型调用次数不增加。
-  - 只读工具：`get_session_overview` / `search_turns` / `list_weak_turns` / `get_turn`，带 session 归属校验、参数校验、2s 超时、结果 6000 runes 上限、每段 ≤4 / 总 ≤12 预算；调用记录进入 `report.tool_calls`。
+  - 只读工具：`get_session_overview` / `search_turns` / `list_weak_turns` / `get_turn`，带 session 归属校验、参数校验、2s 超时、结果 6000 runes 上限、每段 ≤4 / 总 ≤12 预算；调用记录进入 `report.tool_calls`。报告固定采集计划实际调用前 3 个；`get_turn` 已实现但未接入报告链路。
   - 报告生成：固定 3 次工具回查 → 单次模型调用写点评 → 确定性数据合并分数与结构 → 5 段 JSON + Markdown 同事务落库；prompt 不含全量对话。
   - 降级：`model_unavailable` / `report_output_invalid` / `no_answers` 均产出完整报告，run 成功、session `completed`。
   - 事件：`report.started` / `report.section` ×5 / `report.tool_calls` / `report.completed`，终态事件最后。
@@ -1030,7 +1030,7 @@ data: {"event_id":43,"session_id":"01H...","run_id":"01H...","type":"question.as
 
 ### M7 可观测性与成本口径（已完成）
 
-- 内容：`reqctx` 串起 `request_id / session_id / run_id / turn_id`；关键路径结构化日志；`/metrics` Prometheus 文本（模型调用、token、评估/报告降级、锁冲突、SSE 连接与投递延迟、run 失败）；按 session 的成本快照写入报告。
+- 内容：`reqctx` 串起 `request_id / session_id / run_id / turn_id`；关键路径结构化日志；`/metrics` Prometheus 文本（模型调用、token、评估/报告降级、锁冲突、SSE 连接与投递延迟、run 失败）；按 session 的 token 与调用次数快照写入报告（不计算金额）。
 - 验收：一次完整面试的日志可按 `request_id` / `run_id` 串起全链路；报告出现 `model_calls` / `model_call_breakdown` / `prompt_tokens` / `completion_tokens` / `total_tokens`；降级、锁冲突、SSE 连接数有单测覆盖；`go test ./...` 与集成测试全绿。
 - 边界：不做美元计价与 50 并发压测；日志不含答案正文与 API key。
 
@@ -1062,7 +1062,7 @@ data: {"event_id":43,"session_id":"01H...","run_id":"01H...","type":"question.as
 ### M11 复习与间隔重复（已完成）
 
 - 理由：一次面试的价值应在面试后延续；把低分点变成可复习卡片，形成「面试 → 复习 → 再测」闭环。
-- 复习卡生成：每场面试结束时，用 `missing_points` 与低分维度确定性拼装复习卡（考点 / 用户当时的答法摘要 / 标准要点 / 来源 `turn_id`），不调用模型；模型生成留可选开关。
+- 复习卡生成：每场面试结束时，用 `missing_points` 与低分维度确定性拼装复习卡（有缺失要点 / 单题低于 60 / 最弱维度 ≤2 才建卡），考点 / 用户当时的答法摘要 / 标准要点 / 来源 `turn_id`，不调用模型；模型生成留可选开关。
 - 排程算法：采用 SM-2，字段 `ease_factor`、`interval_days`、`repetitions`、`due_at`；按回忆质量 0–5 更新并记录计算过程，便于讲解与测试（若后续换 FSRS 需在文档说明理由）。
 - 接口：`GET /v1/review/due`（今日到期）、`POST /v1/review/{card_id}/grade`（提交回忆质量并更新排程）、复习卡列表与详情。
 - 复习会话：到期卡可生成一次「换问法」再测（优先规则/题纲模板，避免模型开销；模型可选），答完回写复习卡与排程。
@@ -1079,7 +1079,7 @@ data: {"event_id":43,"session_id":"01H...","run_id":"01H...","type":"question.as
 - 前端：顶栏「今天该复习 N 张」入口；复习面板按「正面 → 展开参考答案 → 自评 0–5 → 下一张」推进，评分后提示新的 EF / 间隔 / 到期日；报告图表区新增「遗忘曲线预测」（SM-2 间隔 1/6/15/38/95/237 天）。
 - 测试：`internal/domain/review/review_test.go` 覆盖 0/3/5 评分、失败重置、EF 下限、多次累积、时区边界（15:59Z 属于当日、16:01Z 属于次日）与卡片生成/换问法轮换；`internal/api/http/review_test.go` 覆盖 due 为空、非法 grade 400、正常评分与排程、列表、404 与未启用 503。
 
-### M12 简历诊断：评分 + 优化建议（计划，规则版先行）
+### M12 简历诊断：评分 + 优化建议（已完成，规则版）
 
 - 理由：附件解析只是入口，候选人更需要「这份简历哪里扣分、怎么改」的结构化反馈。
 - 输入与输出：上传/粘贴的简历 → 总分（0–100，五档）+ 逐项扣分 + 改写建议；结果卡分层折叠，不堆字。
@@ -1091,7 +1091,7 @@ data: {"event_id":43,"session_id":"01H...","run_id":"01H...","type":"question.as
 - 结构先行：`domain/resume` 规则引擎 + `ports` + `POST /v1/resume/analyze` + 前端结果卡。规则清单等调研文档到位后，以检查项 ID、严重程度、评分锚点、改写示例落进 `docs/resume-rules` 再实现。
 - 验收：规则单测覆盖三类判断的正/负样例与边界；接口返回逐项扣分与建议；前端能展示总分、档位、三条主要问题与逐条「原文 → 问题 → 建议改写」。
 
-### M13 闯关式进度条（计划）
+### M13 闯关式进度条（已完成）
 
 - 理由：「第 n / 共 N 题」只表达数量，无法体现题纲结构与追问关系。
 - 内容：题纲节点横向排布，已完成打勾、当前高亮、未开始灰显；追问显示为当前节点的支线（层级缩进或小分叉标记，虚线连接）。
@@ -1101,7 +1101,7 @@ data: {"event_id":43,"session_id":"01H...","run_id":"01H...","type":"question.as
 - 顺带修复：heuristic 评估曾把未覆盖的期望点写进 `evidence.reason`（「缺失：…」），使 `coveredAllPoints` 误判为已覆盖、追问永不触发；现改为缺口只进 `missing_points`，evidence 只引用回答原文，并由 `TestHeuristicUncoveredPointsSuggestFollowupWithoutClaimingCoverage` 锁定。
 - 验证结果（2026-11-06，heuristic，`127.0.0.1:18080`）：主问题推进后第 1 关打勾、第 2 关高亮、第 3 关灰显；短答触发追问时当前节点显示「↳ 追问 1 / 上限 1」支线；390px 宽折叠为「第 1 关 / 共 3 关 · 剩余 2 关」。截图：[推进后](screenshots/m13-stepper-desktop.png) / [追问支线](screenshots/m13-stepper-followup.png) / [全部完成](screenshots/m13-stepper-all-done.png) / [窄屏折叠](screenshots/m13-stepper-mobile.png)。
 
-### M14 领域包机制：外置题纲与可配置维度（计划，M9 后可并行做加载器骨架）
+### M14 领域包机制：外置题纲与可配置维度（已完成）
 
 - 题库三层（硬约束，写进 design-rationale）：
   1. **本地骨架 = 评分唯一依据**：领域包为带版本号的外置配置：`topics`（考点）、`expected_points`（每考点 3 条可判定描述）、`rubric`（维度与权重）、`lexicon`（简历画像词表）。必须离线可跑、可单测、可 diff；评分链路禁止依赖任何网络内容。
@@ -1129,7 +1129,7 @@ data: {"event_id":43,"session_id":"01H...","run_id":"01H...","type":"question.as
 - 测试：`internal/domain/domainpack/pack_test.go` 覆盖三包完整性、权重和、curated 无 URL、非法包逐项拒绝、示例目录不加载、Plan 去重与确定性黄金用例；API 测试覆盖未知 domain 400、rubric 透出与 `/v1/domains`。
 - 验证：`gofmt -l .` 为空；`go vet ./...`、`go test ./...`、`go test -tags=eval ./internal/agent/eval`、`go test -tags=integration ./...` 全绿（integration 使用本地 PG 5433 / Redis 6380）。
 
-### M15 JD 采集与匹配（计划，M12 之后）
+### M15 JD 采集与匹配（已完成）
 
 - 采集范围：仅公开可访问页面——公司招聘官网、Greenhouse / Lever / Workable 等公开 ATS 接口、公司自有岗位页。遵守 `robots.txt`，每域名限速（个位数/分钟），失败指数退避；不绕验证码、不模拟登录、不伪造 UA、不托管用户账号。
 - 用户提供 Boss 直聘等平台内容时，只接受用户自己粘贴的文本，系统负责解析与匹配；不实现代爬。
@@ -1138,9 +1138,9 @@ data: {"event_id":43,"session_id":"01H...","run_id":"01H...","type":"question.as
 - 前端：粘贴文本 / 输入链接 → 结果卡（匹配度环形 + 缺关键词 chips + 生成题纲按钮）。
 - 采集策略口径：控频优先，不对抗反爬；抓取失败明确报错，不伪造内容。
 
-### M16 申请材料包（计划，M15 之后）
+### M16 申请材料包（已完成）
 
-- 按 JD 生成：定制简历摘要（只重排真实事实，不新增虚构内容）、一段针对岗位的开场、该 JD 的面试题纲与预演问题；打包为可复制文本或 Markdown 下载。
+- 按 JD 生成：定制简历摘要（只重排真实事实，不新增虚构内容）、一段针对岗位的开场、复用的面试题纲、预演问题与缺口清单；打包为可复制文本或 Markdown 下载。
 - 明确不做自动投递：不提供表单自动填写、不批量提交、不保存他人账号；三条理由写入 `design-rationale.md`（平台协议与个人信息合规、各家公司表单结构不可泛化、代投会掩盖匹配问题）。
 - 验收：生成内容可逐条回指原始简历事实；Markdown 下载可打开；不出现虚构指标或职责。
 

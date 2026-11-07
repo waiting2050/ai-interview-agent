@@ -1,7 +1,7 @@
 // Package tools exposes the read-only conversation queries used by report
 // generation. Every tool is scoped to one session, validates its arguments,
 // enforces a timeout and a result-size cap, and records each call so the caller
-// can persist a cost breakdown.
+// can persist a tool-call breakdown.
 package tools
 
 import (
@@ -59,7 +59,7 @@ func (o *Options) normalize() {
 }
 
 // CallRecord is one tool invocation. The report run persists the aggregate in
-// events so cost accounting does not depend on logs.
+// events so usage accounting does not depend on logs.
 type CallRecord struct {
 	Tool         string `json:"tool"`
 	Args         string `json:"args,omitempty"`

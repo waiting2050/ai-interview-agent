@@ -207,7 +207,7 @@ func TestFinishDegradesWhenModelFails(t *testing.T) {
 	}
 }
 
-func TestReportCarriesSessionCostSnapshot(t *testing.T) {
+func TestReportCarriesSessionUsageSnapshot(t *testing.T) {
 	ctx := context.Background()
 	usage := obs.NewUsageTracker()
 	svc, store := newTestService(t, Options{
@@ -232,11 +232,11 @@ func TestReportCarriesSessionCostSnapshot(t *testing.T) {
 
 	doc := report.Report
 	if doc.ModelCalls != 2 || doc.PromptTokens != 500 || doc.CompletionTokens != 130 || doc.TotalTokens != 630 {
-		t.Fatalf("cost fields = calls %d, tokens %d/%d/%d",
+		t.Fatalf("usage fields = calls %d, tokens %d/%d/%d",
 			doc.ModelCalls, doc.PromptTokens, doc.CompletionTokens, doc.TotalTokens)
 	}
 	if doc.ModelCallBreakdown["evaluate"] != 1 || doc.ModelCallBreakdown["question"] != 1 {
-		t.Fatalf("cost breakdown = %+v", doc.ModelCallBreakdown)
+		t.Fatalf("usage breakdown = %+v", doc.ModelCallBreakdown)
 	}
 
 	var completedPayload map[string]any
@@ -248,7 +248,7 @@ func TestReportCarriesSessionCostSnapshot(t *testing.T) {
 		}
 	}
 	if completedPayload["model_calls"] != float64(2) || completedPayload["total_tokens"] != float64(630) {
-		t.Fatalf("report.completed cost payload = %+v", completedPayload)
+		t.Fatalf("report.completed usage payload = %+v", completedPayload)
 	}
 }
 

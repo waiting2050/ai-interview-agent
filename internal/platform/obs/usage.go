@@ -2,7 +2,7 @@ package obs
 
 import "sync"
 
-// Usage is the per-session model cost summary. Field names follow the
+// Usage is the per-session model usage summary. Field names follow the
 // tool_calls / tool_breakdown naming already used by the M4 report.
 type Usage struct {
 	ModelCalls         int            `json:"model_calls"`
@@ -20,7 +20,7 @@ type sessionUsage struct {
 }
 
 // UsageTracker aggregates model calls and tokens per session in memory. It is
-// the source for the cost fields persisted in the final report; a process
+// the source for the token and call-count fields persisted in the final report; a process
 // restart loses unfinished sessions, which is acceptable because completed
 // reports keep their snapshot.
 type UsageTracker struct {

@@ -147,7 +147,7 @@
 - 抓取策略：[internal/platform/jobfetch/jobfetch.go:1-233](file:///c:/Users/waiting2050/Desktop/gotest/%E9%9D%A2%E8%AF%95/internal/platform/jobfetch/jobfetch.go#L1-L233)：只允许公开 http(s)、遵守 robots（读不到就拒绝）、每 host 每 10 秒最多 1 次（约 6 次/分钟）、10 秒超时、1 MiB 上限、最多 3 次尝试；私网地址在生产被拒绝，不绕验证码、不模拟登录。
 - 材料包：[internal/domain/jd/kit.go:48-126](file:///c:/Users/waiting2050/Desktop/gotest/%E9%9D%A2%E8%AF%95/internal/domain/jd/kit.go#L48-L126) 与 markdown 渲染 226-...；接口 [internal/api/http/jd.go:13-70](file:///c:/Users/waiting2050/Desktop/gotest/%E9%9D%A2%E8%AF%95/internal/api/http/jd.go#L13-L70)。
 
-**为什么这么设计（含代价）**：匹配度复用简历诊断口径，避免「简历 77 分、JD 匹配又一套算法」互相矛盾；技能卡分必备/加分、红绿标注缺口，题纲复用领域包而不是让模型自由出题。材料包只做摘要、开场、题纲、预演问题，按钮明确「不代投」。代价是关键词/行规则对非标准 JD 会漏技能；抓取只适合静态 HTML，JS 渲染或登录墙页面抓不到，需要用户粘贴。
+**为什么这么设计（含代价）**：匹配度复用简历诊断口径，避免「简历 77 分、JD 匹配又一套算法」互相矛盾；技能卡分必备/加分、红绿标注缺口，题纲复用领域包而不是让模型自由出题。材料包只做摘要、开场、复用题纲、预演问题与缺口清单，按钮明确「不代投」。代价是关键词/行规则对非标准 JD 会漏技能；抓取只适合静态 HTML，JS 渲染或登录墙页面抓不到，需要用户粘贴。
 
 **面试官可能追问**：
 1. **「匹配度 77 是怎么来的？」** 不是模型打分，是取简历诊断的 `screen_score`（岗位关键词、量化、结构等组件），再列已命中/缺失关键词；同一简历同一 JD 可复现。
@@ -188,11 +188,11 @@
 - 指标：[internal/platform/obs/metrics.go:63-210](file:///c:/Users/waiting2050/Desktop/gotest/%E9%9D%A2%E8%AF%95/internal/platform/obs/metrics.go#L63-L210) 统计模型调用、token、评估/报告降级、锁冲突、SSE 连接数、事件投递耗时、run 失败分类；文本输出在 211-300。
 - 用量：[internal/platform/obs/usage.go:38-82](file:///c:/Users/waiting2050/Desktop/gotest/%E9%9D%A2%E8%AF%95/internal/platform/obs/usage.go#L38-L82) 按 session 聚合 purpose/prompt/completion/total。
 - 模型埋点：[internal/agent/llm/instrument.go:42-63](file:///c:/Users/waiting2050/Desktop/gotest/%E9%9D%A2%E8%AF%95/internal/agent/llm/instrument.go#L42-L63)：每次调用记 result、token，并把本次用量记到 session。
-- 报告成本快照：[internal/app/report.go:295](file:///c:/Users/waiting2050/Desktop/gotest/%E9%9D%A2%E8%AF%95/internal/app/report.go#L295)。
+- 报告用量快照：[internal/app/report.go:295](file:///c:/Users/waiting2050/Desktop/gotest/%E9%9D%A2%E8%AF%95/internal/app/report.go#L295)（token 与调用次数，不计算金额）。
 - SSE：[internal/api/http/handlers.go:338-425](file:///c:/Users/waiting2050/Desktop/gotest/%E9%9D%A2%E8%AF%95/internal/api/http/handlers.go#L338-L425)，`Last-Event-ID` 解析在 435-449。
 - `/metrics`：[internal/api/http/metrics.go:5-12](file:///c:/Users/waiting2050/Desktop/gotest/%E9%9D%A2%E8%AF%95/internal/api/http/metrics.go#L5-L12)。
 
-**为什么这么设计（含代价）**：run/step 的结构化日志 + 关联 ID 让问题能定位到具体节点；指标按 provider/model/result 分桶，能看到「是哪家模型、哪种失败」；用量按 session 聚合，报告和界面能显示本场成本。代价是全部指标在进程内，重启归零，没有持久化、没有 OpenTelemetry 追踪、没有跨实例聚合；日志只到 stdout，没有集中检索。
+**为什么这么设计（含代价）**：run/step 的结构化日志 + 关联 ID 让问题能定位到具体节点；指标按 provider/model/result 分桶，能看到「是哪家模型、哪种失败」；用量按 session 聚合，报告和界面能显示本场 token 用量。代价是全部指标在进程内，重启归零，没有持久化、没有 OpenTelemetry 追踪、没有跨实例聚合；日志只到 stdout，没有集中检索。
 
 **面试官可能追问**：
 1. **「线上一次 run 失败，你怎么定位？」** 先看 `run_failure_total{kind,class}`，再按 `request_id/run_id` 查日志，`run_steps` 里看最后成功的 step 与失败 step，`session_events` 里看对用户暴露到哪一步。

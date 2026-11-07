@@ -1,5 +1,6 @@
-// Package tools will expose read-only conversation lookup tools
-// (get_session_overview, search_turns, get_turn, list_weak_turns,
-// get_topic_summary) so the report agent fetches evidence on demand instead of
-// receiving the full transcript. It lands in M6.
+// Package tools exposes the read-only conversation queries used by report
+// generation: get_session_overview, search_turns, list_weak_turns and
+// get_turn. The report's fixed collect plan calls the first three
+// deterministically and hands the bundle to the model; get_turn is
+// implemented but not used by that plan.
 package tools
