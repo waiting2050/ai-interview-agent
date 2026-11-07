@@ -1301,8 +1301,8 @@
       `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#e6ecf5" stroke-width="10"/>` +
       `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#3452e1" stroke-width="10" stroke-linecap="round" ` +
       `stroke-dasharray="${(circ * pct).toFixed(1)} ${circ.toFixed(1)}" transform="rotate(-90 ${cx} ${cy})"/>` +
-      `<text x="${cx}" y="${cy + 2}" text-anchor="middle" class="ring-value">${Number(score || 0).toFixed(1)}</text>` +
-      `<text x="${cx}" y="${cy + 20}" text-anchor="middle" class="ring-label">/ 100</text></svg>`;
+      `<text x="${cx}" y="${cy + 1}" text-anchor="middle" class="ring-value">${Number(score || 0).toFixed(1)}</text>` +
+      `<text x="${cx}" y="${cy + 19}" text-anchor="middle" class="ring-label">/ 100</text></svg>`;
   }
 
   function radarSvg(dims) {
