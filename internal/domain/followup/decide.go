@@ -19,6 +19,8 @@ const (
 	ReasonCoverageSatisfied     = "coverage_satisfied"
 	ReasonModelSuggestion       = "model_suggestion"
 	ReasonNoFollowupSignal      = "no_followup_signal"
+	ReasonWeakTopicBonus        = "weak_topic_bonus"
+	ReasonStrongTopicSkip       = "strong_topic_skip"
 )
 
 // Input is everything the gates may look at. All counters come from the
@@ -45,6 +47,10 @@ type Input struct {
 	SuggestFollowup       bool
 	SuggestTarget         string
 	SuggestionHasEvidence bool
+
+	// History is the aggregate of this question's topic before the current
+	// answer. Nil means no history yet and disables every adaptive rule.
+	History *TopicHistory
 }
 
 type Decision struct {
@@ -84,10 +90,42 @@ func Decide(in Input) Decision {
 		// to follow up. The model only advises.
 		return next(in, ReasonCoverageSatisfied, "")
 	}
-	if in.SuggestFollowup && strings.TrimSpace(in.SuggestTarget) != "" && in.SuggestionHasEvidence {
+	// Adaptive rules run after every hard gate, so time, outline and budget
+	// exhaustion always win. A strong topic may skip a model-suggested
+	// follow-up; a weak topic may take one follow-up the model did not ask for.
+	// Both are recorded in the reason so the decision can be replayed.
+	if strongTopic(in.History) && hasUsableSuggestion(in) {
+		return next(in, ReasonStrongTopicSkip, "")
+	}
+	if hasUsableSuggestion(in) {
 		return Decision{Action: ActionFollowUp, Reason: ReasonModelSuggestion, Target: in.SuggestTarget}
 	}
+	if weakTopic(in.History) && in.FollowupsThisQuestion == 0 {
+		// Only the first decision of a question chain may take the bonus, so a
+		// weak topic gets exactly one extra follow-up and later decisions fall
+		// back to the normal suggestion/advance rules.
+		return Decision{Action: ActionFollowUp, Reason: ReasonWeakTopicBonus, Target: strings.TrimSpace(in.SuggestTarget)}
+	}
 	return next(in, ReasonNoFollowupSignal, "")
+}
+
+func hasUsableSuggestion(in Input) bool {
+	return in.SuggestFollowup && strings.TrimSpace(in.SuggestTarget) != "" && in.SuggestionHasEvidence
+}
+
+// weakTopic reports whether the topic's most recent answers form a low-score
+// streak. The per-question and total budgets were already checked by the hard
+// gates, so the bonus can never exceed them; it only turns a fallback advance
+// into one extra follow-up.
+func weakTopic(h *TopicHistory) bool {
+	return h != nil && h.LowStreak >= WeakStreakThreshold
+}
+
+// strongTopic reports whether the topic's most recent answers form a high-score
+// streak. It only changes the decision when a follow-up was otherwise allowed;
+// hard gates still win.
+func strongTopic(h *TopicHistory) bool {
+	return h != nil && h.HighStreak >= StrongStreakThreshold
 }
 
 func next(in Input, reason, target string) Decision {

@@ -68,6 +68,11 @@ type TurnSnapshot struct {
 	NextSeq               int            `json:"next_seq"`
 	AskedQuestions        []string       `json:"asked_questions"`
 
+	// TopicHistory is nil until the topic has at least one scored answer. The
+	// omitempty pointer keeps the persisted snapshot bytes unchanged for
+	// sessions without history.
+	TopicHistory *followup.TopicHistory `json:"topic_history,omitempty"`
+
 	StartedAt time.Time     `json:"started_at"`
 	Elapsed   time.Duration `json:"elapsed"`
 	Now       time.Time     `json:"now"`

@@ -29,3 +29,24 @@ func DefaultLimits() Limits {
 		MaxSessionMinutes:       45,
 	}
 }
+
+// Adaptive follow-up thresholds. Streaks are counted over the already-answered
+// questions of one topic, using the same band cut points as evaluation.Band:
+// band 1 (<50) is "low", band 5 (>=80) is "high". A topic must show two
+// consecutive answers in the same extreme before the preference flips.
+const (
+	WeakStreakThreshold   = 2
+	StrongStreakThreshold = 2
+)
+
+// TopicHistory is the read-only aggregate of one topic's answered questions
+// before the current decision. The zero value / nil pointer means "no history"
+// and must leave Decide byte-identical to the original behaviour.
+type TopicHistory struct {
+	Topic            string  `json:"topic,omitempty"`
+	Answered         int     `json:"answered"`
+	AvgScore         float64 `json:"avg_score"`
+	LowStreak        int     `json:"low_streak"`
+	HighStreak       int     `json:"high_streak"`
+	WeakestDimension string  `json:"weakest_dimension,omitempty"`
+}

@@ -746,6 +746,16 @@
     }
   }
 
+  // Adaptive decisions get one plain-language sentence in the per-question
+  // rationale. Every other reason keeps showing its stable code.
+  function decisionReasonLabel(code) {
+    switch (code) {
+      case "weak_topic_bonus": return "历史弱项放宽：该主题连续低分，本轮追加一次追问";
+      case "strong_topic_skip": return "历史强项收紧：该主题连续高分，跳过追问提前推进";
+      default: return code || "未提供理由";
+    }
+  }
+
   function reasonLabel(code) {
     switch (code) {
       case "model_output_invalid": return "模型输出无法解析";
@@ -1283,14 +1293,14 @@
     }
     const note = p.turn_id ? $(`decision-${p.turn_id}`) : null;
     if (note) {
-      note.textContent = `${actionLabel}：${p.reason || "未提供理由"}`;
+      note.textContent = `${actionLabel}：${decisionReasonLabel(p.reason)}`;
     }
     const el = card("card-event");
     el.appendChild(cardHead("评估决策", [{ text: actionLabel }]));
     if (p.reason) {
       const body = document.createElement("div");
       body.className = "card-body muted";
-      body.textContent = p.reason;
+      body.textContent = decisionReasonLabel(p.reason);
       el.appendChild(body);
     }
     appendEventCard(el);

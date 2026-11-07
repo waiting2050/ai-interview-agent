@@ -41,6 +41,8 @@ func decideAnswer(snap AnswerSnapshot, out interview.Outcome) (followup.Decision
 		SuggestFollowup:       suggestion.Needed,
 		SuggestTarget:         suggestion.Target,
 		SuggestionHasEvidence: len(out.Result.Evidence) > 0,
+
+		History: snap.TopicHistory,
 	}), nil
 }
 
@@ -177,7 +179,7 @@ func (r *Runner) commitAnswer(
 			return fmt.Errorf("unsupported decision action %q", decision.Action)
 		}
 
-		if err := appendEvent(ctx, r.logger(ctx), repos.Events, sess.ID, run.ID, session.EventDecisionMade, map[string]any{
+		decisionPayload := map[string]any{
 			"turn_id":             snap.TurnID,
 			"action":              string(decision.Action),
 			"reason":              decision.Reason,
@@ -186,7 +188,13 @@ func (r *Runner) commitAnswer(
 			"plan_cursor":         sess.PlanCursor,
 			"next_turn_id":        ask.TurnID,
 			"next_question_asked": asked,
-		}); err != nil {
+		}
+		// Only sessions with scored history carry the extra field, so the
+		// default event payload stays byte-identical.
+		if snap.TopicHistory != nil {
+			decisionPayload["topic_history"] = snap.TopicHistory
+		}
+		if err := appendEvent(ctx, r.logger(ctx), repos.Events, sess.ID, run.ID, session.EventDecisionMade, decisionPayload); err != nil {
 			return err
 		}
 

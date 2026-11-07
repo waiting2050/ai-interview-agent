@@ -460,3 +460,108 @@ func lastEventOfType(events []session.Event, eventType string) *session.Event {
 func containsReason(payload []byte, reason string) bool {
 	return strings.Contains(string(payload), reason)
 }
+
+func TestBuildTopicHistoryAggregatesScoredAnswers(t *testing.T) {
+	turns := []session.Turn{
+		{ID: "t1", Topic: "Go 并发", Seq: 1, Status: session.TurnStatusAnswered},
+		{ID: "t2", Topic: "Go 并发", Seq: 2, Status: session.TurnStatusAnswered},
+		{ID: "t3", Topic: "Go 并发", Seq: 3, Status: session.TurnStatusAnswered},
+		{ID: "t4", Topic: "缓存一致性", Seq: 4, Status: session.TurnStatusAnswered},
+	}
+	records := []evaluation.Record{
+		{TurnID: "t1", WeightedScore: 30, Scores: map[evaluation.Dimension]int{
+			evaluation.DimensionCorrectness: 40,
+			evaluation.DimensionDepth:       20,
+		}},
+		{TurnID: "t2", WeightedScore: 35, Scores: map[evaluation.Dimension]int{
+			evaluation.DimensionCorrectness: 50,
+			evaluation.DimensionDepth:       30,
+		}},
+		{TurnID: "t3", WeightedScore: 90, Scores: map[evaluation.Dimension]int{
+			evaluation.DimensionCorrectness: 90,
+		}},
+		{TurnID: "t4", WeightedScore: 20, Scores: map[evaluation.Dimension]int{
+			evaluation.DimensionCorrectness: 10,
+		}},
+	}
+
+	history := buildTopicHistory("Go 并发", "t3", turns, records)
+	if history == nil {
+		t.Fatal("expected history for the current topic")
+	}
+	if history.Answered != 2 {
+		t.Fatalf("answered = %d, want 2 (current turn and other topics excluded)", history.Answered)
+	}
+	if history.AvgScore != 32.5 {
+		t.Fatalf("avg = %v, want 32.5", history.AvgScore)
+	}
+	if history.LowStreak != 2 || history.HighStreak != 0 {
+		t.Fatalf("streak = low %d / high %d, want low 2 / high 0", history.LowStreak, history.HighStreak)
+	}
+	if history.WeakestDimension != string(evaluation.DimensionDepth) {
+		t.Fatalf("weakest = %q, want %q", history.WeakestDimension, evaluation.DimensionDepth)
+	}
+}
+
+func TestBuildTopicHistoryIgnoresDegradedAnswers(t *testing.T) {
+	turns := []session.Turn{
+		{ID: "t1", Topic: "Go 并发", Seq: 1, Status: session.TurnStatusAnswered},
+		{ID: "t2", Topic: "Go 并发", Seq: 2, Status: session.TurnStatusAnswered},
+		{ID: "t3", Topic: "Go 并发", Seq: 3, Status: session.TurnStatusPending},
+	}
+	records := []evaluation.Record{
+		{TurnID: "t1", WeightedScore: 30, Scores: map[evaluation.Dimension]int{
+			evaluation.DimensionCorrectness: 20,
+		}},
+		{TurnID: "t2", Degraded: true, WeightedScore: 90, Scores: map[evaluation.Dimension]int{
+			evaluation.DimensionCorrectness: 90,
+		}},
+	}
+
+	history := buildTopicHistory("Go 并发", "t3", turns, records)
+	if history == nil {
+		t.Fatal("expected history")
+	}
+	if history.Answered != 1 || history.LowStreak != 1 || history.HighStreak != 0 {
+		t.Fatalf("degraded record leaked into history: %+v", history)
+	}
+}
+
+func TestBuildTopicHistoryStreakStopsAtMiddleBand(t *testing.T) {
+	turns := []session.Turn{
+		{ID: "t1", Topic: "Go 并发", Seq: 1, Status: session.TurnStatusAnswered},
+		{ID: "t2", Topic: "Go 并发", Seq: 2, Status: session.TurnStatusAnswered},
+		{ID: "t3", Topic: "Go 并发", Seq: 3, Status: session.TurnStatusAnswered},
+	}
+	records := []evaluation.Record{
+		{TurnID: "t1", WeightedScore: 35, Scores: map[evaluation.Dimension]int{
+			evaluation.DimensionCorrectness: 30,
+		}},
+		{TurnID: "t2", WeightedScore: 65, Scores: map[evaluation.Dimension]int{
+			evaluation.DimensionCorrectness: 65,
+		}},
+		{TurnID: "t3", WeightedScore: 35, Scores: map[evaluation.Dimension]int{
+			evaluation.DimensionCorrectness: 30,
+		}},
+	}
+
+	history := buildTopicHistory("Go 并发", "", turns, records)
+	if history == nil {
+		t.Fatal("expected history")
+	}
+	if history.LowStreak != 1 || history.HighStreak != 0 {
+		t.Fatalf("streak = low %d / high %d, want low 1 / high 0", history.LowStreak, history.HighStreak)
+	}
+}
+
+func TestBuildTopicHistoryReturnsNilWhenNoScoredAnswer(t *testing.T) {
+	turns := []session.Turn{
+		{ID: "t1", Topic: "Go 并发", Seq: 1, Status: session.TurnStatusPending},
+	}
+	if history := buildTopicHistory("Go 并发", "t1", turns, nil); history != nil {
+		t.Fatalf("expected nil history, got %+v", history)
+	}
+	if history := buildTopicHistory("", "", turns, nil); history != nil {
+		t.Fatalf("empty topic must not produce history, got %+v", history)
+	}
+}

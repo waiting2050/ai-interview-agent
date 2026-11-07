@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/waiting2050/ai-interview-agent/internal/agent/interview"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/domainpack"
+	"github.com/waiting2050/ai-interview-agent/internal/domain/evaluation"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/followup"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/resume"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/session"
@@ -284,6 +286,12 @@ func (r *Runner) buildSnapshot(ctx context.Context, run *session.Run) (AnswerSna
 		}
 	}
 
+	evals, err := repos.Evaluations.ListBySession(ctx, sess.ID)
+	if err != nil {
+		return AnswerSnapshot{}, err
+	}
+	history := buildTopicHistory(turn.Topic, turn.ID, turns, evals)
+
 	now := r.now().UTC()
 	var startedAt time.Time
 	var elapsed time.Duration
@@ -316,6 +324,7 @@ func (r *Runner) buildSnapshot(ctx context.Context, run *session.Run) (AnswerSna
 		PlanItems:             items,
 		NextSeq:               nextSeq,
 		AskedQuestions:        asked,
+		TopicHistory:          history,
 		StartedAt:             startedAt,
 		Elapsed:               elapsed,
 		Now:                   now,
@@ -327,4 +336,89 @@ func (r *Runner) buildSnapshot(ctx context.Context, run *session.Run) (AnswerSna
 		JDText:                sess.JDText,
 		Config:                sess.Config,
 	}, nil
+}
+
+type scoredTurn struct {
+	seq   int
+	score float64
+}
+
+// buildTopicHistory aggregates the already-scored answers of one topic. It
+// reads persisted turns and evaluations only, and returns nil when the topic
+// has no usable history so Decide keeps its original behaviour.
+//
+// Streaks are counted from the most recent answer backwards, using the same
+// band cut points as the scorer: band 1 is low, band 5 is high, anything else
+// ends the streak.
+func buildTopicHistory(topic, currentTurnID string, turns []session.Turn, records []evaluation.Record) *followup.TopicHistory {
+	topic = strings.TrimSpace(topic)
+	if topic == "" {
+		return nil
+	}
+
+	byTurn := make(map[string]evaluation.Record, len(records))
+	for _, rec := range records {
+		byTurn[rec.TurnID] = rec
+	}
+
+	scored := make([]scoredTurn, 0, len(turns))
+	dimSums := make(map[evaluation.Dimension]float64, len(evaluation.DimensionOrder))
+	dimCounts := make(map[evaluation.Dimension]int, len(evaluation.DimensionOrder))
+	var total float64
+	for _, turn := range turns {
+		if turn.ID == currentTurnID || turn.Topic != topic || turn.Status != session.TurnStatusAnswered {
+			continue
+		}
+		rec, ok := byTurn[turn.ID]
+		if !ok || rec.Degraded || len(rec.Scores) == 0 {
+			continue
+		}
+		scored = append(scored, scoredTurn{seq: turn.Seq, score: rec.WeightedScore})
+		total += rec.WeightedScore
+		for dimension, value := range rec.Scores {
+			dimSums[dimension] += float64(value)
+			dimCounts[dimension]++
+		}
+	}
+	if len(scored) == 0 {
+		return nil
+	}
+	sort.Slice(scored, func(i, j int) bool { return scored[i].seq < scored[j].seq })
+
+	low, high := 0, 0
+	for i := len(scored) - 1; i >= 0; i-- {
+		band := evaluation.Band(scored[i].score)
+		if band == 1 && high == 0 {
+			low++
+			continue
+		}
+		if band == 5 && low == 0 {
+			high++
+			continue
+		}
+		break
+	}
+
+	weakest := ""
+	weakestAvg := 0.0
+	for _, dimension := range evaluation.DimensionOrder {
+		count := dimCounts[dimension]
+		if count == 0 {
+			continue
+		}
+		avg := dimSums[dimension] / float64(count)
+		if weakest == "" || avg < weakestAvg {
+			weakest = string(dimension)
+			weakestAvg = avg
+		}
+	}
+
+	return &followup.TopicHistory{
+		Topic:            topic,
+		Answered:         len(scored),
+		AvgScore:         total / float64(len(scored)),
+		LowStreak:        low,
+		HighStreak:       high,
+		WeakestDimension: weakest,
+	}
 }
