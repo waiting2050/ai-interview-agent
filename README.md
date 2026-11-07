@@ -284,7 +284,7 @@ go run ./cmd/server
 
 **A/B**：`cmd/evaldiff` 与 `/eval?base=a.json&candidate=b.json` 只读历史文件，不发起模型调用，没有 key 也能跑；输出五个指标的差值、门槛状态变化，以及 `improved / regressed / changed` 判定翻转。
 
-结果文件含时间戳、provider、模型名、prompt 版本、`dataset_sha256`、指标与逐条明细，门槛不达标时退出码为 2。**真实模型基线已更新为 `eval-v3` 的 60 条数据**（2026-11-07 跑分；请求模型 `deepseek-chat`，供应商实际返回 `deepseek-flash` / DeepSeek-V4.1-Flash-1017；一次跑完 60 次调用，0 降级、0 错误）：schema 合法率 100%、档位命中率 81.7%（49/60）、相邻档 100%、维度 MAE 0.497、证据引用率 100%，**五个门槛全部通过**；分领域命中率 Go 后端 82.9%（29/35）、AI Agent 80.0%（20/25）。与 `eval-v2` 的 30 条基线相比，档位命中 +1.7pt，维度 MAE +0.063（略升但仍达标）；两侧共有的 30 条里只有 2 条档位翻转，且均为改进（`high-06-rate-limit`、`high-08-cpu-profile`）。11 条失准集中在 high 档偏严（6 条）以及「指标无出处 / 术语堆砌 / 只有结论」被压到 1 档。结果文件：[eval-openai-deepseek-chat-eval-v3-20261107T134323Z.json](docs/eval-results/eval-openai-deepseek-chat-eval-v3-20261107T134323Z.json)。
+结果文件含时间戳、provider、模型名、prompt 版本、`dataset_sha256`、指标与逐条明细，门槛不达标时退出码为 2。**真实模型基线已更新为 `eval-v4` 的 60 条数据**（2026-11-07 跑分；请求模型 `deepseek-chat`，供应商实际返回 `deepseek-flash` / DeepSeek-V4.1-Flash-1017；一次跑完 60 次调用，0 降级、0 错误）：schema 合法率 100%、档位命中率 **80.0%（48/60）**、相邻档 100%、维度 MAE **0.4733**、证据引用率 100%，**五个门槛全部通过**；分领域命中率 Go 后端 82.9%（29/35）、AI Agent 76.0%（19/25）。与同集 `eval-v3` 的 A/B：档位命中率 **81.7%→80.0%（−1 条，净效应变差）**、维度 MAE **0.4967→0.4733（改善）**，其余三项持平；实际档位翻转 2 条且均为回退（`ai-mid-03-memory`、`ai-mid-07-context-budget` 3→5）；标注修正使 `ai-high-01-rag-pipeline` 由期望 5 档改为 3 档并转为命中，但模型实际分未变（74），不计为模型改进。v4 结果：[eval-openai-deepseek-chat-eval-v4-20261107T143259Z.json](docs/eval-results/eval-openai-deepseek-chat-eval-v4-20261107T143259Z.json)；v3 结果保留：[eval-openai-deepseek-chat-eval-v3-20261107T134323Z.json](docs/eval-results/eval-openai-deepseek-chat-eval-v3-20261107T134323Z.json)。
 
 ---
 

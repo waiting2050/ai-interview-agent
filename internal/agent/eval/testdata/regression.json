@@ -13,12 +13,12 @@
       "expected_band": 5,
       "expected_scores": {
         "correctness": 5,
-        "depth": 5,
-        "engineering_judgment": 5,
+        "depth": 4,
+        "engineering_judgment": 4,
         "structure": 4,
-        "evidence_credibility": 5
+        "evidence_credibility": 4
       },
-      "notes": "讲清了 GM 的锁竞争问题、P 的本地队列与 work stealing、资源挂载，并给出量化收益；4 分结构是因为先结论后细节的过渡略糙。",
+      "notes": "GM 锁竞争、P 本地队列与 work stealing、资源挂载讲清楚了；但 depth 4：只写了正常容量路径（满了放全局队列、偷一半），缺 M 阻塞时 P 移交、sysmon 抢占等失效边界；engineering 4：没有 P 的代价与风险；evidence 4：有前后数字但无基线方法/统计窗口/出处，且该数据来自阻塞调用批量化，不是 GMP 本身。",
       "evidence_anchor": "加了 P 之后，每个 M 绑定一个 P，goroutine 优先放 P 的本地 runq"
     },
     {
@@ -93,12 +93,12 @@
       "expected_band": 5,
       "expected_scores": {
         "correctness": 5,
-        "depth": 4,
+        "depth": 3,
         "engineering_judgment": 4,
         "structure": 4,
-        "evidence_credibility": 5
+        "evidence_credibility": 4
       },
-      "notes": "明确重复是常态，给了幂等表和状态机两种落地方案，还提了 rebalance 这个容易被遗漏的点；量化数据可信。",
+      "notes": "明确重复是常态，并覆盖了 rebalance 这个易漏点；但 depth 3：幂等表与状态机是「或者」并列，没有在两者间做选择，也没有说明被放弃方案的缺陷或代价；evidence 4：0.3% 重复率没有统计窗口与出处，「可信」是主观判断。",
       "evidence_anchor": "我一般用业务唯一键做幂等表，insert 唯一索引，冲突就丢弃"
     },
     {
@@ -133,12 +133,12 @@
       "expected_band": 5,
       "expected_scores": {
         "correctness": 5,
-        "depth": 5,
+        "depth": 3,
         "engineering_judgment": 4,
         "structure": 4,
         "evidence_credibility": 4
       },
-      "notes": "next-key lock 的触发条件、RC 对比、死锁日志排查和治理手段都到位，也有线上结果；engineering_judgment 4 分是因为降隔离级别没有讨论业务风险。",
+      "notes": "next-key lock 触发条件、RC 对比、死锁日志排查都到位，也有线上结果；但 depth 3：统一加锁顺序/缩小事务/降隔离/补索引是补救措施清单，不是方案取舍，没有说明被放弃方案的代价；engineering 4 仍成立：降隔离级别没有讨论业务风险。",
       "evidence_anchor": "RR 下当前读会加 next-key lock，也就是记录锁加间隙锁"
     },
     {
@@ -710,15 +710,15 @@
       "question": "一个完整的 RAG 检索链路包含哪些环节？哪个环节最容易成为瓶颈？",
       "answer": "离线侧是文档解析、清洗、分块、向量化和入库；在线侧是 query 改写、召回、粗排、精排、拼上下文和生成。最容易出问题的是分块和召回：块切得太碎会丢上下文，太大又会稀释向量语义；召回阶段 embedding 模型和业务语料不匹配，或者只做单路向量召回，都会让后面精排救不回来。我一般先保证召回率，再看精排，最后才调 prompt。线上还会加 trace，把每阶段的候选数和耗时打出来，方便定位是召回空还是生成跑偏。",
       "expected_points": ["离线与在线链路", "召回 / 精排瓶颈定位"],
-      "expected_band": 5,
+      "expected_band": 3,
       "expected_scores": {
         "correctness": 5,
-        "depth": 5,
+        "depth": 3,
         "engineering_judgment": 4,
         "structure": 4,
-        "evidence_credibility": 5
+        "evidence_credibility": 3
       },
-      "notes": "链路完整，明确指出分块与召回是瓶颈并给出排查顺序和 trace 手段；结构 4 分是因为环节列举略平铺。",
+      "notes": "链路完整，指出分块与召回是瓶颈，也给了排查顺序；但 depth 3：「先召回、再精排、最后调 prompt」是优先级排序，不是取舍，且验证只有 trace 手段、没有数据；evidence 3：只有「加 trace 打候选数和耗时」的计划，没有实测结果、窗口或出处。",
       "evidence_anchor": "我一般先保证召回率，再看精排，最后才调 prompt"
     },
     {
