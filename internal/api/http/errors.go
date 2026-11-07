@@ -147,6 +147,12 @@ func (h *handlers) writeError(w http.ResponseWriter, r *http.Request, err error)
 		body.Message = "复习卡不存在"
 		writeJSON(w, http.StatusNotFound, body)
 
+	case errors.Is(err, review.ErrEvaluatorUnavailable):
+		body.Code = "review_evaluator_unavailable"
+		body.Message = "复习评估链路未启用"
+		body.Retryable = true
+		writeJSON(w, http.StatusServiceUnavailable, body)
+
 	case errors.Is(err, user.ErrInvalidArgument):
 		body.Code = "invalid_argument"
 		body.Message = err.Error()

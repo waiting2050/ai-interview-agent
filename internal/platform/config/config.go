@@ -70,6 +70,9 @@ type Config struct {
 	// EvalResultsDir is the directory the read-only /eval panel reads result
 	// files from.
 	EvalResultsDir string
+	// ReviewDailyLimit caps how many due cards the daily review queue shows.
+	// It never changes the persisted SM-2 due dates.
+	ReviewDailyLimit int
 }
 
 func Load() (Config, error) {
@@ -98,6 +101,7 @@ func Load() (Config, error) {
 		DemoRateLimitAnswer:     20,
 		DemoRateLimitReport:     3,
 		EvalResultsDir:          "docs/eval-results",
+		ReviewDailyLimit:        20,
 	}
 
 	var err error
@@ -158,6 +162,12 @@ func Load() (Config, error) {
 	}
 	if cfg.DemoRateLimitReport, err = intEnv("DEMO_RATE_LIMIT_REPORT", cfg.DemoRateLimitReport); err != nil {
 		return Config{}, err
+	}
+	if cfg.ReviewDailyLimit, err = intEnv("REVIEW_DAILY_LIMIT", cfg.ReviewDailyLimit); err != nil {
+		return Config{}, err
+	}
+	if cfg.ReviewDailyLimit <= 0 {
+		cfg.ReviewDailyLimit = 20
 	}
 	cfg.WorkerID = os.Getenv("WORKER_ID")
 	if cfg.WorkerConcurrency <= 0 {

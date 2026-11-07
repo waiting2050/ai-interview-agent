@@ -1123,6 +1123,17 @@ data: {"event_id":43,"session_id":"01H...","run_id":"01H...","type":"question.as
 - 前端：顶栏「今天该复习 N 张」入口；复习面板按「正面 → 展开参考答案 → 自评 0–5 → 下一张」推进，评分后提示新的 EF / 间隔 / 到期日；报告图表区新增「遗忘曲线预测」（SM-2 间隔 1/6/15/38/95/237 天）。
 - 测试：`internal/domain/review/review_test.go` 覆盖 0/3/5 评分、失败重置、EF 下限、多次累积、时区边界（15:59Z 属于当日、16:01Z 属于次日）与卡片生成/换问法轮换；`internal/api/http/review_test.go` 覆盖 due 为空、非法 grade 400、正常评分与排程、列表、404 与未启用 503。
 
+**M11 复习升级记录（已完成，确定性规则，不调模型）**
+
+- 变式题：`BuildVariant` 优先取题纲 `expected_points`（按 `topic` 精确匹配领域包），缺失时回退卡片 `key_points`；按 `repetitions` 轮换三种问法模板，并用 `ID|Topic|Repetitions` 作为 FNV-1a 种子做 Fisher–Yates 打乱，同卡同轮次结果稳定，`model_called=false`。
+- 客观评分：新增 `POST /v1/review/{id}/variant/answer`，评估走既有 `interview.Evaluator`（`internal/app/review_eval.go` 适配），无 key 时自动走 heuristic；`expected_points` 与题纲 rubric 一并传入，评分复用 `evaluation.ComputeScoreWith`，不改评分逻辑与 M6 门槛。
+- 换算：`ObjectiveGrade(score)` 把 0–100 客观分映射到 SM-2 grade：`<40→1`、`40–59→2`、`60–79→3`、`80–89→4`、`≥90→5`；band 仍按既有 50/80 边界只作展示。SM-2 公式本身不变，只改 grade 来源。
+- 双轨：自评 0–5 可选，只记录为参考；`|自评 − 客观 grade| ≥ 2` 判定分歧，自评更高提示「可能高估自己」，反之提示「可能低估自己」；`last_objective_score / last_objective_band / last_self_grade / last_divergence` 落卡，便于后续统计。评估降级时不排程、不猜测分数。
+- 排序：`Due` 排序键为「题纲 `focus` 高频考点 > 历史低分（原题 <60 / 上次客观分 <60 / 上次 grade <3）> 普通题」，同级按 `due_at` 升序再按 `id`；每条卡返回 `priority` 与一句 `sort_reason`。
+- 每日上限：`REVIEW_DAILY_LIMIT`（默认 20）只裁剪当日展示队列，返回 `total_due / deferred_count / remaining`；`limit` 只能进一步缩小，不改变持久化的 SM-2 到期时间。
+- 前端：复用现有复习面板，新增变式题作答区、自评选择与「客观分 vs 自评」对比、排序理由、今日剩余额度与延后数量；不再用自评按钮直接写排程。
+- 测试：覆盖变式题确定性、题纲要点回退、客观分换算边界、自评/客观分歧与落库、无 evaluator 503、降级不排程、排序优先级、每日上限与延后计数；`internal/app` 额外验证 heuristic 无 key 链路可跑。本轮全程无真实模型调用。
+
 ### M12 简历诊断：评分 + 优化建议（已完成，规则版）
 
 - 理由：附件解析只是入口，候选人更需要「这份简历哪里扣分、怎么改」的结构化反馈。

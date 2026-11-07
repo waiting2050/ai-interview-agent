@@ -16,7 +16,7 @@ func (h *handlers) listDueReviews(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	offset := queryInt(r, "tz_offset_minutes", review.DefaultTZOffsetMinutes)
-	limit := queryInt(r, "limit", 20)
+	limit := queryInt(r, "limit", 0)
 	identity, _ := identityFrom(r.Context())
 	result, err := h.deps.Reviewer.Due(r.Context(), identity.UserID, offset, limit)
 	if err != nil {
@@ -103,6 +103,44 @@ func (h *handlers) retestReview(w http.ResponseWriter, r *http.Request) {
 	}
 	identity, _ := identityFrom(r.Context())
 	result, err := h.deps.Reviewer.Retest(r.Context(), identity.UserID, r.PathValue("id"))
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// variantReview returns the deterministic variant question with shuffled
+// syllabus expected points. It never calls a model.
+func (h *handlers) variantReview(w http.ResponseWriter, r *http.Request) {
+	if h.deps.Reviewer == nil {
+		h.writeReviewUnavailable(w)
+		return
+	}
+	identity, _ := identityFrom(r.Context())
+	result, err := h.deps.Reviewer.Variant(r.Context(), identity.UserID, r.PathValue("id"))
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// answerVariantReview evaluates a variant answer objectively and applies the
+// SM-2 update derived from the objective grade. The optional self grade is
+// recorded for the double-track comparison only.
+func (h *handlers) answerVariantReview(w http.ResponseWriter, r *http.Request) {
+	if h.deps.Reviewer == nil {
+		h.writeReviewUnavailable(w)
+		return
+	}
+	var req review.VariantAnswerInput
+	if err := decodeJSON(w, r, &req); err != nil {
+		h.writeError(w, r, fmt.Errorf("%w: %s", review.ErrInvalidArgument, err))
+		return
+	}
+	identity, _ := identityFrom(r.Context())
+	result, err := h.deps.Reviewer.AnswerVariant(r.Context(), identity.UserID, r.PathValue("id"), req)
 	if err != nil {
 		h.writeError(w, r, err)
 		return

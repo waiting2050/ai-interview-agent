@@ -3,6 +3,8 @@ package review_test
 import (
 	"context"
 	"errors"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -201,6 +203,284 @@ func TestBuildRetestRotatesWithRepetitions(t *testing.T) {
 	if review.BuildRetest(card).Template != "rephrase" {
 		t.Fatalf("reps 3 template = %q", review.BuildRetest(card).Template)
 	}
+}
+
+func TestBuildVariantUsesSyllabusPointsDeterministically(t *testing.T) {
+	card := &review.Card{
+		ID:           "card-go",
+		Topic:        "Go 并发模型",
+		KeyPoints:    []string{"自定义要点"},
+		Repetitions:  1,
+		EaseFactor:   review.DefaultEase,
+		IntervalDays: 0,
+		LastGrade:    -1,
+	}
+	first := review.BuildVariant(card)
+	second := review.BuildVariant(card)
+	if first.ModelCalled {
+		t.Fatal("variant generation must not call a model")
+	}
+	if first.Question != second.Question || !reflect.DeepEqual(first.ExpectedPoints, second.ExpectedPoints) {
+		t.Fatalf("variant generation is not deterministic:\nfirst=%+v\nsecond=%+v", first, second)
+	}
+	if first.Template != "scenario" {
+		t.Fatalf("reps 1 template = %q", first.Template)
+	}
+	want := map[string]bool{
+		"goroutine 调度与 G-M-P 模型": true,
+		"channel 阻塞与缓冲区设计":       true,
+		"context 取消与超时传递":        true,
+	}
+	if len(first.ExpectedPoints) != len(want) {
+		t.Fatalf("expected points = %v", first.ExpectedPoints)
+	}
+	for _, point := range first.ExpectedPoints {
+		if !want[point] {
+			t.Fatalf("unexpected syllabus point %q", point)
+		}
+	}
+	if !strings.Contains(first.Question, "Go 并发模型") {
+		t.Fatalf("question = %q", first.Question)
+	}
+}
+
+func TestBuildVariantFallsBackToCardKeyPoints(t *testing.T) {
+	card := &review.Card{
+		ID:          "card-fallback",
+		Topic:       "订单幂等",
+		KeyPoints:   []string{"幂等键", "本地消息表", "重试语义"},
+		Repetitions: 2,
+		EaseFactor:  review.DefaultEase,
+		LastGrade:   -1,
+	}
+	first := review.BuildVariant(card)
+	if len(first.ExpectedPoints) != 3 {
+		t.Fatalf("points = %v", first.ExpectedPoints)
+	}
+	if !reflect.DeepEqual(first, review.BuildVariant(card)) {
+		t.Fatalf("fallback variant is not deterministic: %+v", first)
+	}
+}
+
+func TestBuildCardsMarksKeyTopicAndSourceScore(t *testing.T) {
+	now := time.Date(2026, 11, 6, 10, 0, 0, 0, time.UTC)
+	rep := &domainreport.Report{Questions: []domainreport.QuestionReview{
+		{
+			TurnID:        "turn-key",
+			Topic:         "Go 并发模型",
+			Question:      "讲讲 Go 并发",
+			Score:         61,
+			Scores:        map[string]int{"correctness": 3, "depth": 3},
+			MissingPoints: []string{"context 取消"},
+		},
+		{
+			TurnID:        "turn-normal",
+			Topic:         "自拟考点",
+			Question:      "自拟问题",
+			Score:         70,
+			Scores:        map[string]int{"correctness": 3, "depth": 3},
+			MissingPoints: []string{"自拟缺口"},
+		},
+	}}
+	cards := review.BuildCards("sess-1", rep, now)
+	if len(cards) != 2 {
+		t.Fatalf("cards = %d", len(cards))
+	}
+	if !cards[0].KeyTopic {
+		t.Fatal("syllabus focus topic must be marked")
+	}
+	if cards[0].SourceScore != 61 {
+		t.Fatalf("source score = %v", cards[0].SourceScore)
+	}
+	if cards[1].KeyTopic {
+		t.Fatal("unknown topic must not be marked as key")
+	}
+}
+
+func TestObjectiveGradeMapping(t *testing.T) {
+	cases := []struct {
+		score float64
+		want  int
+	}{
+		{-1, 1}, {0, 1}, {39.9, 1}, {40, 2}, {59.9, 2}, {60, 3},
+		{79.9, 3}, {80, 4}, {89.9, 4}, {90, 5}, {100, 5}, {120, 5},
+	}
+	for _, tc := range cases {
+		if got := review.ObjectiveGrade(tc.score); got != tc.want {
+			t.Fatalf("ObjectiveGrade(%v) = %d, want %d", tc.score, got, tc.want)
+		}
+	}
+}
+
+func TestAnswerVariantUsesObjectiveGrade(t *testing.T) {
+	now := time.Date(2026, 11, 6, 10, 0, 0, 0, time.UTC)
+	card := newCard()
+	card.UserID = "u1"
+	evaluator := &fakeEvaluator{result: review.VariantEvaluation{
+		Score:         45,
+		MissingPoints: []string{"没讲补偿"},
+		ModelName:     "fake-heuristic",
+		PromptVersion: "eval-test",
+	}}
+	store := &fakeStore{cards: []*review.Card{card}}
+	svc := review.New(store, evaluator)
+	svc.SetClock(func() time.Time { return now })
+
+	self := 5
+	result, err := svc.AnswerVariant(context.Background(), "u1", card.ID, review.VariantAnswerInput{
+		Answer:    "我的回答",
+		SelfGrade: &self,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Objective.Score != 45 || result.Objective.Band != 1 || result.Objective.Grade != 2 {
+		t.Fatalf("objective = %+v", result.Objective)
+	}
+	if result.Card.LastGrade != 2 || result.Card.IntervalDays != 1 || result.Card.Repetitions != 0 {
+		t.Fatalf("objective grade must drive SM-2: %+v", result.Card)
+	}
+	if result.Card.LastObjectiveScore == nil || *result.Card.LastObjectiveScore != 45 ||
+		result.Card.LastObjectiveBand == nil || *result.Card.LastObjectiveBand != 1 ||
+		result.Card.LastSelfGrade == nil || *result.Card.LastSelfGrade != 5 {
+		t.Fatalf("objective/self fields = %+v", result.Card)
+	}
+	if result.Divergence == nil || result.Divergence.Delta != 3 || !result.Divergence.SuspectedOverestimate {
+		t.Fatalf("divergence = %+v", result.Divergence)
+	}
+	if result.Card.LastDivergence == nil || *result.Card.LastDivergence != 3 {
+		t.Fatalf("persisted divergence = %v", result.Card.LastDivergence)
+	}
+	if !strings.Contains(result.Message, "高估") {
+		t.Fatalf("message = %q", result.Message)
+	}
+	if result.Calculation == nil || result.Calculation.Grade != 2 {
+		t.Fatalf("calculation = %+v", result.Calculation)
+	}
+	if len(evaluator.last.ExpectedPoints) == 0 {
+		t.Fatal("variant points must be passed to the evaluator")
+	}
+}
+
+func TestAnswerVariantRequiresEvaluator(t *testing.T) {
+	card := newCard()
+	card.UserID = "u1"
+	store := &fakeStore{cards: []*review.Card{card}}
+	svc := review.New(store)
+	_, err := svc.AnswerVariant(context.Background(), "u1", card.ID, review.VariantAnswerInput{Answer: "回答"})
+	if !errors.Is(err, review.ErrEvaluatorUnavailable) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestAnswerVariantDegradedDoesNotReschedule(t *testing.T) {
+	now := time.Date(2026, 11, 6, 10, 0, 0, 0, time.UTC)
+	card := newCard()
+	card.UserID = "u1"
+	evaluator := &fakeEvaluator{result: review.VariantEvaluation{Degraded: true, ErrorCode: "model_output_invalid"}}
+	store := &fakeStore{cards: []*review.Card{card}}
+	svc := review.New(store, evaluator)
+	svc.SetClock(func() time.Time { return now })
+
+	result, err := svc.AnswerVariant(context.Background(), "u1", card.ID, review.VariantAnswerInput{Answer: "回答"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Objective.Degraded || result.Calculation != nil {
+		t.Fatalf("degraded result = %+v", result)
+	}
+	if result.Card.LastGrade != -1 || !result.Card.DueAt.Equal(card.DueAt) {
+		t.Fatalf("degraded must not reschedule: %+v", result.Card)
+	}
+}
+
+func TestAnswerVariantRejectsBadInput(t *testing.T) {
+	card := newCard()
+	card.UserID = "u1"
+	store := &fakeStore{cards: []*review.Card{card}}
+	svc := review.New(store, &fakeEvaluator{})
+	bad := 6
+	if _, err := svc.AnswerVariant(context.Background(), "u1", card.ID, review.VariantAnswerInput{Answer: " ", SelfGrade: &bad}); !errors.Is(err, review.ErrInvalidArgument) {
+		t.Fatalf("empty answer err = %v", err)
+	}
+	if _, err := svc.AnswerVariant(context.Background(), "u1", card.ID, review.VariantAnswerInput{Answer: "回答", SelfGrade: &bad}); !errors.Is(err, review.ErrInvalidGrade) {
+		t.Fatalf("bad self grade err = %v", err)
+	}
+}
+
+func TestDuePriorityAndDailyLimit(t *testing.T) {
+	now := time.Date(2026, 11, 6, 10, 0, 0, 0, time.UTC)
+	makeCard := func(id, topic string, source float64, dueAt time.Time) *review.Card {
+		c := newCard()
+		c.ID = id
+		c.UserID = "u1"
+		c.Topic = topic
+		c.Question = topic
+		c.SourceScore = source
+		c.DueAt = dueAt
+		return c
+	}
+	cards := []*review.Card{
+		makeCard("key", "Go 并发模型", 90, now.Add(2*time.Hour)),
+		makeCard("low", "自拟低分题", 45, now.Add(time.Hour)),
+		makeCard("normal-late", "普通题 A", 80, now),
+		makeCard("normal-early", "普通题 B", 80, now.Add(-time.Hour)),
+	}
+	store := &fakeStore{cards: cards}
+	svc := review.New(store)
+	svc.SetClock(func() time.Time { return now })
+	svc.SetDailyLimit(2)
+
+	result, err := svc.Due(context.Background(), "u1", 480, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.TotalDue != 4 || result.Count != 2 || result.DeferredCount != 2 || result.DailyLimit != 2 || result.Remaining != 0 {
+		t.Fatalf("due counts = %+v", result)
+	}
+	if result.Cards[0].ID != "key" || result.Cards[1].ID != "low" {
+		t.Fatalf("priority order = %v, %v", result.Cards[0].ID, result.Cards[1].ID)
+	}
+	if result.Cards[0].Priority != "key_topic" || result.Cards[1].Priority != "low_score" {
+		t.Fatalf("priority labels = %q, %q", result.Cards[0].Priority, result.Cards[1].Priority)
+	}
+	if !strings.Contains(result.Cards[0].SortReason, "高频") || !strings.Contains(result.Cards[1].SortReason, "低分") {
+		t.Fatalf("sort reasons = %q / %q", result.Cards[0].SortReason, result.Cards[1].SortReason)
+	}
+
+	svc.SetDailyLimit(4)
+	all, err := svc.Due(context.Background(), "u1", 480, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if all.Count != 4 || all.DeferredCount != 0 || all.Remaining != 0 {
+		t.Fatalf("all due = %+v", all)
+	}
+	if all.Cards[2].ID != "normal-early" || all.Cards[3].ID != "normal-late" {
+		t.Fatalf("same-tier due order = %v, %v", all.Cards[2].ID, all.Cards[3].ID)
+	}
+
+	svc.SetDailyLimit(2)
+	one, err := svc.Due(context.Background(), "u1", 480, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if one.Count != 1 || one.DeferredCount != 3 || one.Remaining != 1 {
+		t.Fatalf("requested limit = %+v", one)
+	}
+}
+
+type fakeEvaluator struct {
+	result review.VariantEvaluation
+	err    error
+	last   review.VariantEvaluationInput
+	calls  int
+}
+
+func (f *fakeEvaluator) EvaluateVariant(_ context.Context, in review.VariantEvaluationInput) (review.VariantEvaluation, error) {
+	f.calls++
+	f.last = in
+	return f.result, f.err
 }
 
 func TestEndOfTodayRespectsOffset(t *testing.T) {

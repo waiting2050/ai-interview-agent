@@ -900,5 +900,21 @@ func cloneReviewCard(card *review.Card) *review.Card {
 		calc := *card.LastCalculation
 		cp.LastCalculation = &calc
 	}
+	if card.LastObjectiveScore != nil {
+		v := *card.LastObjectiveScore
+		cp.LastObjectiveScore = &v
+	}
+	if card.LastObjectiveBand != nil {
+		v := *card.LastObjectiveBand
+		cp.LastObjectiveBand = &v
+	}
+	if card.LastSelfGrade != nil {
+		v := *card.LastSelfGrade
+		cp.LastSelfGrade = &v
+	}
+	if card.LastDivergence != nil {
+		v := *card.LastDivergence
+		cp.LastDivergence = &v
+	}
 	return &cp
 }

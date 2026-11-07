@@ -151,6 +151,8 @@ type Reviewer interface {
 	Get(ctx context.Context, userID, id string) (*review.Card, error)
 	Grade(ctx context.Context, userID, id string, grade int) (*review.GradeResult, error)
 	Retest(ctx context.Context, userID, id string) (*review.Retest, error)
+	Variant(ctx context.Context, userID, id string) (*review.Variant, error)
+	AnswerVariant(ctx context.Context, userID, id string, in review.VariantAnswerInput) (*review.VariantAnswerResult, error)
 }
 
 // Repositories is the set of repositories bound to either the pool or an

@@ -37,7 +37,10 @@ type Topic struct {
 	Difficulty     string   `yaml:"difficulty" json:"difficulty"`
 	ExpectedPoints []string `yaml:"expected_points" json:"expected_points"`
 	Source         string   `yaml:"source" json:"source"`
-	URL            string   `yaml:"url,omitempty" json:"url,omitempty"`
+	// Focus marks an outline topic that interviewers ask most often. Review
+	// ranking uses it before any other signal.
+	Focus bool   `yaml:"focus,omitempty" json:"focus,omitempty"`
+	URL   string `yaml:"url,omitempty" json:"url,omitempty"`
 }
 
 type Lexicon struct {

@@ -1485,11 +1485,16 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
 .review-answer summary { cursor: pointer; color: var(--brand); font-size: var(--text-sm); }
 .review-answer ul { margin: var(--space-2) 0 0; padding-left: var(--space-5); line-height: 1.7; }
 .review-answer p { margin: var(--space-1) 0 0; line-height: 1.7; color: var(--ink-soft); }
-.review-retest { margin: var(--space-3) 0; padding: var(--space-3); background: var(--surface-2); border-radius: var(--radius-sm); line-height: 1.7; }
-.grade-row { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-4); }
-.grade-btn { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; margin: 0; border-radius: 50%; border: 1px solid var(--line-strong); background: var(--panel); font-weight: 600; line-height: 1; color: var(--ink-soft); cursor: pointer; font-variant-numeric: tabular-nums; }
-.grade-btn:hover:not(:disabled) { border-color: var(--brand); color: var(--brand); box-shadow: 0 0 0 3px var(--focus); }
-.grade-btn:disabled { opacity: .5; cursor: wait; }
+.review-reason { margin: calc(-1 * var(--space-2)) 0 var(--space-3); font-size: var(--text-sm); color: var(--muted); }
+.review-variant { margin: var(--space-3) 0; padding: var(--space-3); border: 1px dashed var(--line-strong); border-radius: var(--radius-sm); background: var(--surface-2); }
+.review-variant-question { margin-bottom: var(--space-2); line-height: 1.7; color: var(--ink-soft); }
+.review-variant-points { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-bottom: var(--space-3); }
+.review-variant textarea { width: 100%; margin-bottom: var(--space-2); }
+.review-self-label { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); font-size: var(--text-sm); color: var(--muted); }
+.review-variant-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+.review-objective { margin-top: var(--space-3); padding: var(--space-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); line-height: 1.7; }
+.review-objective-score { margin-bottom: var(--space-2); font-variant-numeric: tabular-nums; }
+.review-objective-score strong { font-size: var(--text-lg); color: var(--brand); }
 .review-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-3); }
 .review-done { padding: var(--space-6); text-align: center; line-height: 1.7; }
 .fc-bar { fill: var(--chart-neutral); }
@@ -1501,7 +1506,6 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
   .review-head { flex-wrap: wrap; }
   .review-kicker { font-size: var(--text-xs); }
   .review-card { padding: var(--space-4); }
-  .grade-btn { width: 32px; height: 32px; }
 }
 
 /* Numeric readouts keep column alignment across score cards and charts. */

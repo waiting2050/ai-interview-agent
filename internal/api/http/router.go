@@ -81,6 +81,8 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("GET /v1/review", h.listReviews)
 	mux.HandleFunc("GET /v1/review/{id}", h.getReview)
 	mux.HandleFunc("GET /v1/review/{id}/retest", h.retestReview)
+	mux.HandleFunc("GET /v1/review/{id}/variant", h.variantReview)
+	mux.HandleFunc("POST /v1/review/{id}/variant/answer", h.answerVariantReview)
 	mux.HandleFunc("POST /v1/review/{id}/grade", h.gradeReview)
 	mux.HandleFunc("GET /v1/domains", h.listDomains)
 	mux.HandleFunc("POST /v1/sessions", h.createSession)

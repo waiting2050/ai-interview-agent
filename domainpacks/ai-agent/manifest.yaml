@@ -53,6 +53,7 @@ topics:
       - 指令、示例与角色提示的结构化编排
       - 上下文预算分配与历史信息的压缩策略
       - 结构化输出约束与结果解析的容错
+    focus: true
     source: curated
   - id: llm-agent-tool
     direction: llm
@@ -63,6 +64,7 @@ topics:
       - 工具定义与参数模式的结构化约束
       - 多步规划失败后的重试与终止判定
       - 工具越权调用与副作用的具体防护
+    focus: true
     source: curated
   - id: llm-memory
     direction: llm
@@ -93,6 +95,7 @@ topics:
       - 向量召回与关键词召回的融合排序
       - 重排模型在延迟与精度之间的权衡
       - 查询改写与多路召回策略的合理组合
+    focus: true
     source: curated
   - id: rag-vector-store
     direction: rag
@@ -113,6 +116,7 @@ topics:
       - 评测集构建与召回命中率指标设计
       - 端到端效果与分阶段指标的拆解方法
       - 负样本与困难样本的构造方式设计
+    focus: true
     source: curated
   - id: serving-inference
     direction: serving
@@ -143,6 +147,7 @@ topics:
       - 离线评测集与线上抽检的完整闭环
       - 事实校验与引用溯源的拦截策略设计
       - 幻觉率与拒答率之间的平衡取舍方式
+    focus: true
     source: curated
   - id: serving-streaming
     direction: serving

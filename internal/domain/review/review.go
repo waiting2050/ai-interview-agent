@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/waiting2050/ai-interview-agent/internal/domain/domainpack"
+	"github.com/waiting2050/ai-interview-agent/internal/domain/evaluation"
 	domainreport "github.com/waiting2050/ai-interview-agent/internal/domain/report"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/idgen"
 )
@@ -34,6 +36,9 @@ var (
 	ErrInvalidArgument = errors.New("invalid review input")
 	// ErrNotFound marks a missing review card.
 	ErrNotFound = errors.New("review card not found")
+	// ErrEvaluatorUnavailable marks a variant-answer request when no evaluation
+	// chain is wired in. Production always wires the heuristic fallback.
+	ErrEvaluatorUnavailable = errors.New("review evaluator unavailable")
 )
 
 // Calculation records one SM-2 update so the demo can explain the schedule.
@@ -52,24 +57,36 @@ type Calculation struct {
 // Card is one persisted review unit. EaseFactor / IntervalDays / Repetitions /
 // DueAt are the SM-2 state.
 type Card struct {
-	ID              string       `json:"id"`
-	UserID          string       `json:"user_id,omitempty"`
-	SessionID       string       `json:"session_id"`
-	TurnID          string       `json:"source_turn_id,omitempty"`
-	Topic           string       `json:"topic"`
-	Question        string       `json:"question"`
-	AnswerDigest    string       `json:"answer_digest,omitempty"`
-	KeyPoints       []string     `json:"key_points"`
-	Dimension       string       `json:"dimension,omitempty"`
-	EaseFactor      float64      `json:"ease_factor"`
-	IntervalDays    int          `json:"interval_days"`
-	Repetitions     int          `json:"repetitions"`
-	DueAt           time.Time    `json:"due_at"`
-	LastGrade       int          `json:"last_grade"`
-	LastReviewedAt  *time.Time   `json:"last_reviewed_at,omitempty"`
-	LastCalculation *Calculation `json:"last_calculation,omitempty"`
-	CreatedAt       time.Time    `json:"created_at"`
-	UpdatedAt       time.Time    `json:"updated_at"`
+	ID           string   `json:"id"`
+	UserID       string   `json:"user_id,omitempty"`
+	SessionID    string   `json:"session_id"`
+	TurnID       string   `json:"source_turn_id,omitempty"`
+	Topic        string   `json:"topic"`
+	Question     string   `json:"question"`
+	AnswerDigest string   `json:"answer_digest,omitempty"`
+	KeyPoints    []string `json:"key_points"`
+	Dimension    string   `json:"dimension,omitempty"`
+	// SourceScore is the original question score from the report. It feeds the
+	// "historical low score" ranking tier.
+	SourceScore float64 `json:"source_score,omitempty"`
+	// KeyTopic marks a syllabus topic flagged as a high-frequency interview
+	// point (domainpack topic `focus`). It is the top ranking tier.
+	KeyTopic bool `json:"key_topic,omitempty"`
+	// Last objective/self results are persisted so the double-track
+	// divergence can be reported and aggregated later.
+	LastObjectiveScore *int         `json:"last_objective_score,omitempty"`
+	LastObjectiveBand  *int         `json:"last_objective_band,omitempty"`
+	LastSelfGrade      *int         `json:"last_self_grade,omitempty"`
+	LastDivergence     *int         `json:"last_divergence,omitempty"`
+	EaseFactor         float64      `json:"ease_factor"`
+	IntervalDays       int          `json:"interval_days"`
+	Repetitions        int          `json:"repetitions"`
+	DueAt              time.Time    `json:"due_at"`
+	LastGrade          int          `json:"last_grade"`
+	LastReviewedAt     *time.Time   `json:"last_reviewed_at,omitempty"`
+	LastCalculation    *Calculation `json:"last_calculation,omitempty"`
+	CreatedAt          time.Time    `json:"created_at"`
+	UpdatedAt          time.Time    `json:"updated_at"`
 }
 
 // BuildCards derives cards from a finished report. A question earns a card
@@ -109,6 +126,8 @@ func BuildCards(sessionID string, rep *domainreport.Report, now time.Time) []*Ca
 			AnswerDigest: answerDigest(q, dimension),
 			KeyPoints:    keyPoints,
 			Dimension:    dimension,
+			SourceScore:  q.Score,
+			KeyTopic:     isKeyTopic(topic),
 			EaseFactor:   DefaultEase,
 			IntervalDays: 0,
 			Repetitions:  0,
@@ -197,40 +216,168 @@ func GradeCard(card *Card, grade int, at time.Time) (*Card, Calculation, error) 
 	return &updated, calc, nil
 }
 
-// Retest is a deterministic rephrasing of a due card. Template picks a stable
-// variant from Repetitions so repeated sessions do not feel identical.
-type Retest struct {
-	CardID      string   `json:"card_id"`
-	Topic       string   `json:"topic"`
-	Question    string   `json:"question"`
-	KeyPoints   []string `json:"key_points"`
-	Template    string   `json:"template"`
-	ModelCalled bool     `json:"model_called"`
+// Variant is a rule-generated variation of a due card's question. It reuses
+// the syllabus expected points (falling back to the card's own points), rotates
+// a question template by Repetitions and shuffles the points deterministically.
+// ModelCalled is always false on this path.
+type Variant struct {
+	CardID         string   `json:"card_id"`
+	Topic          string   `json:"topic"`
+	Question       string   `json:"question"`
+	ExpectedPoints []string `json:"expected_points"`
+	Template       string   `json:"template"`
+	ModelCalled    bool     `json:"model_called"`
 }
 
-// BuildRetest returns one rule-generated rephrasing of the original question.
+// Retest is a deterministic rephrasing of a due card. It is kept as an alias
+// of Variant for callers that predate the objective double-track.
+type Retest struct {
+	CardID         string   `json:"card_id"`
+	Topic          string   `json:"topic"`
+	Question       string   `json:"question"`
+	KeyPoints      []string `json:"key_points"`
+	ExpectedPoints []string `json:"expected_points"`
+	Template       string   `json:"template"`
+	ModelCalled    bool     `json:"model_called"`
+}
+
+// BuildRetest returns the same rule-generated variation as BuildVariant.
 func BuildRetest(card *Card) Retest {
-	templates := []struct {
-		name string
-		text string
-	}{
-		{"rephrase", "换一种问法：请重新回答下面的问题，先给结论，再说明关键取舍。\n\n" + card.Question},
-		{"scenario", fmt.Sprintf("假设面试官追问：「%s」里最容易出错的地方是什么？请结合你的项目经历说明。", card.Topic)},
-		{"summary", fmt.Sprintf("请用三句话讲清「%s」的核心机制，再补一个你踩过的坑或做过的取舍。", card.Topic)},
+	v := BuildVariant(card)
+	return Retest{
+		CardID:         v.CardID,
+		Topic:          v.Topic,
+		Question:       v.Question,
+		KeyPoints:      append([]string(nil), card.KeyPoints...),
+		ExpectedPoints: v.ExpectedPoints,
+		Template:       v.Template,
+		ModelCalled:    false,
 	}
+}
+
+// BuildVariant builds one deterministic variant question. The same card at the
+// same repetition count always yields the same template and point order.
+func BuildVariant(card *Card) Variant {
+	points := variantPoints(card)
+	joined := strings.Join(points, "、")
 	index := 0
 	if card.Repetitions > 0 {
-		index = card.Repetitions % len(templates)
+		index = card.Repetitions % 3
 	}
-	t := templates[index]
-	return Retest{
-		CardID:      card.ID,
-		Topic:       card.Topic,
-		Question:    t.text,
-		KeyPoints:   append([]string(nil), card.KeyPoints...),
-		Template:    t.name,
-		ModelCalled: false,
+	var name, question string
+	switch index {
+	case 1:
+		name = "scenario"
+		question = fmt.Sprintf("假设线上出现与「%s」相关的问题，请结合 %s 说明你会如何定位、处理并验证。", card.Topic, joined)
+	case 2:
+		name = "summary"
+		question = fmt.Sprintf("请用三句话讲清「%s」的核心机制，覆盖 %s，并补一个你踩过的坑或做过的取舍。", card.Topic, joined)
+	default:
+		name = "rephrase"
+		question = fmt.Sprintf("换一种问法：请围绕「%s」回答，并覆盖 %s。先给结论，再说明机制、边界与取舍。", card.Topic, joined)
 	}
+	return Variant{
+		CardID:         card.ID,
+		Topic:          card.Topic,
+		Question:       question,
+		ExpectedPoints: points,
+		Template:       name,
+		ModelCalled:    false,
+	}
+}
+
+// ObjectiveGrade converts a 0-100 objective score to the SM-2 recall grade.
+// The mapping is intentionally coarser than the score itself:
+//
+//	score < 40        -> 1 (lapse)
+//	40 <= score < 60  -> 2 (lapse)
+//	60 <= score < 80  -> 3 (barely recalled)
+//	80 <= score < 90  -> 4
+//	score >= 90       -> 5
+//
+// The overlapping evaluation.Band boundaries (50/80) stay display-only so the
+// deterministic SM-2 behavior does not change.
+func ObjectiveGrade(score float64) int {
+	switch {
+	case score >= 90:
+		return 5
+	case score >= 80:
+		return 4
+	case score >= 60:
+		return 3
+	case score >= 40:
+		return 2
+	default:
+		return 1
+	}
+}
+
+func variantPoints(card *Card) []string {
+	seed := variantSeed(card)
+	if _, topic, ok := findTopic(card.Topic); ok {
+		if points := normalizePoints(topic.ExpectedPoints); len(points) > 0 {
+			return shufflePoints(points, seed)
+		}
+	}
+	if points := normalizePoints(card.KeyPoints); len(points) > 0 {
+		return shufflePoints(points, seed)
+	}
+	return []string{"先给结论，再说明机制、边界与取舍"}
+}
+
+func variantSeed(card *Card) uint64 {
+	key := fmt.Sprintf("%s|%s|%d", card.ID, card.Topic, card.Repetitions)
+	seed := uint64(1469598103934665603)
+	for _, r := range key {
+		seed ^= uint64(r)
+		seed *= 1099511628211
+	}
+	if seed == 0 {
+		seed = 1
+	}
+	return seed
+}
+
+func shufflePoints(points []string, seed uint64) []string {
+	out := append([]string(nil), points...)
+	next := func() uint64 {
+		seed ^= seed << 13
+		seed ^= seed >> 7
+		seed ^= seed << 17
+		return seed
+	}
+	for i := len(out) - 1; i > 0; i-- {
+		j := int(next() % uint64(i+1))
+		out[i], out[j] = out[j], out[i]
+	}
+	return out
+}
+
+func findTopic(name string) (*domainpack.Pack, domainpack.Topic, bool) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, domainpack.Topic{}, false
+	}
+	for _, pack := range domainpack.Default().List() {
+		for _, topic := range pack.Topics {
+			if topic.Topic == name {
+				return pack, topic, true
+			}
+		}
+	}
+	return nil, domainpack.Topic{}, false
+}
+
+func isKeyTopic(name string) bool {
+	_, topic, ok := findTopic(name)
+	return ok && topic.Focus
+}
+
+func rubricForTopic(name string) evaluation.Rubric {
+	if pack, _, ok := findTopic(name); ok {
+		return pack.EvaluationRubric()
+	}
+	return evaluation.DefaultRubric()
 }
 
 func weakestDimension(scores map[string]int) (string, int) {

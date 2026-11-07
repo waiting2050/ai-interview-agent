@@ -1766,13 +1766,15 @@
     return ["完全忘记", "几乎想不起", "勉强回忆", "想起要点", "比较熟练", "秒答"][grade] || String(grade);
   }
 
+  let reviewMeta = { total_due: 0, daily_limit: 0, deferred_count: 0, remaining: 0 };
+
   async function refreshReviewEntry() {
     if (state.sampleMode) {
       return;
     }
     try {
       const due = await api(`/v1/review/due?tz_offset_minutes=${reviewTzOffset()}&limit=1`);
-      const count = Number(due.count || 0);
+      const count = Number(due.total_due != null ? due.total_due : due.count || 0);
       reviewDueCount.textContent = String(count);
       reviewEntry.hidden = false;
       reviewEntry.classList.toggle("has-due", count > 0);
@@ -1788,8 +1790,14 @@
     reviewStatus.textContent = "正在加载…";
     reviewBody.innerHTML = "";
     try {
-      const due = await api(`/v1/review/due?tz_offset_minutes=${reviewTzOffset()}&limit=50`);
+      const due = await api(`/v1/review/due?tz_offset_minutes=${reviewTzOffset()}`);
       reviewCards = Array.isArray(due.cards) ? due.cards : [];
+      reviewMeta = {
+        total_due: Number(due.total_due || 0),
+        daily_limit: Number(due.daily_limit || 0),
+        deferred_count: Number(due.deferred_count || 0),
+        remaining: Number(due.remaining || 0),
+      };
       reviewIndex = 0;
       renderReviewCard();
     } catch (err) {
@@ -1799,84 +1807,165 @@
     reviewPanel.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
+  function reviewPriorityLabel(priority) {
+    return { key_topic: "高频考点", low_score: "历史低分", normal: "普通题" }[priority] || "普通题";
+  }
+
+  function reviewSelfOptions() {
+    const options = [`<option value="">不填（仅客观分）</option>`];
+    [0, 1, 2, 3, 4, 5].forEach((g) => {
+      options.push(`<option value="${g}">${g} · ${gradeLabel(g)}</option>`);
+    });
+    return options.join("");
+  }
+
   function renderReviewCard() {
     if (reviewIndex >= reviewCards.length) {
-      reviewStatus.textContent = "今日复习完成";
+      reviewStatus.textContent = "今日队列完成";
+      const deferred = Number(reviewMeta.deferred_count || 0);
       reviewBody.innerHTML =
         `<div class="review-done"><strong>今天的卡片已复习完</strong>` +
-        `<p class="muted">评分已写回 SM-2 排程，下次到期时会重新出现在这里。</p></div>`;
+        `<p class="muted">评分已写回 SM-2 排程，下次到期时会重新出现在这里。` +
+        (deferred > 0 ? `另有 ${deferred} 张今天到期，被每日上限延后。` : "") +
+        `</p></div>`;
       refreshReviewEntry();
       return;
     }
     const card = reviewCards[reviewIndex];
     const reps = Number(card.repetitions || 0);
-    reviewStatus.textContent = `第 ${reviewIndex + 1} / ${reviewCards.length} 张 · 到期 ${formatReviewDue(card.due_at)}`;
+    const deferred = Number(reviewMeta.deferred_count || 0);
+    const remaining = reviewCards.length - reviewIndex - 1;
+    reviewStatus.textContent =
+      `第 ${reviewIndex + 1} / ${reviewCards.length} 张 · 本轮剩余 ${remaining} 张` +
+      ` · 延后 ${deferred} 张 · 每日上限 ${reviewMeta.daily_limit}`;
     const points = (card.key_points || []).map((p) => `<li>${escapeHtml(p)}</li>`).join("");
     reviewBody.innerHTML =
       `<article class="review-card" data-card-id="${escapeHtml(card.id)}">` +
       `<div class="review-kicker"><span class="chip primary">${escapeHtml(card.topic || "复习卡")}</span>` +
+      `<span class="chip">${escapeHtml(reviewPriorityLabel(card.priority))}</span>` +
       (card.dimension ? `<span class="chip">${escapeHtml(card.dimension)}</span>` : "") +
       `<span class="muted">第 ${reps + 1} 次复习 · EF ${Number(card.ease_factor || 2.5).toFixed(2)}</span></div>` +
+      `<div class="review-reason">排序理由：${escapeHtml(card.sort_reason || "按到期时间排序")}</div>` +
       `<div class="review-question">${escapeHtml(card.question || "")}</div>` +
       `<details class="review-answer"><summary>展开参考答案</summary>` +
       (card.answer_digest ? `<div class="calc-label">你当时的答法</div><p>${escapeHtml(card.answer_digest)}</p>` : "") +
       `<div class="calc-label">标准要点</div><ul>${points || "<li>补齐核心机制与边界条件</li>"}</ul>` +
       `</details>` +
-      `<div class="review-retest" hidden></div>` +
-      `<div class="grade-row"><span class="muted">回忆质量 0–5：</span>` +
-      [0, 1, 2, 3, 4, 5].map((g) =>
-        `<button class="grade-btn" type="button" data-grade="${g}" title="${gradeLabel(g)}">${g}</button>`).join("") +
-      `</div>` +
+      `<div class="review-variant" data-variant-box>` +
+      `<div class="calc-label">变式题（规则生成，未调用模型）</div>` +
+      `<div class="review-variant-question">正在生成变式题…</div>` +
+      `<div class="review-variant-points"></div>` +
+      `<label class="review-self-label">自评（参考，不决定排程）<select data-review-self>${reviewSelfOptions()}</select></label>` +
+      `<textarea data-review-answer rows="4" placeholder="写下你的回答，提交后由客观分决定 SM-2 间隔"></textarea>` +
+      `<div class="review-variant-actions">` +
+      `<button class="primary" type="button" data-review-action="submit-variant">提交答案，计算客观分</button>` +
+      `<button class="ghost" type="button" data-review-action="reload-variant">重载变式题</button>` +
+      `</div></div>` +
+      `<div class="review-objective" hidden></div>` +
       `<div class="review-actions">` +
-      `<button class="ghost" type="button" data-review-action="retest">换问法再测</button>` +
       `<button class="ghost" type="button" data-review-action="skip">稍后再复习</button>` +
       `</div>` +
       `</article>`;
+    loadReviewVariant(card);
   }
 
-  async function gradeReview(grade) {
-    const card = reviewCards[reviewIndex];
-    if (!card) {
-      return;
-    }
-    const buttons = reviewBody.querySelectorAll(".grade-btn");
-    buttons.forEach((btn) => { btn.disabled = true; });
-    try {
-      const result = await api(`/v1/review/${encodeURIComponent(card.id)}/grade`, {
-        method: "POST",
-        body: JSON.stringify({ grade }),
-      });
-      const calc = result.calculation || {};
-      reviewCards[reviewIndex] = result.card || card;
-      showNotice("ok",
-        `已排程：EF ${Number(calc.new_ease || 0).toFixed(2)}，间隔 ${calc.new_interval_days} 天，下次 ${formatReviewDue(calc.due_at)}`,
-        { key: "review-grade", timeout: 2400 });
-      reviewIndex += 1;
-      renderReviewCard();
-    } catch (err) {
-      buttons.forEach((btn) => { btn.disabled = false; });
-      showNotice("error", "复习评分失败：" + humanError(err), { key: "review-grade" });
-    }
-  }
-
-  async function showReviewRetest() {
-    const card = reviewCards[reviewIndex];
-    if (!card) {
-      return;
-    }
-    const box = reviewBody.querySelector(".review-retest");
+  async function loadReviewVariant(card) {
+    const box = reviewBody.querySelector("[data-variant-box]");
     if (!box) {
       return;
     }
-    try {
-      const retest = await api(`/v1/review/${encodeURIComponent(card.id)}/retest`);
-      box.hidden = false;
-      box.innerHTML =
-        `<div class="calc-label">换问法（规则生成，未调用模型）</div>` +
-        `<p>${escapeHtml(retest.question || "")}</p>`;
-    } catch (err) {
-      showNotice("error", "换问法失败：" + humanError(err), { key: "review-retest" });
+    const questionEl = box.querySelector(".review-variant-question");
+    if (questionEl) {
+      questionEl.textContent = "正在生成变式题…";
     }
+    try {
+      const variant = await api(`/v1/review/${encodeURIComponent(card.id)}/variant`);
+      if (questionEl) {
+        questionEl.textContent = variant.question || "";
+      }
+      const pointsEl = box.querySelector(".review-variant-points");
+      if (pointsEl) {
+        pointsEl.innerHTML = (variant.expected_points || [])
+          .map((p) => `<span class="chip">${escapeHtml(p)}</span>`).join("");
+      }
+      box.dataset.template = variant.template || "";
+    } catch (err) {
+      if (questionEl) {
+        questionEl.textContent = "变式题生成失败：" + humanError(err);
+      }
+    }
+  }
+
+  async function submitReviewVariant() {
+    const card = reviewCards[reviewIndex];
+    if (!card) {
+      return;
+    }
+    const answerEl = reviewBody.querySelector("[data-review-answer]");
+    const selfEl = reviewBody.querySelector("[data-review-self]");
+    const answer = answerEl ? String(answerEl.value || "").trim() : "";
+    if (!answer) {
+      showNotice("error", "请先写下回答，再提交客观评分", { key: "review-variant" });
+      return;
+    }
+    const body = { answer };
+    if (selfEl && selfEl.value !== "") {
+      body.self_grade = Number(selfEl.value);
+    }
+    const submitBtn = reviewBody.querySelector('[data-review-action="submit-variant"]');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+    }
+    try {
+      const result = await api(`/v1/review/${encodeURIComponent(card.id)}/variant/answer`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      reviewCards[reviewIndex] = result.card || card;
+      renderVariantResult(result);
+      refreshReviewEntry();
+    } catch (err) {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+      }
+      showNotice("error", "客观评分失败：" + humanError(err), { key: "review-variant" });
+    }
+  }
+
+  function renderVariantResult(result) {
+    const box = reviewBody.querySelector(".review-objective");
+    if (!box) {
+      return;
+    }
+    const objective = result.objective || {};
+    const divergence = result.divergence;
+    const calc = result.calculation || {};
+    const variantBox = reviewBody.querySelector("[data-variant-box]");
+    if (variantBox) {
+      variantBox.querySelectorAll("textarea, select, button").forEach((el) => { el.disabled = true; });
+    }
+    box.hidden = false;
+    if (objective.degraded) {
+      box.innerHTML =
+        `<div class="notice warn">评估降级（${escapeHtml(objective.error_code || "unknown")}），` +
+        `本次没有更新排程，可以稍后重试。</div>` +
+        `<div class="review-actions"><button class="primary" type="button" data-review-action="next">下一张</button></div>`;
+      return;
+    }
+    const missing = (objective.missing_points || []).map((p) => `<li>${escapeHtml(p)}</li>`).join("");
+    const divergenceClass = divergence && (divergence.suspected_overestimate || divergence.suspected_underestimate) ? "warn" : "ok";
+    const divergenceText = divergence
+      ? `<div class="notice ${divergenceClass}">${escapeHtml(divergence.message || "")}</div>`
+      : `<div class="muted">未填写自评，本次完全按客观分排程。</div>`;
+    box.innerHTML =
+      `<div class="calc-label">客观分 vs 自评</div>` +
+      `<div class="review-objective-score"><strong>${objective.score}</strong> 分` +
+      `<span class="muted"> · band ${objective.band} · SM-2 grade ${objective.grade}</span></div>` +
+      divergenceText +
+      (missing ? `<div class="calc-label">仍缺要点</div><ul>${missing}</ul>` : "") +
+      `<div class="muted">已排程：EF ${Number(calc.new_ease || 0).toFixed(2)}，` +
+      `间隔 ${calc.new_interval_days} 天，下次 ${formatReviewDue(calc.due_at)}</div>` +
+      `<div class="review-actions"><button class="primary" type="button" data-review-action="next">下一张</button></div>`;
   }
 
   // ---------- resume attachment (local parsing only) ----------
@@ -2718,18 +2807,21 @@
     reviewPanel.hidden = true;
   });
   reviewPanel.addEventListener("click", (event) => {
-    const gradeBtn = event.target.closest("[data-grade]");
-    if (gradeBtn) {
-      gradeReview(Number(gradeBtn.getAttribute("data-grade")));
-      return;
-    }
     const actionBtn = event.target.closest("[data-review-action]");
     if (!actionBtn) {
       return;
     }
     const action = actionBtn.getAttribute("data-review-action");
-    if (action === "retest") {
-      showReviewRetest();
+    if (action === "submit-variant") {
+      submitReviewVariant();
+    } else if (action === "reload-variant") {
+      const card = reviewCards[reviewIndex];
+      if (card) {
+        loadReviewVariant(card);
+      }
+    } else if (action === "next") {
+      reviewIndex += 1;
+      renderReviewCard();
     } else if (action === "skip") {
       reviewIndex += 1;
       renderReviewCard();

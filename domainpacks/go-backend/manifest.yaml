@@ -56,6 +56,7 @@ topics:
         - goroutine 调度与 G-M-P 模型
         - channel 阻塞与缓冲区设计
         - context 取消与超时传递
+      focus: true
       source: curated
     - id: go-arch-layering
       direction: go
@@ -106,6 +107,7 @@ topics:
         - 幂等键与去重存储
         - 状态机合法迁移
         - 重复请求与重试语义
+      focus: true
       source: curated
     - id: go-network
       direction: go
@@ -176,6 +178,7 @@ topics:
         - B+ 树索引结构
         - 最左前缀与回表
         - 覆盖索引与执行计划判断
+      focus: true
       source: curated
     - id: mysql-mvcc
       direction: mysql
@@ -186,6 +189,7 @@ topics:
         - 隔离级别与可见性
         - Read View 与 undo log
         - 幻读与间隙锁
+      focus: true
       source: curated
     - id: mysql-lock
       direction: mysql
@@ -256,6 +260,7 @@ topics:
         - 缓存穿透、击穿、雪崩
         - 热 key 与大 key 治理
         - 缓存与数据库一致性
+      focus: true
       source: curated
     - id: redis-lock
       direction: redis
@@ -266,6 +271,7 @@ topics:
         - SET NX PX 与唯一值
         - 续租与误删防护
         - 锁失效与降级方案
+      focus: true
       source: curated
     - id: redis-ha
       direction: redis

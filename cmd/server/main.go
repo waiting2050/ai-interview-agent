@@ -186,6 +186,9 @@ func run() error {
 	}
 	cancelRatePing()
 
+	reviewer := review.New(store.Repos().Reviews, app.NewReviewEvaluator(evaluator))
+	reviewer.SetDailyLimit(cfg.ReviewDailyLimit)
+
 	srv := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: httpapi.NewRouter(httpapi.Deps{
@@ -213,7 +216,7 @@ func run() error {
 				}
 				return jd.Fetched{URL: result.URL, Text: result.Text, FetchedAt: result.FetchedAt}, nil
 			}),
-			Reviewer:       review.New(store.Repos().Reviews),
+			Reviewer:       reviewer,
 			EvalResultsDir: cfg.EvalResultsDir,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,

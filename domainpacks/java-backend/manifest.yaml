@@ -43,6 +43,7 @@ topics:
       - 堆、栈与元空间的分区及对象分配路径
       - 分代回收与常见垃圾收集器的差异
       - 用 GC 日志与停顿指标定位内存问题
+    focus: true
     source: curated
   - id: jvm-threadpool
     direction: jvm
@@ -63,6 +64,7 @@ topics:
       - 对象头 Mark Word 与锁升级过程
       - AQS 同步队列与公平锁的实现代价
       - 锁竞争下的伪共享与性能压测方法
+    focus: true
     source: curated
   - id: spring-transaction
     direction: spring
@@ -73,6 +75,7 @@ topics:
       - 事务传播行为与嵌套事务的实际语义
       - 同类自调用导致事务失效的根本原因
       - 回滚规则与异常被捕获后的实际边界
+    focus: true
     source: curated
   - id: spring-bean-lifecycle
     direction: spring
@@ -103,6 +106,7 @@ topics:
       - 业务幂等键与去重表的具体落地方式
       - 消息重试与位点回滚下的状态机收敛
       - 顺序消息与分区键之间的绑定关系
+    focus: true
     source: curated
   - id: spring-microservices
     direction: spring
@@ -133,6 +137,7 @@ topics:
       - 聚簇索引与二级索引的回表代价分析
       - 最左前缀原则与索引列顺序的选择依据
       - 执行计划中扫描行数与访问类型判读
+    focus: true
     source: curated
   - id: mysql-lock
     direction: mysql
@@ -143,6 +148,7 @@ topics:
       - 记录锁、间隙锁与临键锁的加锁范围
       - 死锁日志的等待图与具体 SQL 定位
       - 锁等待超时与业务重试策略的配合
+    focus: true
     source: curated
 lexicon:
   skills: [java, spring, "spring boot", mysql, redis, kafka]

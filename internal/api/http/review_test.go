@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,15 @@ import (
 	"github.com/waiting2050/ai-interview-agent/internal/domain/session"
 	"github.com/waiting2050/ai-interview-agent/internal/store/memory"
 )
+
+type stubReviewEvaluator struct {
+	result review.VariantEvaluation
+	err    error
+}
+
+func (s stubReviewEvaluator) EvaluateVariant(context.Context, review.VariantEvaluationInput) (review.VariantEvaluation, error) {
+	return s.result, s.err
+}
 
 func newReviewRouter(t *testing.T, now time.Time, cards []*review.Card) (*httptest.Server, *memory.Store) {
 	t.Helper()
@@ -53,7 +63,12 @@ func newReviewRouter(t *testing.T, now time.Time, cards []*review.Card) (*httpte
 			t.Fatal(err)
 		}
 	}
-	svc := review.New(store.Repos().Reviews)
+	svc := review.New(store.Repos().Reviews, stubReviewEvaluator{result: review.VariantEvaluation{
+		Score:         45,
+		MissingPoints: []string{"没讲补偿"},
+		ModelName:     "fake-heuristic",
+		PromptVersion: "eval-test",
+	}})
 	svc.SetClock(func() time.Time { return now })
 	srv := httptest.NewServer(withTestAuthorization(NewRouter(Deps{
 		Auth:     authSvc,
@@ -116,15 +131,29 @@ func TestReviewGradeValidationAndSchedule(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	var due struct {
-		Count           int           `json:"count"`
-		TZOffsetMinutes int           `json:"tz_offset_minutes"`
-		Cards           []review.Card `json:"cards"`
+		Count           int `json:"count"`
+		TotalDue        int `json:"total_due"`
+		DailyLimit      int `json:"daily_limit"`
+		DeferredCount   int `json:"deferred_count"`
+		Remaining       int `json:"remaining"`
+		TZOffsetMinutes int `json:"tz_offset_minutes"`
+		Cards           []struct {
+			review.Card
+			Priority   string `json:"priority"`
+			SortReason string `json:"sort_reason"`
+		} `json:"cards"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&due); err != nil {
 		t.Fatal(err)
 	}
 	if due.Count != 1 || due.TZOffsetMinutes != 480 || due.Cards[0].ID != "card-1" {
 		t.Fatalf("due = %+v", due)
+	}
+	if due.TotalDue != 1 || due.DailyLimit != 20 || due.DeferredCount != 0 || due.Remaining != 19 {
+		t.Fatalf("due counts = %+v", due)
+	}
+	if due.Cards[0].Priority != "normal" || due.Cards[0].SortReason == "" {
+		t.Fatalf("ranking = %+v", due.Cards[0])
 	}
 
 	// Out-of-range grades are rejected.
@@ -213,6 +242,103 @@ func TestReviewGradeValidationAndSchedule(t *testing.T) {
 	if missingResp.StatusCode != http.StatusNotFound {
 		t.Fatalf("missing status = %d", missingResp.StatusCode)
 	}
+}
+
+func TestReviewVariantObjectiveDoubleTrack(t *testing.T) {
+	now := time.Date(2026, 11, 6, 10, 0, 0, 0, time.UTC)
+	card := &review.Card{
+		ID:           "card-v",
+		SessionID:    "sess-v",
+		TurnID:       "turn-v",
+		Topic:        "Go 并发模型",
+		Question:     "讲讲 Go 的并发模型",
+		AnswerDigest: "只讲了 goroutine",
+		KeyPoints:    []string{"调度", "channel", "context"},
+		SourceScore:  61,
+		KeyTopic:     true,
+		EaseFactor:   review.DefaultEase,
+		DueAt:        now,
+		LastGrade:    -1,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	srv, _ := newReviewRouter(t, now, []*review.Card{card})
+
+	// The variant question is generated from syllabus expected points with no
+	// model call, and stays stable across requests.
+	first := getVariant(t, srv.URL, card.ID)
+	second := getVariant(t, srv.URL, card.ID)
+	if first.ModelCalled || len(first.ExpectedPoints) != 3 || first.Question == "" {
+		t.Fatalf("variant = %+v", first)
+	}
+	if first.Question != second.Question || !reflect.DeepEqual(first.ExpectedPoints, second.ExpectedPoints) {
+		t.Fatalf("variant is not deterministic:\nfirst=%+v\nsecond=%+v", first, second)
+	}
+
+	// Objective 45 => band 1, SM-2 grade 2. Self 5 is recorded but does not
+	// drive the schedule; the gap is flagged and persisted.
+	resp, err := http.Post(srv.URL+"/v1/review/card-v/variant/answer", "application/json",
+		strings.NewReader(`{"answer":"只讲了一句话","self_grade":5}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("answer status = %d", resp.StatusCode)
+	}
+	var out struct {
+		Card        review.Card            `json:"card"`
+		Calculation *review.Calculation    `json:"calculation"`
+		Objective   review.ObjectiveResult `json:"objective"`
+		Divergence  *review.Divergence     `json:"divergence"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Objective.Score != 45 || out.Objective.Band != 1 || out.Objective.Grade != 2 {
+		t.Fatalf("objective = %+v", out.Objective)
+	}
+	if out.Card.LastGrade != 2 || out.Calculation == nil || out.Calculation.Grade != 2 {
+		t.Fatalf("objective grade must drive SM-2: %+v", out.Card)
+	}
+	if out.Card.LastSelfGrade == nil || *out.Card.LastSelfGrade != 5 || out.Card.LastDivergence == nil || *out.Card.LastDivergence != 3 {
+		t.Fatalf("self track = %+v", out.Card)
+	}
+	if out.Divergence == nil || !out.Divergence.SuspectedOverestimate {
+		t.Fatalf("divergence = %+v", out.Divergence)
+	}
+
+	// The persisted card exposes the objective and divergence fields.
+	cardResp, err := http.Get(srv.URL + "/v1/review/card-v")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cardResp.Body.Close()
+	var stored review.Card
+	if err := json.NewDecoder(cardResp.Body).Decode(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored.LastObjectiveScore == nil || *stored.LastObjectiveScore != 45 ||
+		stored.LastSelfGrade == nil || *stored.LastSelfGrade != 5 {
+		t.Fatalf("stored card = %+v", stored)
+	}
+}
+
+func getVariant(t *testing.T, baseURL, cardID string) review.Variant {
+	t.Helper()
+	resp, err := http.Get(baseURL + "/v1/review/" + cardID + "/variant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("variant status = %d", resp.StatusCode)
+	}
+	var variant review.Variant
+	if err := json.NewDecoder(resp.Body).Decode(&variant); err != nil {
+		t.Fatal(err)
+	}
+	return variant
 }
 
 func TestReviewUnavailableWithoutService(t *testing.T) {

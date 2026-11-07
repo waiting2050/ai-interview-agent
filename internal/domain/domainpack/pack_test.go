@@ -197,6 +197,20 @@ func TestPlanGoldenGoBackend(t *testing.T) {
 	}
 }
 
+func TestPacksMarkHighFrequencyTopics(t *testing.T) {
+	for _, pack := range Default().List() {
+		marked := 0
+		for _, topic := range pack.Topics {
+			if topic.Focus {
+				marked++
+			}
+		}
+		if marked == 0 {
+			t.Fatalf("pack %s has no focus topic", pack.ID)
+		}
+	}
+}
+
 func TestDetectAndRubric(t *testing.T) {
 	pack := Default().MustGet("ai-agent")
 	if got := pack.Detect("做过 RAG 检索和 LLM 提示词优化"); len(got) != 2 || got[0] != "llm" || got[1] != "rag" {

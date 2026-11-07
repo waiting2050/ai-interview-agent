@@ -31,7 +31,7 @@ Go 1.25 + [cloudwego/eino](https://github.com/cloudwego/eino) + PostgreSQL + Red
 | **JD 匹配** | 匹配度、技能覆盖（已覆盖 / 未体现）、缺口清单、复用题纲、申请材料包 | 关键词与行规则；公开页抓取遵守 robots 与限速 |
 | **模拟面试** | 一题一评：维度分、证据、加减分、缺失要点、追问或推进 | eino 图 + 10 级规则裁决 |
 | **复盘报告** | 五段报告、综合分与等级、雷达图、逐题趋势、token 与调用次数快照 | 3 个只读工具确定性采集，模型只写点评 |
-| **间隔复习** | SM-2 复习卡、到期队列、换问法、0–5 自评与遗忘曲线 | 本地规则，不调模型 |
+| **间隔复习** | SM-2 复习卡、变式题客观评分、高频考点/低分优先级、每日上限、自评双轨与遗忘曲线 | 变式题规则生成；客观分走既有评估链路，无 key 用 heuristic |
 
 ### 工程能力
 
@@ -197,11 +197,13 @@ HTTP / SSE  →  应用服务（事务 / 幂等 / 锁）  →  eino 图（Agent 
 | GET | `/v1/sessions/{id}/events` | SSE 事件流 |
 | POST | `/v1/sessions/{id}/runs/{run_id}/retry` | 显式重试失败 / 中断 / 死信 run（重新入队） |
 | GET | `/v1/runs` | 查询本人的异常 run（`status` 取 `all` / `failed` / `interrupted` / `dead`，含失败原因与最后错误） |
-| GET | `/v1/review/due` | 到期复习卡（`tz_offset_minutes`，默认 480） |
+| GET | `/v1/review/due` | 到期复习卡：按「高频考点 > 历史低分 > 普通题 > 到期时间」排序，返回每张卡的 `priority` / `sort_reason`，以及 `total_due` / `deferred_count` / `remaining`；`limit` 只能缩小当日队列 |
 | GET | `/v1/review` | 按 `session_id` 列出复习卡 |
 | GET | `/v1/review/{id}` | 复习卡详情 |
-| POST | `/v1/review/{id}/grade` | 自评 0–5，更新 SM-2 排程 |
-| GET | `/v1/review/{id}/retest` | 规则生成的「换问法」 |
+| GET | `/v1/review/{id}/variant` | 规则生成的变式题（题纲 `expected_points` + 确定性打乱，不调模型） |
+| POST | `/v1/review/{id}/variant/answer` | 提交变式题作答：走既有评估链路（无 key 走 heuristic），客观分决定 SM-2 grade；自评仅作参考并存分歧 |
+| POST | `/v1/review/{id}/grade` | 手动自评 0–5（保留为人工覆盖入口，不走客观分双轨） |
+| GET | `/v1/review/{id}/retest` | 规则生成的「换问法」（与 variant 同一生成器） |
 
 事件顺序：`session.created` → `run.started` → `session.started` → `question.asked` → `session.phase`；作答后追加 `answer.received` → `evaluation.completed`（或 `degraded`）→ `decision.made`；收尾后追加 `report.started` → `report.section` ×5 → `report.tool_calls` → `report.completed` → `session.completed`。
 
@@ -294,7 +296,7 @@ go run ./cmd/server
 - **简历 / JD 仍是规则语义**：正则与关键词可复现，但同义词、隐性技能、复杂排版会漏判；没有 embedding 语义匹配。
 - **图片简历与扫描版 PDF 没有 OCR**：附件只支持 txt / md / docx / pdf；PNG / JPG 返回 `image_requires_ocr`，扫描版 PDF 提不出文字。
 - **报告证据包有截断**：回答摘要、弱项条数、搜索结果都有上限；只有一轮模型点评，无跨场趋势与多轮修订。
-- **复习只有 SM-2 + 自评**：没有每日上限、优先级与长期统计；0–5 是用户自报，系统不做客观回忆验证。
+- **复习已补客观校验，但仍有边界**：变式题由题纲要点规则生成，客观分经既有评估链路（无 key 时 heuristic 只按长度与要点覆盖粗判）；自评与客观分双轨，分歧落卡上但还没有跨用户报表；每日上限只裁剪展示队列（`REVIEW_DAILY_LIMIT`，默认 20），不改 SM-2 到期时间。
 - **队列是 PostgreSQL 认领（做浅了）**：`SKIP LOCKED` + 租约已支持多实例与崩溃接管，但空队列靠轮询（跨实例唤醒未接 `LISTEN/NOTIFY`），没有优先级、延迟队列与指数退避；恢复粒度是 step，不是精确断点。
 - **可观测性只在进程内**：指标重启归零，没有集中日志、分布式追踪与告警；多实例各看各的。
 - **JD 抓取只适配静态 HTML**：不执行 JS、不碰登录墙与验证码；抓不到就要求粘贴。
