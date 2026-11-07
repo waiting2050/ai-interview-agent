@@ -522,6 +522,24 @@ total = clamp(base + Σbonus + Σpenalty, 0, 100)
 
 归因：heuristic 是无语义的长度分档器（`<40`→2 分、`40–119`→3 分、`≥120`→4 分），因此「长但空洞 / 长但夸大 / 长但跑题」必然被抬高，中档长回答也会越档；`schema` 与证据复核均为 100%，说明失准不是证据校验过严，也不能靠调 rubric 权重修复。`expected_band` 保持人工标注不变。真实 provider 的同一跑分需配置 `OPENAI_API_KEY` 后执行 `go run ./cmd/evalrunner -provider openai`，再判断是否存在 prompt 锚点不足的问题。
 
+**5.2 真实模型基线实测（`openai` / `deepseek-chat`→`deepseek-flash` / `eval-v3` / 60 条）**
+
+2026-11-07 22:43（北京时间）一次跑完 60 条，未逐条重试；请求模型名为 `deepseek-chat`，供应商实际返回 `deepseek-flash`（DeepSeek-V4.1-Flash-1017），结果文件按请求名记录 `deepseek-chat`。数据文件 `internal/agent/eval/testdata/regression.json`，`sha256=e5d0084639e376e0f1149de4441d36223ebc843da853a7704270b8bb44011e9e`；结果文件 `docs/eval-results/eval-openai-deepseek-chat-eval-v3-20261107T134323Z.json`。60 次调用全部一次成功（`attempts=1`），0 降级、0 错误，平均 3739 ms/条。
+
+| 指标 | 实测 | 门槛 | 结果 |
+| --- | --- | --- | --- |
+| `schema_valid_rate` | 100%（60/60） | 100% | 通过 |
+| `band_hit_rate` | 81.7%（49/60） | ≥80% | 通过 |
+| 相邻档命中率 | 100%（60/60） | ≥95% | 通过 |
+| `dimension_mae` | 0.4967 | ≤0.60 | 通过 |
+| `evidence_quote_rate` | 100% | 100% | 通过 |
+
+分领域：Go 后端 82.9%（29/35）、AI Agent 80.0%（20/25）。11 条失准：`high-01-gmp`、`high-04-local-message`、`high-05-kafka-idempotent`、`high-07-innodb-lock`、`high-09-escape`、`ai-high-01-rag-pipeline` 均为 5→3（模型偏严，主要压 `depth` / `evidence`）；`unverified-01-perf`、`ai-unverified-01-accuracy` 为 3→1（指标无出处被正确压档，但压过头）；`ai-jargon-02-ann`、`ai-conclusion-02-cost` 为 3→1；`ai-mid-01-embedding` 为 3→5（反向高估 1 档）。期望值未做任何修改。
+
+与 `eval-v2` 30 条基线 A/B（`cmd/evaldiff` 与 `/eval?base=&candidate=`）：`band_hit_rate` 0.8000→0.8167（+1.7pt），`dimension_mae` 0.4333→0.4967（+0.0634，仍达标），其余三项持平；两侧共有的 30 条中 2 条翻转，均为改进（`high-06-rate-limit` 3→5、`high-08-cpu-profile` 3→5），无回退，新增的 30 条只出现在候选侧。
+
+成本口径：60 条实际消耗输入 54,741 tokens、输出 33,966 tokens、合计 88,707 tokens（另有 1 次模型连通性探测 5/1 tokens，总计 54,746 + 33,967 = 88,713）。按 DeepSeek `deepseek-flash` **peak 单价**（输入缓存未命中 $0.3/百万、输出 $1.2/百万；人民币 ¥2 / ¥8）折算约 **$0.0572 / ¥0.3812**。本次实际在北京时间周六晚（off-peak，单价减半），按 off-peak 折算约 **$0.0286 / ¥0.1906**。金额仅按官方牌价估算，未计入缓存命中折价。
+
 **6. 明确不做**
 
 - 不做人工标注平台、标注团队流程；回归集由开发者自己维护。
@@ -1184,7 +1202,7 @@ data: {"event_id":43,"session_id":"01H...","run_id":"01H...","type":"question.as
 - **评测面板**：`GET /eval` 服务端渲染（内嵌模板，无前端构建），读取 `docs/eval-results/*.json`，不新增数据库表、不触发模型调用。展示最近结果文件、五个门槛指标、逐条失准（期望档 → 实际档、偏差维度、锚点、notes），失准按领域包分组。
 - **A/B 对比**：`internal/agent/eval.Compare` + `cmd/evaldiff` + `/eval?base=&candidate=`，输出五个指标差值、门槛状态变化，以及 `improved / regressed / changed` 判定翻转；没有 API key 也能对比历史文件。
 - **门槛理由**：schema 100% 因为解析失败即不可用；band_hit 80% 因为三档是产品结论、允许边界抖动；adjacent 95% 因为 ±1 档可接受、跨两档才是明显误判；dimension_mae 0.6 因为五维是 1–5 分制、约 12% 满量程；evidence_quote 100% 作为硬不变量单列。
-- **基线与现状**：真实模型基线仍是 `eval-v2` 的 30 条数据（band_hit 0.80 通过）；代码 prompt 已到 `eval-v3`，回归集已扩到 60 条，但真实模型尚未重跑，不能宣称 60 条口径已达标。
+- **基线与现状**：真实模型基线已重跑为 `eval-v3` 的 60 条数据（2026-11-07，`deepseek-chat`→`deepseek-flash` / DeepSeek-V4.1-Flash-1017），五个门槛全部通过：schema 100%、band_hit 81.7%、adjacent 100%、MAE 0.4967、evidence 100%；Go 后端 82.9%、AI Agent 80.0%。与 `eval-v2` 30 条基线相比 band_hit +1.7pt、MAE +0.0634（仍达标），共有 case 无回退。明细与成本见 5.2。
 
 ---
 

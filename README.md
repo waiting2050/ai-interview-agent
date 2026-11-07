@@ -98,7 +98,7 @@ go run ./cmd/server
 接真实模型（任意 OpenAI 兼容服务，示例为 DeepSeek）：
 
 ```powershell
-$env:OPENAI_API_KEY="sk-..."                       # 只放本机，不要提交
+$env:OPENAI_API_KEY="<your-api-key>"                # 只放本机，不要提交
 $env:OPENAI_BASE_URL="https://api.deepseek.com/v1"
 $env:OPENAI_MODEL="deepseek-flash"
 go run ./cmd/server
@@ -284,7 +284,7 @@ go run ./cmd/server
 
 **A/B**：`cmd/evaldiff` 与 `/eval?base=a.json&candidate=b.json` 只读历史文件，不发起模型调用，没有 key 也能跑；输出五个指标的差值、门槛状态变化，以及 `improved / regressed / changed` 判定翻转。
 
-结果文件含时间戳、provider、模型名、prompt 版本、`dataset_sha256`、指标与逐条明细，门槛不达标时退出码为 2。**真实模型基线仍是 `eval-v2` 的 30 条数据**（DeepSeek，band_hit 0.80 通过）；当前代码 prompt 已到 `eval-v3`、回归集已扩到 60 条，但真实模型基线尚未重跑，不能视为 60 条口径已达标。
+结果文件含时间戳、provider、模型名、prompt 版本、`dataset_sha256`、指标与逐条明细，门槛不达标时退出码为 2。**真实模型基线已更新为 `eval-v3` 的 60 条数据**（2026-11-07 跑分；请求模型 `deepseek-chat`，供应商实际返回 `deepseek-flash` / DeepSeek-V4.1-Flash-1017；一次跑完 60 次调用，0 降级、0 错误）：schema 合法率 100%、档位命中率 81.7%（49/60）、相邻档 100%、维度 MAE 0.497、证据引用率 100%，**五个门槛全部通过**；分领域命中率 Go 后端 82.9%（29/35）、AI Agent 80.0%（20/25）。与 `eval-v2` 的 30 条基线相比，档位命中 +1.7pt，维度 MAE +0.063（略升但仍达标）；两侧共有的 30 条里只有 2 条档位翻转，且均为改进（`high-06-rate-limit`、`high-08-cpu-profile`）。11 条失准集中在 high 档偏严（6 条）以及「指标无出处 / 术语堆砌 / 只有结论」被压到 1 档。结果文件：[eval-openai-deepseek-chat-eval-v3-20261107T134323Z.json](docs/eval-results/eval-openai-deepseek-chat-eval-v3-20261107T134323Z.json)。
 
 ---
 

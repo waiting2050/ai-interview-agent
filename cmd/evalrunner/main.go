@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync/atomic"
 
 	"github.com/waiting2050/ai-interview-agent/internal/agent/eval"
 	"github.com/waiting2050/ai-interview-agent/internal/agent/interview"
@@ -27,6 +28,23 @@ const (
 	defaultOut = "docs/eval-results"
 )
 
+// callBudget enforces a hard upper bound on model calls. The eval runner is
+// sequential, so a check-then-increment is sufficient; a limit of zero means
+// unlimited and keeps the default behaviour unchanged.
+type callBudget struct {
+	inner llm.Client
+	limit int64
+	used  atomic.Int64
+}
+
+func (b *callBudget) Generate(ctx context.Context, req llm.Request) (llm.Response, error) {
+	if b.limit > 0 && b.used.Load() >= b.limit {
+		return llm.Response{}, fmt.Errorf("model call budget exhausted (%d calls)", b.limit)
+	}
+	b.used.Add(1)
+	return b.inner.Generate(ctx, req)
+}
+
 func main() {
 	code, err := run()
 	if err != nil {
@@ -41,6 +59,7 @@ func run() (int, error) {
 	outDir := flag.String("out", defaultOut, "directory for timestamped result files")
 	provider := flag.String("provider", "", "heuristic|openai (default: MODEL_PROVIDER, or openai when OPENAI_API_KEY is set)")
 	limit := flag.Int("limit", 0, "run only the first N cases (0 = whole set); useful for a cost-bounded smoke run")
+	maxCalls := flag.Int("max-calls", 0, "hard cap on model calls (0 = unlimited); the run stops calling once the cap is hit")
 	gate := flag.Bool("gate", true, "exit 2 when the plan's thresholds are missed")
 	flag.Parse()
 
@@ -69,6 +88,8 @@ func run() (int, error) {
 	if err != nil {
 		return exitError, fmt.Errorf("assemble model client: %w", err)
 	}
+	budget := &callBudget{inner: client, limit: int64(*maxCalls)}
+	client = budget
 
 	report := eval.Run(context.Background(),
 		interview.NewEvaluator(client, info.Model),
@@ -86,6 +107,11 @@ func run() (int, error) {
 	)
 
 	printSummary(report)
+	fmt.Printf("model_calls_used=%d", budget.used.Load())
+	if *maxCalls > 0 {
+		fmt.Printf(" max_calls=%d", *maxCalls)
+	}
+	fmt.Println()
 
 	path, err := eval.WriteReport(report, *outDir)
 	if err != nil {
