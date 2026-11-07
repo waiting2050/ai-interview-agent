@@ -505,7 +505,7 @@ total = clamp(base + Σbonus + Σpenalty, 0, 100)
 
 - 改 rubric / prompt / few-shot 后必须重跑同一回归集，并与上一版对比命中率与混淆矩阵。
 - 合入门槛：`band_hit_rate` 不下降且 `dimension_mae` 不上升；有争议的 case 人工复核后写进 `notes`。
-- 线上人工抽查发现的新失败样本补进回归集，但总量控制在 40 条内，避免跑分成本失控。
+- 线上人工抽查发现的新失败样本补进回归集；M19 起固定为 60 条（Go 后端 35 / AI Agent 25），新增样本替换而非无限追加，避免跑分成本失控。
 - 每次迭代更新 `prompt_version`，历史评估可按版本回放对比。
 
 **5.1 M6 基线实测（heuristic，`fake-heuristic` / `eval-v2` / 30 条）**
@@ -1174,6 +1174,17 @@ data: {"event_id":43,"session_id":"01H...","run_id":"01H...","type":"question.as
 - **可观测**：新增 `worker_claims_total`、`lease_renew_failures_total`、`rate_limit_rejections_total{action}`、`rate_limit_degraded_total{action}`、`dead_letters_total{class,kind}`；日志补 `worker_id` / `lease_id`。
 - **迁移**：`0009_worker.sql` 给 `runs` 加租约、失败与死信字段及索引；历史行 lease 空、失败计数 0，旧 `running` run 可立即认领，历史失败 run 不自动进入死信。
 - **验收**：两 worker 并发只认领一次、租约过期后重新认领、限流 429、连续失败进入死信、人工重试后重新执行均有测试覆盖；既有 202 + run_id 契约与事件顺序不变，评分逻辑、M6 阈值与回归集未改动。
+
+---
+
+### M19 评测体系加固（已完成）
+
+- **修测试抖动**：`TestLockerAgainstRealRedis` 不再依赖 800ms 租约与固定 sleep；TTL / acquire timeout / retry interval 全部通过 `LockOptions` 显式注入，租约到期用轮询 key 消失来等待，测试时长与机器负载解耦。其余时间相关测试审计：锁单测与限流窗口用 miniredis `FastForward`，worker 租约测试直接传入显式 `leaseUntil`，没有依赖真实等待。
+- **回归集 60 条**：Go 后端 35、AI Agent 25。类型覆盖 high 15 / mid 18 / low 7 / empty 3 / exaggerated 3 / off_topic 3 / jargon 3 / unverified 3 / conclusion_only 3 / verbose_offtopic 2，新增「术语堆砌但无实践」「指标出处不明」「只答结论无机制」「答得长但偏离问题」四类。每条带 `domain`、`expected_band`、五维人工分、`notes` 与 `evidence_anchor`；`evidence_anchor` 必须是答案原文的子串，加载时校验。
+- **评测面板**：`GET /eval` 服务端渲染（内嵌模板，无前端构建），读取 `docs/eval-results/*.json`，不新增数据库表、不触发模型调用。展示最近结果文件、五个门槛指标、逐条失准（期望档 → 实际档、偏差维度、锚点、notes），失准按领域包分组。
+- **A/B 对比**：`internal/agent/eval.Compare` + `cmd/evaldiff` + `/eval?base=&candidate=`，输出五个指标差值、门槛状态变化，以及 `improved / regressed / changed` 判定翻转；没有 API key 也能对比历史文件。
+- **门槛理由**：schema 100% 因为解析失败即不可用；band_hit 80% 因为三档是产品结论、允许边界抖动；adjacent 95% 因为 ±1 档可接受、跨两档才是明显误判；dimension_mae 0.6 因为五维是 1–5 分制、约 12% 满量程；evidence_quote 100% 作为硬不变量单列。
+- **基线与现状**：真实模型基线仍是 `eval-v2` 的 30 条数据（band_hit 0.80 通过）；代码 prompt 已到 `eval-v3`，回归集已扩到 60 条，但真实模型尚未重跑，不能宣称 60 条口径已达标。
 
 ---
 

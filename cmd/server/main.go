@@ -213,7 +213,8 @@ func run() error {
 				}
 				return jd.Fetched{URL: result.URL, Text: result.Text, FetchedAt: result.FetchedAt}, nil
 			}),
-			Reviewer: review.New(store.Repos().Reviews),
+			Reviewer:       review.New(store.Repos().Reviews),
+			EvalResultsDir: cfg.EvalResultsDir,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 	}

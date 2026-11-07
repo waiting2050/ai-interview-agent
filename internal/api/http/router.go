@@ -37,6 +37,9 @@ type Deps struct {
 	RateLimiter ports.RateLimiter
 	// RateLimits holds the per-command quotas (demo accounts are stricter).
 	RateLimits RateLimitConfig
+	// EvalResultsDir backs the read-only /eval panel. Empty falls back to
+	// docs/eval-results relative to the process working directory.
+	EvalResultsDir string
 }
 
 // NewRouter wires the HTTP surface: health, metrics, session commands, answers
@@ -65,6 +68,7 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("GET /metrics", h.metrics)
 	mux.HandleFunc("GET /demo", h.demoPage)
 	mux.Handle("GET /demo/", demoStatic())
+	mux.HandleFunc("GET /eval", h.evalPanel)
 	mux.HandleFunc("POST /v1/auth/register", h.register)
 	mux.HandleFunc("POST /v1/auth/login", h.login)
 	mux.HandleFunc("POST /v1/auth/demo", h.demoLogin)

@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>评测面板 · AI 模拟面试 Agent</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --text: #1c2430;
+    --muted: #61708a;
+    --line: #e3e8ef;
+    --ok: #1d7a4c;
+    --bad: #b42318;
+    --warn: #9a6700;
+    --accent: #2456c8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.6 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  header {
+    background: #101828;
+    color: #fff;
+    padding: 22px 32px;
+  }
+  header h1 { margin: 0 0 4px; font-size: 22px; }
+  header p { margin: 0; color: #aeb9cc; font-size: 13px; }
+  header a { color: #9dc0ff; }
+  main { max-width: 1240px; margin: 0 auto; padding: 24px 32px 64px; }
+  section {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 20px 22px;
+    margin-bottom: 20px;
+  }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  h3 { font-size: 14px; margin: 18px 0 8px; color: var(--muted); }
+  .muted { color: var(--muted); }
+  .files { display: grid; gap: 8px; }
+  .file-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 130px 120px 90px 100px;
+    gap: 12px;
+    align-items: center;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-size: 13px;
+  }
+  .file-row.selected { border-color: var(--accent); background: #f0f5ff; }
+  .file-row a { color: var(--accent); text-decoration: none; word-break: break-all; }
+  .badge {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    border: 1px solid currentColor;
+  }
+  .badge.ok { color: var(--ok); }
+  .badge.bad { color: var(--bad); }
+  .badge.warn { color: var(--warn); }
+  .metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-top: 8px;
+  }
+  .metric {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+  .metric .name { font-size: 12px; color: var(--muted); }
+  .metric .value { font-size: 20px; font-weight: 600; margin: 2px 0; }
+  .metric .gate { font-size: 12px; }
+  .ok { color: var(--ok); }
+  .bad { color: var(--bad); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; font-size: 12px; }
+  code {
+    background: #f1f4f8;
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 12px;
+  }
+  .compare-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin-bottom: 14px; }
+  .compare-form label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+  select, button {
+    font: inherit;
+    padding: 6px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--line);
+    background: #fff;
+  }
+  button { background: var(--accent); color: #fff; border-color: var(--accent); cursor: pointer; }
+  .empty { color: var(--muted); padding: 10px 0; }
+  .dir { font-size: 12px; color: var(--muted); word-break: break-all; }
+  .legend { font-size: 12px; color: var(--muted); margin-top: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>评测面板</h1>
+  <p>只读视图 · 数据来自 <code>docs/eval-results/*.json</code> · 不读取数据库、不触发模型调用 · <a href="/demo">返回演示页</a></p>
+</header>
+<main>
+  {{if .LoadError}}<section><h2>结果目录不可读</h2><p class="bad">{{.LoadError}}</p><p class="dir">目录：{{.Dir}}</p></section>{{end}}
+
+  <section>
+    <h2>最近的结果文件</h2>
+    {{if .Files}}
+      <div class="files">
+        {{range .Files}}
+        <div class="file-row{{if .Selected}} selected{{end}}">
+          <a href="/eval?file={{.Name}}">{{.Name}}</a>
+          <span class="muted">{{.Provider}} / {{.Model}}</span>
+          <span class="muted">{{.GeneratedAt}}</span>
+          <span class="muted">{{.Cases}} 条</span>
+          {{if .GatePassed}}<span class="badge ok">门槛通过</span>{{else}}<span class="badge bad">门槛未过</span>{{end}}
+        </div>
+        {{end}}
+      </div>
+      <p class="legend">点击文件名查看该次结果；最新文件默认展开。文件名包含 provider / 模型 / prompt 版本 / UTC 时间，便于排序。</p>
+    {{else}}
+      <p class="empty">还没有结果文件。先运行 <code>go run ./cmd/evalrunner -provider heuristic</code>。</p>
+    {{end}}
+  </section>
+
+  {{if .Selected}}
+  <section>
+    <h2>本次结果：{{.SelectedName}}</h2>
+    <p class="muted">
+      provider={{.Selected.Provider}} · model={{.Selected.Model}} · prompt={{.Selected.PromptVersion}} ·
+      rubric={{.Selected.RubricSchemaVersion}} · 生成时间 {{.Selected.GeneratedAt.Format "2006-01-02 15:04 UTC"}}
+      {{if .Selected.Fallback}} · <span class="badge warn">fallback</span> {{.Selected.FallbackReason}}{{end}}
+    </p>
+    <div class="metrics">
+      <div class="metric">
+        <div class="name">schema_valid_rate</div>
+        <div class="value">{{pct .Selected.Metrics.SchemaValidRate | printf "%.1f"}}%</div>
+        <div class="gate {{if ge .Selected.Metrics.SchemaValidRate .Selected.Thresholds.SchemaValidRate}}ok{{else}}bad{{end}}">
+          门槛 ≥ {{pct .Selected.Thresholds.SchemaValidRate | printf "%.0f"}}%
+        </div>
+      </div>
+      <div class="metric">
+        <div class="name">band_hit_rate</div>
+        <div class="value">{{pct .Selected.Metrics.BandHitRate | printf "%.1f"}}%</div>
+        <div class="gate {{if ge .Selected.Metrics.BandHitRate .Selected.Thresholds.BandHitRate}}ok{{else}}bad{{end}}">
+          门槛 ≥ {{pct .Selected.Thresholds.BandHitRate | printf "%.0f"}}%
+        </div>
+      </div>
+      <div class="metric">
+        <div class="name">adjacent_band_rate</div>
+        <div class="value">{{pct .Selected.Metrics.AdjacentBandRate | printf "%.1f"}}%</div>
+        <div class="gate {{if ge .Selected.Metrics.AdjacentBandRate .Selected.Thresholds.AdjacentBandRate}}ok{{else}}bad{{end}}">
+          门槛 ≥ {{pct .Selected.Thresholds.AdjacentBandRate | printf "%.0f"}}%
+        </div>
+      </div>
+      <div class="metric">
+        <div class="name">dimension_mae</div>
+        <div class="value">{{.Selected.Metrics.DimensionMAE | printf "%.4f"}}</div>
+        <div class="gate {{if le .Selected.Metrics.DimensionMAE .Selected.Thresholds.DimensionMAE}}ok{{else}}bad{{end}}">
+          门槛 ≤ {{.Selected.Thresholds.DimensionMAE | printf "%.2f"}}
+        </div>
+      </div>
+    </div>
+    <p class="legend">
+      另有 evidence_quote_rate={{pct .Selected.Metrics.EvidenceQuoteRate | printf "%.1f"}}%（门槛 ≥ {{pct .Selected.Thresholds.EvidenceQuoteRate | printf "%.0f"}}%）；
+      共 {{.Selected.Metrics.Total}} 条，成功评估 {{.Selected.Metrics.Evaluated}} 条，降级 {{.Selected.Metrics.Degraded}} 条，错误 {{.Selected.Metrics.Errors}} 条。
+    </p>
+    <h3>数据集分布（按领域包）</h3>
+    <p>
+      {{range $domain, $count := .Selected.DomainDistribution}}<span class="badge warn">{{$domain}} {{$count}}</span> {{end}}
+      {{range $type, $count := .Selected.Distribution}}<code>{{$type}}={{$count}}</code> {{end}}
+    </p>
+    <p class="legend">
+      {{if .Selected.Gate.Passed}}<span class="badge ok">gate PASS</span>{{else}}<span class="badge bad">gate FAIL</span> {{join .Selected.Gate.Failures}}{{end}}
+    </p>
+  </section>
+
+  <section>
+    <h2>逐条失准 case（{{len .Misses}} 条）</h2>
+    {{if .Misses}}
+      {{range .Sections}}
+      <h3>{{.Domain}} · {{len .Cases}} 条</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>case_id</th><th>type</th><th>期望档 → 实际档</th><th>偏差维度（期望→实际）</th><th>证据锚点</th><th>归因 notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Cases}}
+          <tr>
+            <td><code>{{.CaseID}}</code><div class="muted">{{.Topic}}</div></td>
+            <td>{{.Type}}</td>
+            <td>
+              {{if .Error}}<span class="bad">ERROR</span><div class="muted">{{.Error}}</div>
+              {{else if .Degraded}}<span class="bad">DEGRADED</span><div class="muted">{{.ErrorCode}}</div>
+              {{else}}<span class="bad">{{.ExpectedBand}} → {{.ActualBand}}</span><div class="muted">score {{.TotalScore | printf "%.1f"}}</div>{{end}}
+            </td>
+            <td>
+              {{if .Deviations}}
+                {{range .Deviations}}<div>{{.Dimension}}：{{.Expected}}→{{.Actual}}</div>{{end}}
+              {{else}}<span class="muted">—</span>{{end}}
+            </td>
+            <td><code>{{.EvidenceAnchor}}</code></td>
+            <td>{{.Notes}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+      {{end}}
+    {{else}}
+      <p class="empty">本次结果没有失准 case。</p>
+    {{end}}
+  </section>
+  {{end}}
+
+  <section>
+    <h2>A/B 对比</h2>
+    <p class="muted">选择两份已有结果文件（例如 heuristic 与真实模型），只做文件级对比：指标差异 + 判定翻转。不会发起任何模型调用。</p>
+    {{if .Files}}
+    <form class="compare-form" method="get" action="/eval">
+      <input type="hidden" name="file" value="{{.SelectedName}}">
+      <label>基线文件
+        <select name="base">
+          {{range .Files}}<option value="{{.Name}}"{{if .CompareBase}} selected{{end}}>{{.Name}}</option>{{end}}
+        </select>
+      </label>
+      <label>候选文件
+        <select name="candidate">
+          {{range .Files}}<option value="{{.Name}}"{{if .CompareCand}} selected{{end}}>{{.Name}}</option>{{end}}
+        </select>
+      </label>
+      <button type="submit">对比</button>
+    </form>
+    {{end}}
+
+    {{if .Compare}}
+    <p class="muted">
+      gate：{{.Compare.GateStatusChange}} · 翻转 improved={{.Compare.ImprovedFlips}} regressed={{.Compare.RegressedFlips}} changed={{.Compare.ChangedFlips}}
+      {{if .Compare.BaseOnlyCases}} · 仅基线有 {{.Compare.BaseOnlyCases}} 条{{end}}
+      {{if .Compare.CandidateOnly}} · 仅候选有 {{.Compare.CandidateOnly}} 条{{end}}
+    </p>
+    <table>
+      <thead><tr><th>指标</th><th>基线</th><th>候选</th><th>差异</th><th>方向</th></tr></thead>
+      <tbody>
+        {{range .Compare.Metrics}}
+        <tr>
+          <td>{{.Name}}</td>
+          <td>{{.Base | printf "%.4f"}}</td>
+          <td>{{.Candidate | printf "%.4f"}}</td>
+          <td>{{.Delta | printf "%.4f"}}</td>
+          <td>{{if .Improved}}<span class="ok">改善</span>{{else if .Delta}}<span class="bad">变差</span>{{else}}<span class="muted">持平</span>{{end}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    <h3>判定翻转（{{len .Compare.Flips}} 条）</h3>
+    {{if .Compare.Flips}}
+    <table>
+      <thead><tr><th>方向</th><th>case</th><th>领域包</th><th>基线档 → 候选档</th><th>期望档</th><th>分数</th></tr></thead>
+      <tbody>
+        {{range .Compare.Flips}}
+        <tr>
+          <td>{{if eq .Direction "improved"}}<span class="ok">improved</span>{{else if eq .Direction "regressed"}}<span class="bad">regressed</span>{{else}}changed{{end}}</td>
+          <td><code>{{.CaseID}}</code><div class="muted">{{.Topic}}</div></td>
+          <td>{{.Domain}}</td>
+          <td>{{.BaseBand}} → {{.CandBand}}</td>
+          <td>{{.ExpectedBand}}</td>
+          <td>{{.BaseScore | printf "%.1f"}} → {{.CandScore | printf "%.1f"}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+    {{else}}
+    <p class="empty">两份文件之间没有档位翻转。</p>
+    {{end}}
+    {{end}}
+  </section>
+
+  <section>
+    <p class="dir">结果目录：{{.Dir}}</p>
+    <p class="legend">
+      面板只读且只解析现有 JSON。运行 <code>cmd/evalrunner</code> 产生新文件后刷新页面即可看到，无需数据库迁移。
+      命令行等价对比：<code>go run ./cmd/evaldiff -base &lt;file&gt; -candidate &lt;file&gt;</code>。
+    </p>
+  </section>
+</main>
+</body>
+</html>

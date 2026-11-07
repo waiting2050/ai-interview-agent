@@ -31,6 +31,20 @@ func WriteReport(r Report, dir string) (string, error) {
 	return path, nil
 }
 
+// ReadReport loads one previously written result file. It is used by the A/B
+// diff command and the read-only /eval panel, which never re-run scoring.
+func ReadReport(path string) (Report, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return Report{}, fmt.Errorf("read result %s: %w", path, err)
+	}
+	var r Report
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return Report{}, fmt.Errorf("decode result %s: %w", path, err)
+	}
+	return r, nil
+}
+
 func slug(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	if s == "" {

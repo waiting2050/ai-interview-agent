@@ -20,10 +20,18 @@ func TestLoadShippedRegressionSet(t *testing.T) {
 	}
 
 	counts := ds.TypeCounts()
-	for _, typ := range []string{TypeHigh, TypeMid, TypeLow, TypeEmpty, TypeExaggerated, TypeOffTopic} {
+	for _, typ := range []string{
+		TypeHigh, TypeMid, TypeLow, TypeEmpty, TypeExaggerated, TypeOffTopic,
+		TypeJargon, TypeUnverified, TypeConclusionOnly, TypeVerboseOffTopic,
+	} {
 		if counts[typ] == 0 {
 			t.Fatalf("regression set has no %s case", typ)
 		}
+	}
+
+	domains := ds.DomainCounts()
+	if domains[DomainGoBackend] != 35 || domains[DomainAIAgent] != 25 {
+		t.Fatalf("domain distribution = %v, want go-backend=35 ai-agent=25", domains)
 	}
 
 	bands := map[int]int{}
@@ -50,12 +58,14 @@ func TestFileDigest(t *testing.T) {
 
 func TestValidateRejectsInconsistentBand(t *testing.T) {
 	ds := Dataset{Version: 1, Cases: []Case{{
-		CaseID:       "bad-band",
-		Type:         TypeHigh,
-		Question:     "q",
-		Answer:       "a",
-		Notes:        "n",
-		ExpectedBand: 5,
+		CaseID:         "bad-band",
+		Domain:         DomainGoBackend,
+		Type:           TypeHigh,
+		Question:       "q",
+		Answer:         "a",
+		Notes:          "n",
+		EvidenceAnchor: "a",
+		ExpectedBand:   5,
 		ExpectedScores: map[evaluation.Dimension]int{
 			evaluation.DimensionCorrectness:         3,
 			evaluation.DimensionDepth:               3,
@@ -72,12 +82,14 @@ func TestValidateRejectsInconsistentBand(t *testing.T) {
 
 func TestValidateRejectsBadTypeAndDuplicate(t *testing.T) {
 	c := Case{
-		CaseID:       "dup",
-		Type:         TypeHigh,
-		Question:     "q",
-		Answer:       "a",
-		Notes:        "n",
-		ExpectedBand: 1,
+		CaseID:         "dup",
+		Domain:         DomainGoBackend,
+		Type:           TypeHigh,
+		Question:       "q",
+		Answer:         "a",
+		Notes:          "n",
+		EvidenceAnchor: "a",
+		ExpectedBand:   1,
 		ExpectedScores: map[evaluation.Dimension]int{
 			evaluation.DimensionCorrectness:         1,
 			evaluation.DimensionDepth:               1,

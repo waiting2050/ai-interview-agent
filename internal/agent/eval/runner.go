@@ -60,8 +60,10 @@ type Deviation struct {
 // CaseResult is the per-case detail kept in the result file.
 type CaseResult struct {
 	CaseID           string                       `json:"case_id"`
+	Domain           string                       `json:"domain"`
 	Type             string                       `json:"type"`
 	Topic            string                       `json:"topic"`
+	EvidenceAnchor   string                       `json:"evidence_anchor"`
 	ExpectedBand     int                          `json:"expected_band"`
 	ActualBand       int                          `json:"actual_band"`
 	BandDelta        int                          `json:"band_delta"`
@@ -120,8 +122,10 @@ type Report struct {
 	RubricSchemaVersion int            `json:"rubric_schema_version"`
 	Thresholds          Thresholds     `json:"thresholds"`
 	Distribution        map[string]int `json:"distribution"`
+	DomainDistribution  map[string]int `json:"domain_distribution"`
 	Metrics             Metrics        `json:"metrics"`
 	MissesByType        map[string]int `json:"misses_by_type"`
+	MissesByDomain      map[string]int `json:"misses_by_domain"`
 	Gate                Gate           `json:"gate"`
 	Cases               []CaseResult   `json:"cases"`
 }
@@ -142,15 +146,19 @@ func Run(ctx context.Context, ev Evaluator, ds *Dataset, meta Meta) Report {
 		RubricSchemaVersion: evaluation.SchemaVersion,
 		Thresholds:          DefaultThresholds(),
 		Distribution:        ds.TypeCounts(),
+		DomainDistribution:  ds.DomainCounts(),
 		MissesByType:        map[string]int{},
+		MissesByDomain:      map[string]int{},
 		Cases:               make([]CaseResult, 0, len(ds.Cases)),
 	}
 
 	for _, c := range ds.Cases {
 		cr := CaseResult{
 			CaseID:         c.CaseID,
+			Domain:         c.Domain,
 			Type:           c.Type,
 			Topic:          c.Topic,
+			EvidenceAnchor: c.EvidenceAnchor,
 			ExpectedBand:   c.ExpectedBand,
 			ExpectedScores: c.ExpectedScores,
 			Notes:          c.Notes,
@@ -201,6 +209,7 @@ func Run(ctx context.Context, ev Evaluator, ds *Dataset, meta Meta) Report {
 
 	report.Metrics = computeMetrics(report.Cases)
 	report.MissesByType = missesByType(report.Cases)
+	report.MissesByDomain = missesByDomain(report.Cases)
 	report.Gate = checkGate(report.Metrics, report.Thresholds)
 	return report
 }
@@ -314,6 +323,16 @@ func missesByType(cases []CaseResult) map[string]int {
 		}
 		if c.ActualBand != c.ExpectedBand {
 			out[c.Type]++
+		}
+	}
+	return out
+}
+
+func missesByDomain(cases []CaseResult) map[string]int {
+	out := map[string]int{}
+	for _, c := range cases {
+		if c.Error != "" || c.Degraded || c.ActualBand != c.ExpectedBand {
+			out[c.Domain]++
 		}
 	}
 	return out

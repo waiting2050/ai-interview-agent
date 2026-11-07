@@ -66,6 +66,10 @@ type Config struct {
 	DemoRateLimitSession int
 	DemoRateLimitAnswer  int
 	DemoRateLimitReport  int
+
+	// EvalResultsDir is the directory the read-only /eval panel reads result
+	// files from.
+	EvalResultsDir string
 }
 
 func Load() (Config, error) {
@@ -93,6 +97,7 @@ func Load() (Config, error) {
 		DemoRateLimitSession:    3,
 		DemoRateLimitAnswer:     20,
 		DemoRateLimitReport:     3,
+		EvalResultsDir:          "docs/eval-results",
 	}
 
 	var err error
@@ -117,6 +122,7 @@ func Load() (Config, error) {
 	if cfg.DemoLoginWindow, err = durationEnv("DEMO_LOGIN_WINDOW", cfg.DemoLoginWindow); err != nil {
 		return Config{}, err
 	}
+	cfg.EvalResultsDir = env("EVAL_RESULTS_DIR", cfg.EvalResultsDir)
 	if cfg.WorkerLeaseTTL, err = durationEnv("WORKER_LEASE_TTL", cfg.WorkerLeaseTTL); err != nil {
 		return Config{}, err
 	}

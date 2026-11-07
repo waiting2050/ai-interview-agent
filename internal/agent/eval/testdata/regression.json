@@ -3,6 +3,7 @@
   "cases": [
     {
       "case_id": "high-01-gmp",
+      "domain": "go-backend",
       "type": "high",
       "topic": "Go 并发模型",
       "difficulty": "senior",
@@ -17,10 +18,12 @@
         "structure": 4,
         "evidence_credibility": 5
       },
-      "notes": "讲清了 GM 的锁竞争问题、P 的本地队列与 work stealing、资源挂载，并给出量化收益；4 分结构是因为先结论后细节的过渡略糙。"
+      "notes": "讲清了 GM 的锁竞争问题、P 的本地队列与 work stealing、资源挂载，并给出量化收益；4 分结构是因为先结论后细节的过渡略糙。",
+      "evidence_anchor": "加了 P 之后，每个 M 绑定一个 P，goroutine 优先放 P 的本地 runq"
     },
     {
       "case_id": "high-02-mysql-slow",
+      "domain": "go-backend",
       "type": "high",
       "topic": "索引与执行计划",
       "difficulty": "mid",
@@ -35,10 +38,12 @@
         "structure": 4,
         "evidence_credibility": 4
       },
-      "notes": "定位路径完整，索引失效原因覆盖到位，有真实改造前后的量化对比；depth 未到 4.5 是因为没有展开优化器选错索引的情况。"
+      "notes": "定位路径完整，索引失效原因覆盖到位，有真实改造前后的量化对比；depth 未到 4.5 是因为没有展开优化器选错索引的情况。",
+      "evidence_anchor": "扫描行数从 80 万降到 3000"
     },
     {
       "case_id": "high-03-cache-consistency",
+      "domain": "go-backend",
       "type": "high",
       "topic": "缓存模式与一致性",
       "difficulty": "mid",
@@ -53,10 +58,12 @@
         "structure": 4,
         "evidence_credibility": 4
       },
-      "notes": "明确承认没有强一致，给了延迟双删、binlog 补偿和版本号三类手段，并说明强一致场景的退路；细节到位但 depth 没讲到并发窗口的严格证明。"
+      "notes": "明确承认没有强一致，给了延迟双删、binlog 补偿和版本号三类手段，并说明强一致场景的退路；细节到位但 depth 没讲到并发窗口的严格证明。",
+      "evidence_anchor": "更新数据库后删缓存，删除失败靠 binlog 订阅做补偿"
     },
     {
       "case_id": "high-04-local-message",
+      "domain": "go-backend",
       "type": "high",
       "topic": "分布式事务与最终一致",
       "difficulty": "senior",
@@ -71,10 +78,12 @@
         "structure": 4,
         "evidence_credibility": 4
       },
-      "notes": "事务边界、消息状态机、幂等、对账四层都覆盖了，量化结果也合理；correctness 留 4 分是因为没有讨论消息表与业务库同库部署的前提。"
+      "notes": "事务边界、消息状态机、幂等、对账四层都覆盖了，量化结果也合理；correctness 留 4 分是因为没有讨论消息表与业务库同库部署的前提。",
+      "evidence_anchor": "业务数据和消息在同一个本地事务里落库"
     },
     {
       "case_id": "high-05-kafka-idempotent",
+      "domain": "go-backend",
       "type": "high",
       "topic": "消息队列与幂等",
       "difficulty": "mid",
@@ -89,10 +98,12 @@
         "structure": 4,
         "evidence_credibility": 5
       },
-      "notes": "明确重复是常态，给了幂等表和状态机两种落地方案，还提了 rebalance 这个容易被遗漏的点；量化数据可信。"
+      "notes": "明确重复是常态，给了幂等表和状态机两种落地方案，还提了 rebalance 这个容易被遗漏的点；量化数据可信。",
+      "evidence_anchor": "我一般用业务唯一键做幂等表，insert 唯一索引，冲突就丢弃"
     },
     {
       "case_id": "high-06-rate-limit",
+      "domain": "go-backend",
       "type": "high",
       "topic": "限流与原子脚本",
       "difficulty": "mid",
@@ -107,10 +118,12 @@
         "structure": 4,
         "evidence_credibility": 5
       },
-      "notes": "选型理由清楚，分布式实现和 Redis 故障降级都讲到了，有误杀率这种可验证指标；depth 扣分是因为没提时间窗口精度和时钟漂移。"
+      "notes": "选型理由清楚，分布式实现和 Redis 故障降级都讲到了，有误杀率这种可验证指标；depth 扣分是因为没提时间窗口精度和时钟漂移。",
+      "evidence_anchor": "单机可以用 x/time/rate，分布式就得 Redis 加 Lua 保证原子性"
     },
     {
       "case_id": "high-07-innodb-lock",
+      "domain": "go-backend",
       "type": "high",
       "topic": "锁与死锁",
       "difficulty": "senior",
@@ -125,10 +138,12 @@
         "structure": 4,
         "evidence_credibility": 4
       },
-      "notes": "next-key lock 的触发条件、RC 对比、死锁日志排查和治理手段都到位，也有线上结果；engineering_judgment 4 分是因为降隔离级别没有讨论业务风险。"
+      "notes": "next-key lock 的触发条件、RC 对比、死锁日志排查和治理手段都到位，也有线上结果；engineering_judgment 4 分是因为降隔离级别没有讨论业务风险。",
+      "evidence_anchor": "RR 下当前读会加 next-key lock，也就是记录锁加间隙锁"
     },
     {
       "case_id": "high-08-cpu-profile",
+      "domain": "go-backend",
       "type": "high",
       "topic": "可观测性与故障排查",
       "difficulty": "mid",
@@ -143,10 +158,12 @@
         "structure": 5,
         "evidence_credibility": 4
       },
-      "notes": "止损和定位顺序清楚，pprof、top -H、火焰图链路完整，案例有量化；correctness 留 4 分是因为没提内核态排查的具体工具。"
+      "notes": "止损和定位顺序清楚，pprof、top -H、火焰图链路完整，案例有量化；correctness 留 4 分是因为没提内核态排查的具体工具。",
+      "evidence_anchor": "直接开 net/http/pprof 抓 30 秒 CPU profile"
     },
     {
       "case_id": "mid-01-gc",
+      "domain": "go-backend",
       "type": "mid",
       "topic": "内存管理与 GC",
       "difficulty": "mid",
@@ -161,10 +178,12 @@
         "structure": 3,
         "evidence_credibility": 3
       },
-      "notes": "概念正确但只到教科书层面，没有讲混合写屏障、辅助标记或一次真实调优，属于典型中档答案。"
+      "notes": "概念正确但只到教科书层面，没有讲混合写屏障、辅助标记或一次真实调优，属于典型中档答案。",
+      "evidence_anchor": "对象从白色开始，从根可达的标灰再标黑，写屏障保证并发标记不漏对象"
     },
     {
       "case_id": "mid-02-context",
+      "domain": "go-backend",
       "type": "mid",
       "topic": "Go 并发模型",
       "difficulty": "mid",
@@ -179,10 +198,12 @@
         "structure": 3,
         "evidence_credibility": 3
       },
-      "notes": "传播机制和退出条件都对，但没有提 WithCancel 的内存释放、cancel 必须调用、以及跨 goroutine 的常见泄漏。"
+      "notes": "传播机制和退出条件都对，但没有提 WithCancel 的内存释放、cancel 必须调用、以及跨 goroutine 的常见泄漏。",
+      "evidence_anchor": "父 context 取消会关闭 done channel"
     },
     {
       "case_id": "mid-03-bplus-tree",
+      "domain": "go-backend",
       "type": "mid",
       "topic": "索引与执行计划",
       "difficulty": "mid",
@@ -197,10 +218,12 @@
         "structure": 3,
         "evidence_credibility": 3
       },
-      "notes": "关键结论正确，对比了 B 树和哈希索引，但没有展开页大小、聚簇索引和回表，深度一般。"
+      "notes": "关键结论正确，对比了 B 树和哈希索引，但没有展开页大小、聚簇索引和回表，深度一般。",
+      "evidence_anchor": "B+ 树非叶子节点只存 key，扇出大，树高低，磁盘 IO 少"
     },
     {
       "case_id": "mid-04-isolation",
+      "domain": "go-backend",
       "type": "mid",
       "topic": "事务与 MVCC",
       "difficulty": "mid",
@@ -215,10 +238,12 @@
         "structure": 3,
         "evidence_credibility": 3
       },
-      "notes": "四档隔离级别与现象对应正确，但 MVCC 和间隙锁只是一笔带过，没有 Read View 或具体验证，属于背诵型中档。"
+      "notes": "四档隔离级别与现象对应正确，但 MVCC 和间隙锁只是一笔带过，没有 Read View 或具体验证，属于背诵型中档。",
+      "evidence_anchor": "读已提交解决脏读但有不可重复读"
     },
     {
       "case_id": "mid-05-persist",
+      "domain": "go-backend",
       "type": "mid",
       "topic": "持久化与恢复",
       "difficulty": "mid",
@@ -233,10 +258,12 @@
         "structure": 3,
         "evidence_credibility": 3
       },
-      "notes": "差异和混合持久化都对，给了可落地的默认配置；但没有算恢复时间和容量，缺少取舍依据。"
+      "notes": "差异和混合持久化都对，给了可落地的默认配置；但没有算恢复时间和容量，缺少取舍依据。",
+      "evidence_anchor": "AOF 记命令，丢得少但文件大、恢复慢"
     },
     {
       "case_id": "mid-06-replica",
+      "domain": "go-backend",
       "type": "mid",
       "topic": "高可用与集群",
       "difficulty": "mid",
@@ -251,10 +278,12 @@
         "structure": 3,
         "evidence_credibility": 3
       },
-      "notes": "全量加增量的流程正确，提到了 repl backlog，但没有讲复制延迟、failover 和脑裂。"
+      "notes": "全量加增量的流程正确，提到了 repl backlog，但没有讲复制延迟、failover 和脑裂。",
+      "evidence_anchor": "从节点连上来先发 psync，主节点做全量同步"
     },
     {
       "case_id": "mid-07-idempotency",
+      "domain": "go-backend",
       "type": "mid",
       "topic": "错误处理与稳定性",
       "difficulty": "mid",
@@ -269,10 +298,12 @@
         "structure": 4,
         "evidence_credibility": 3
       },
-      "notes": "唯一索引加状态机是常见且正确的组合，也意识到先查后写的窗口；缺少失败重试和幂等键过期的讨论。"
+      "notes": "唯一索引加状态机是常见且正确的组合，也意识到先查后写的窗口；缺少失败重试和幂等键过期的讨论。",
+      "evidence_anchor": "服务端落唯一索引，重复请求直接返回第一次结果"
     },
     {
       "case_id": "mid-08-retry",
+      "domain": "go-backend",
       "type": "mid",
       "topic": "错误处理与稳定性",
       "difficulty": "mid",
@@ -287,10 +318,12 @@
         "structure": 3,
         "evidence_credibility": 3
       },
-      "notes": "要点齐全但都是结论，没有具体退避参数、熔断配合或重试放大的例子，属于中规中矩的中档回答。"
+      "notes": "要点齐全但都是结论，没有具体退避参数、熔断配合或重试放大的例子，属于中规中矩的中档回答。",
+      "evidence_anchor": "设置最大次数和指数退避加抖动，避免雪崩"
     },
     {
       "case_id": "mid-09-goroutine-leak",
+      "domain": "go-backend",
       "type": "mid",
       "topic": "可观测性与故障排查",
       "difficulty": "mid",
@@ -305,10 +338,12 @@
         "structure": 4,
         "evidence_credibility": 3
       },
-      "notes": "排查路径和常见原因都对，结构清楚；但没有一次完整案例，也没有并发数基线和告警阈值。"
+      "notes": "排查路径和常见原因都对，结构清楚；但没有一次完整案例，也没有并发数基线和告警阈值。",
+      "evidence_anchor": "抓 pprof 的 goroutine 看堆栈集中在哪"
     },
     {
       "case_id": "mid-10-slice",
+      "domain": "go-backend",
       "type": "mid",
       "topic": "Go 基础",
       "difficulty": "mid",
@@ -323,10 +358,12 @@
         "structure": 3,
         "evidence_credibility": 3
       },
-      "notes": "扩容倍数正确但版本口径略旧，没提 1.18 之后的阈值变化和底层数组共享导致的坑。"
+      "notes": "扩容倍数正确但版本口径略旧，没提 1.18 之后的阈值变化和底层数组共享导致的坑。",
+      "evidence_anchor": "小 slice 大概翻倍，大了按 1.25 倍增长"
     },
     {
       "case_id": "mid-11-no-index",
+      "domain": "go-backend",
       "type": "mid",
       "topic": "索引与执行计划",
       "difficulty": "mid",
@@ -341,10 +378,12 @@
         "structure": 3,
         "evidence_credibility": 3
       },
-      "notes": "列举的失效场景准确，也提到优化器代价判断；但没有区分数据分布导致的选择性问题和实际案例。"
+      "notes": "列举的失效场景准确，也提到优化器代价判断；但没有区分数据分布导致的选择性问题和实际案例。",
+      "evidence_anchor": "联合索引没走最左前缀"
     },
     {
       "case_id": "low-01-channel",
+      "domain": "go-backend",
       "type": "low",
       "topic": "Go 并发模型",
       "difficulty": "mid",
@@ -359,10 +398,12 @@
         "structure": 2,
         "evidence_credibility": 1
       },
-      "notes": "候选人明确表示没看过底层，只停留在使用层，几乎没有信息量，按 1 档处理。"
+      "notes": "候选人明确表示没看过底层，只停留在使用层，几乎没有信息量，按 1 档处理。",
+      "evidence_anchor": "这个没看过底层"
     },
     {
       "case_id": "low-02-redis-single-thread",
+      "domain": "go-backend",
       "type": "low",
       "topic": "Redis 基础",
       "difficulty": "mid",
@@ -377,10 +418,12 @@
         "structure": 2,
         "evidence_credibility": 1
       },
-      "notes": "把单线程等同于没有并发问题，还建议当数据库用，属于明确的事实错误。"
+      "notes": "把单线程等同于没有并发问题，还建议当数据库用，属于明确的事实错误。",
+      "evidence_anchor": "Redis 是单线程的所以不会有并发问题"
     },
     {
       "case_id": "low-03-index-key",
+      "domain": "go-backend",
       "type": "low",
       "topic": "索引与执行计划",
       "difficulty": "mid",
@@ -395,10 +438,12 @@
         "structure": 2,
         "evidence_credibility": 1
       },
-      "notes": "只知道索引能加速，没有结构、回表或代价概念，信息量接近为零。"
+      "notes": "只知道索引能加速，没有结构、回表或代价概念，信息量接近为零。",
+      "evidence_anchor": "MySQL 索引就是给字段加个 key，查得快"
     },
     {
       "case_id": "low-04-mutex",
+      "domain": "go-backend",
       "type": "low",
       "topic": "并发安全",
       "difficulty": "mid",
@@ -413,10 +458,12 @@
         "structure": 2,
         "evidence_credibility": 1
       },
-      "notes": "方向不算错，但只会全函数加锁且明确不考虑性能，缺少原子操作、channel、锁粒度等任何展开。"
+      "notes": "方向不算错，但只会全函数加锁且明确不考虑性能，缺少原子操作、channel、锁粒度等任何展开。",
+      "evidence_anchor": "并发安全就是加 mutex，锁住整个函数"
     },
     {
       "case_id": "empty-01-forgot",
+      "domain": "go-backend",
       "type": "empty",
       "topic": "缓存模式与一致性",
       "difficulty": "mid",
@@ -431,10 +478,12 @@
         "structure": 2,
         "evidence_credibility": 1
       },
-      "notes": "没有区分两种失效场景，也没有任何处理方案，属于明显空洞。"
+      "notes": "没有区分两种失效场景，也没有任何处理方案，属于明显空洞。",
+      "evidence_anchor": "大概就是加个缓存吧"
     },
     {
       "case_id": "empty-02-fluff",
+      "domain": "go-backend",
       "type": "empty",
       "topic": "缓存模式与一致性",
       "difficulty": "mid",
@@ -449,10 +498,12 @@
         "structure": 2,
         "evidence_credibility": 1
       },
-      "notes": "全是正确但无信息量的套话，没有任何具体手段，按空洞处理；长度不短，专门用来检验评估是否能识别空话。"
+      "notes": "全是正确但无信息量的套话，没有任何具体手段，按空洞处理；长度不短，专门用来检验评估是否能识别空话。",
+      "evidence_anchor": "合适的就是最好的"
     },
     {
       "case_id": "exag-01-cache-scale",
+      "domain": "go-backend",
       "type": "exaggerated",
       "topic": "高可用与集群",
       "difficulty": "senior",
@@ -467,10 +518,12 @@
         "structure": 3,
         "evidence_credibility": 1
       },
-      "notes": "数字明显违背常识且无任何验证方式，还把热点治理简化成加机器，属于典型夸大；结构尚可但不能掩盖可信度问题。"
+      "notes": "数字明显违背常识且无任何验证方式，还把热点治理简化成加机器，属于典型夸大；结构尚可但不能掩盖可信度问题。",
+      "evidence_anchor": "命中率 99.99%，P99 只有 0.3ms"
     },
     {
       "case_id": "exag-02-mysql-scale",
+      "domain": "go-backend",
       "type": "exaggerated",
       "topic": "慢查询优化",
       "difficulty": "senior",
@@ -485,10 +538,12 @@
         "structure": 2,
         "evidence_credibility": 1
       },
-      "notes": "20 亿行单表 1ms 且不做分片，数据无法自洽，还明确表示没有压测，夸大特征明显。"
+      "notes": "20 亿行单表 1ms 且不做分片，数据无法自洽，还明确表示没有压测，夸大特征明显。",
+      "evidence_anchor": "数据库单表 20 亿行查询还是 1ms"
     },
     {
       "case_id": "exag-03-short-brag",
+      "domain": "go-backend",
       "type": "exaggerated",
       "topic": "工程经验",
       "difficulty": "mid",
@@ -503,10 +558,12 @@
         "structure": 2,
         "evidence_credibility": 1
       },
-      "notes": "只有结论性吹嘘，没有背景、方案和可追问细节，属于短句式夸大。"
+      "notes": "只有结论性吹嘘，没有背景、方案和可追问细节，属于短句式夸大。",
+      "evidence_anchor": "我们线上每天几十亿请求，从来没出过问题"
     },
     {
       "case_id": "off-01-k8s",
+      "domain": "go-backend",
       "type": "off_topic",
       "topic": "缓存模式与一致性",
       "difficulty": "mid",
@@ -521,10 +578,12 @@
         "structure": 3,
         "evidence_credibility": 1
       },
-      "notes": "完全没有回答缓存穿透，转到沟通、K8s 和个人评价，属于跑题；表达本身有条理。"
+      "notes": "完全没有回答缓存穿透，转到沟通、K8s 和个人评价，属于跑题；表达本身有条理。",
+      "evidence_anchor": "K8s 集群是我搭的，用了 Helm 和 ArgoCD"
     },
     {
       "case_id": "off-02-business",
+      "domain": "go-backend",
       "type": "off_topic",
       "topic": "事务与 MVCC",
       "difficulty": "mid",
@@ -539,7 +598,608 @@
         "structure": 3,
         "evidence_credibility": 1
       },
-      "notes": "用业务理解替代技术回答，并给出加机器这种与 MVCC 无关的结论，属于跑题。"
+      "notes": "用业务理解替代技术回答，并给出加机器这种与 MVCC 无关的结论，属于跑题。",
+      "evidence_anchor": "我觉得做后端更重要的是业务理解"
+    },
+    {
+      "case_id": "high-09-escape",
+      "domain": "go-backend",
+      "type": "high",
+      "topic": "内存管理与 GC",
+      "difficulty": "senior",
+      "question": "Go 的逃逸分析是怎么工作的？什么情况下对象会分配到堆上？",
+      "answer": "逃逸分析发生在编译期，编译器对每个函数的变量做静态分析，如果一个对象的生命周期可能超出函数栈帧，或者大小在编译期不确定，就标记为逃逸，改到堆上分配。常见触发是对象被返回、被存入全局变量或闭包捕获、通过 interface 传递、切片或 map 里存指针、大小超过栈对象阈值。反过来，如果只是函数内部使用、没有取地址传出，就会留在栈上。我们做过一次订单结构体的优化，把 []byte 字段换成固定长度数组、避免被 interface 装箱，GC 次数从每分钟 12 次降到 3 次。可以用 go build -gcflags=-m 看逃逸决策，别凭感觉优化。",
+      "expected_points": ["逃逸分析触发条件", "栈分配与 GC 压力"],
+      "expected_band": 5,
+      "expected_scores": {
+        "correctness": 5,
+        "depth": 4,
+        "engineering_judgment": 5,
+        "structure": 4,
+        "evidence_credibility": 4
+      },
+      "notes": "触发条件覆盖返回、闭包、interface、容器存指针和大小不确定，并给了编译期查看手段和线上 GC 收益；depth 4 是因为没展开栈对象大小阈值与版本差异。",
+      "evidence_anchor": "可以用 go build -gcflags=-m 看逃逸决策"
+    },
+    {
+      "case_id": "jargon-01-happens-before",
+      "domain": "go-backend",
+      "type": "jargon",
+      "topic": "Go 并发模型",
+      "difficulty": "mid",
+      "question": "Go 的 happens-before 和内存模型怎么理解？",
+      "answer": "happens-before 是 Go 内存模型的核心关系，channel、mutex、atomic 都能建立 happens-before。happens-before 具有传递性，也可以用 HB 图去推。Go 内存模型还涉及顺序一致性和可见性，编译器重排和 CPU 重排都要考虑，屏障会处理。反正只要记住 happens-before，并发问题就都能分析。",
+      "expected_points": ["happens-before 与同步原语", "重排与可见性"],
+      "expected_band": 1,
+      "expected_scores": {
+        "correctness": 3,
+        "depth": 2,
+        "engineering_judgment": 1,
+        "structure": 3,
+        "evidence_credibility": 1
+      },
+      "notes": "术语本身没有大错，但全是名词串联：没有一条代码级例子、没有 race detector 或一次真实排查，最后一句还把问题简化成背概念，工程判断只能给 1 分。",
+      "evidence_anchor": "反正只要记住 happens-before，并发问题就都能分析"
+    },
+    {
+      "case_id": "unverified-01-perf",
+      "domain": "go-backend",
+      "type": "unverified",
+      "topic": "可观测性与故障排查",
+      "difficulty": "mid",
+      "question": "你怎么证明你们 Go 服务的性能优化是有效的？",
+      "answer": "我们上线后整体延迟下降了 40%，QPS 提升了 3 倍，GC 停顿从 8ms 降到 0.5ms，老板和监控都说效果很好，压测报告在另一个同事那里，具体数据我现在记不清了，但肯定是有效的。",
+      "expected_points": ["指标口径与对照", "压测与复现"],
+      "expected_band": 3,
+      "expected_scores": {
+        "correctness": 4,
+        "depth": 2,
+        "engineering_judgment": 2,
+        "structure": 3,
+        "evidence_credibility": 2
+      },
+      "notes": "方向是对的（延迟、QPS、GC 都能作为证据），但指标没有基线、压测条件、统计窗口和出处，报告还在别人手里，属于指标出处不明，只能给中档。",
+      "evidence_anchor": "压测报告在另一个同事那里，具体数据我现在记不清了"
+    },
+    {
+      "case_id": "conclusion-01-graceful",
+      "domain": "go-backend",
+      "type": "conclusion_only",
+      "topic": "错误处理与稳定性",
+      "difficulty": "mid",
+      "question": "你们怎么做服务优雅退出？",
+      "answer": "结论就是一定要优雅退出，不能直接 kill，要处理信号、要停止接收流量、要等待任务完成，这样就不会丢请求，也不会出现数据不一致。",
+      "expected_points": ["信号处理与 shutdown 顺序", "超时预算与在途请求"],
+      "expected_band": 1,
+      "expected_scores": {
+        "correctness": 3,
+        "depth": 1,
+        "engineering_judgment": 2,
+        "structure": 3,
+        "evidence_credibility": 2
+      },
+      "notes": "结论没错，但没有任何机制：没有 signal.Notify、http.Server.Shutdown 的顺序、就绪检查摘流、在途请求和超时预算，属于只答结论无机制。",
+      "evidence_anchor": "结论就是一定要优雅退出"
+    },
+    {
+      "case_id": "verbose-01-defer",
+      "domain": "go-backend",
+      "type": "verbose_offtopic",
+      "topic": "Go 基础",
+      "difficulty": "mid",
+      "question": "Go 的 defer 有哪些坑？",
+      "answer": "defer 这块我们团队非常重视，做了很多规范建设。我们每周开代码评审会，所有 defer 都要 review，CI 里也加了检查。发布流程用了 ArgoCD，回滚五分钟。监控用的是 Prometheus 加 Grafana，告警接到飞书。平时还会组织分享，大家成长很快。至于 defer 本身，就是函数返回前执行，正常用就行，没遇到什么问题。",
+      "expected_points": ["defer 执行时机与参数求值", "循环与错误处理陷阱"],
+      "expected_band": 1,
+      "expected_scores": {
+        "correctness": 1,
+        "depth": 2,
+        "engineering_judgment": 2,
+        "structure": 4,
+        "evidence_credibility": 1
+      },
+      "notes": "篇幅很长、结构清楚，但主体讲团队流程、发布和监控，对 defer 只有一句泛化描述，没有参数求值、循环内 defer、命名返回值等任何坑，属于答得长但偏离问题。",
+      "evidence_anchor": "至于 defer 本身，就是函数返回前执行"
+    },
+    {
+      "case_id": "ai-high-01-rag-pipeline",
+      "domain": "ai-agent",
+      "type": "high",
+      "topic": "RAG 检索链路",
+      "difficulty": "senior",
+      "question": "一个完整的 RAG 检索链路包含哪些环节？哪个环节最容易成为瓶颈？",
+      "answer": "离线侧是文档解析、清洗、分块、向量化和入库；在线侧是 query 改写、召回、粗排、精排、拼上下文和生成。最容易出问题的是分块和召回：块切得太碎会丢上下文，太大又会稀释向量语义；召回阶段 embedding 模型和业务语料不匹配，或者只做单路向量召回，都会让后面精排救不回来。我一般先保证召回率，再看精排，最后才调 prompt。线上还会加 trace，把每阶段的候选数和耗时打出来，方便定位是召回空还是生成跑偏。",
+      "expected_points": ["离线与在线链路", "召回 / 精排瓶颈定位"],
+      "expected_band": 5,
+      "expected_scores": {
+        "correctness": 5,
+        "depth": 5,
+        "engineering_judgment": 4,
+        "structure": 4,
+        "evidence_credibility": 5
+      },
+      "notes": "链路完整，明确指出分块与召回是瓶颈并给出排查顺序和 trace 手段；结构 4 分是因为环节列举略平铺。",
+      "evidence_anchor": "我一般先保证召回率，再看精排，最后才调 prompt"
+    },
+    {
+      "case_id": "ai-high-02-chunking",
+      "domain": "ai-agent",
+      "type": "high",
+      "topic": "分块策略",
+      "difficulty": "mid",
+      "question": "文档分块（chunking）你会怎么设计？固定长度和按语义切有什么区别？",
+      "answer": "固定长度实现简单、块大小可控，但容易把一句话或一个表格切断；按语义切按段落、标题、句子边界来，检索命中更准，但块大小不均匀，长段落还得二次切。我的做法是按结构优先，标题和段落边界先切，再设 token 上限和 overlap，表格和代码单独处理并保留表头。chunk 大小要跟 embedding 模型和问题粒度对齐，短问题用小块，综述类问题用大块或者父块检索。我们知识库从固定 512 token 改成结构切分加 128 overlap，召回 top5 的命中率从 61% 提到 79%。",
+      "expected_points": ["固定长度 vs 语义切分", "chunk 大小与 overlap"],
+      "expected_band": 5,
+      "expected_scores": {
+        "correctness": 5,
+        "depth": 4,
+        "engineering_judgment": 4,
+        "structure": 4,
+        "evidence_credibility": 5
+      },
+      "notes": "两种策略的取舍讲清，给出结构优先、表格代码特判、父块检索等落地做法，并有量化收益；depth 4 是因为没讨论跨块引用与元数据设计。",
+      "evidence_anchor": "我们知识库从固定 512 token 改成结构切分加 128 overlap"
+    },
+    {
+      "case_id": "ai-high-03-hybrid",
+      "domain": "ai-agent",
+      "type": "high",
+      "topic": "混合检索",
+      "difficulty": "senior",
+      "question": "向量检索和关键词检索各自适合什么场景？为什么要做混合检索？",
+      "answer": "向量检索擅长语义相近但词面不同的表达，比如同义改写、口语问题；关键词检索（BM25）擅长精确术语、型号、错误码、人名这类必须命中的词。只走向量时，专有名词和数字容易被近似向量带偏；只走 BM25 时，问法换个说法就召回不到。混合检索一般是两路各取 topN，再用 RRF 或加权分数融合，权重按 query 类型动态调，最后交给 rerank。我们客服知识库加了 BM25 后，含订单号和错误码的问题召回率从 72% 提到 91%，纯语义问题的指标基本没掉。",
+      "expected_points": ["稠密 vs 稀疏检索", "融合方式与权重"],
+      "expected_band": 5,
+      "expected_scores": {
+        "correctness": 4,
+        "depth": 5,
+        "engineering_judgment": 5,
+        "structure": 4,
+        "evidence_credibility": 4
+      },
+      "notes": "两类检索的适用场景、单路失败模式和 RRF/加权融合都讲到了，并给出按 query 类型调权重的线上做法；correctness 4 是因为没有提归一化细节。",
+      "evidence_anchor": "混合检索一般是两路各取 topN，再用 RRF 或加权分数融合"
+    },
+    {
+      "case_id": "ai-high-04-tool-calling",
+      "domain": "ai-agent",
+      "type": "high",
+      "topic": "工具调用",
+      "difficulty": "senior",
+      "question": "模型调用工具（function calling）时，你会怎么设计参数校验和失败处理？",
+      "answer": "工具 schema 要尽量窄，必填字段和枚举写清楚，别让模型自由发挥。模型返回后先做 JSON schema 校验，再做业务校验，比如 ID 是否存在、权限是否够；校验失败把结构化错误回给模型让它重试，但要有次数上限，避免死循环。工具本身要幂等，带 request_id 或者业务唯一键，超时和 5xx 才重试，4xx 直接报错。还要限制单轮工具调用次数和总 token 预算，防止模型无限调工具烧钱。最后把每次调用的入参、出参、耗时写进 trace，出问题能回放。",
+      "expected_points": ["工具 schema 与双层校验", "重试上限与幂等"],
+      "expected_band": 5,
+      "expected_scores": {
+        "correctness": 5,
+        "depth": 4,
+        "engineering_judgment": 5,
+        "structure": 4,
+        "evidence_credibility": 4
+      },
+      "notes": "schema 收窄、JSON/业务双层校验、结构化错误回灌、重试上限、幂等和预算都覆盖，属于能直接落地的答案；depth 4 是没有展开并发工具调用的顺序与依赖。",
+      "evidence_anchor": "校验失败把结构化错误回给模型让它重试，但要有次数上限"
+    },
+    {
+      "case_id": "ai-high-05-hallucination",
+      "domain": "ai-agent",
+      "type": "high",
+      "topic": "幻觉与引用",
+      "difficulty": "senior",
+      "question": "RAG 回答里出现幻觉，你会怎么定位和缓解？",
+      "answer": "先把幻觉分成两类：检索没召回到，还是召回到了但模型没用。前者要查 query 改写、分块和召回通道，后者要看 prompt 和上下文拼接顺序。缓解上要求模型逐句引用来源，引用必须能对回原文片段，对不上就降级成抽取式回答；检索结果加置信度，低置信度直接说不知道。生成后做一次 claim 校验，把没有出处的事实句标出来重写。评测时用带标准答案和引用锚点的集合，看引用准确率和无出处陈述率，而不是只看回答像不像。",
+      "expected_points": ["幻觉归因", "引用约束与降级"],
+      "expected_band": 5,
+      "expected_scores": {
+        "correctness": 5,
+        "depth": 5,
+        "engineering_judgment": 4,
+        "structure": 4,
+        "evidence_credibility": 5
+      },
+      "notes": "先做归因再谈缓解，逐句引用、对不上降级、低置信度拒答、claim 校验形成闭环；engineering 4 分是因为没讨论引用校验的额外延迟成本。",
+      "evidence_anchor": "引用必须能对回原文片段，对不上就降级成抽取式回答"
+    },
+    {
+      "case_id": "ai-high-06-agent-eval",
+      "domain": "ai-agent",
+      "type": "high",
+      "topic": "Agent 评测",
+      "difficulty": "senior",
+      "question": "你怎么评估一个 RAG/Agent 系统的效果？只看准确率够不够？",
+      "answer": "不够，要分层。检索层看 recall@k、MRR 和命中片段的相关性；生成层看答案正确性、引用支持率和拒答准确率；任务层看端到端成功率和人工抽检。离线用带标注的回归集，固定 prompt 版本和模型版本，每次改动跑同一批 case；线上用 trace 采样加用户反馈。LLM-as-judge 可以做粗筛，但 judge 的 prompt 要固定，还要和人工标注对齐，kappa 太低就不能用。我们每次发版会对比基线和候选的指标差异以及翻转 case，避免整体指标涨了但某类问题退化。",
+      "expected_points": ["分层指标", "LLM judge 与人工对齐"],
+      "expected_band": 5,
+      "expected_scores": {
+        "correctness": 4,
+        "depth": 4,
+        "engineering_judgment": 4,
+        "structure": 5,
+        "evidence_credibility": 4
+      },
+      "notes": "检索/生成/任务三层指标清楚，离线回归与线上采样都提到，并强调 judge 对齐和翻转 case；correctness 4 是因为 recall@k 与 MRR 的适用边界略笼统。",
+      "evidence_anchor": "我们每次发版会对比基线和候选的指标差异以及翻转 case"
+    },
+    {
+      "case_id": "ai-mid-01-embedding",
+      "domain": "ai-agent",
+      "type": "mid",
+      "topic": "Embedding 选型",
+      "difficulty": "mid",
+      "question": "embedding 模型怎么选？维度越高越好吗？",
+      "answer": "不一定，维度高表达能力可能更强，但存储和检索成本也更高。选型要看语种、领域和部署条件，中文和长文本要找对应训练过的模型，最好在自己的语料上做小规模召回评测，看 recall@k 而不是只看榜单。维度可以用 PCA 或 Matryoshka 降维，先验证掉点能不能接受。还要保证离线和在线用同一个模型和同一套归一化，不然向量空间对不上。",
+      "expected_points": ["embedding 选型", "维度与成本"],
+      "expected_band": 3,
+      "expected_scores": {
+        "correctness": 4,
+        "depth": 3,
+        "engineering_judgment": 3,
+        "structure": 3,
+        "evidence_credibility": 3
+      },
+      "notes": "回答了维度不是越高越好，给出语种/领域/自测和降维思路；但没有具体模型对比或数据，属于合格但不出彩的中档。",
+      "evidence_anchor": "最好在自己的语料上做小规模召回评测"
+    },
+    {
+      "case_id": "ai-mid-02-prompt-injection",
+      "domain": "ai-agent",
+      "type": "mid",
+      "topic": "提示词注入",
+      "difficulty": "senior",
+      "question": "Agent 接入外部网页内容，怎么防提示词注入？",
+      "answer": "核心是把外部内容当数据，不当指令。拼接时用明确的分隔符和角色标记，系统提示里声明只执行用户和系统指令；工具调用前做权限校验，敏感操作要二次确认。还可以加输入过滤，检测 ignore previous instructions 这类模式，但规则容易被绕过。输出侧限制工具白名单和参数范围，别让网页内容直接决定调用哪个工具。我们目前主要是白名单加人工确认，还没有做完整的红队测试。",
+      "expected_points": ["指令 / 数据隔离", "工具权限与确认"],
+      "expected_band": 3,
+      "expected_scores": {
+        "correctness": 3,
+        "depth": 4,
+        "engineering_judgment": 4,
+        "structure": 4,
+        "evidence_credibility": 3
+      },
+      "notes": "数据与指令隔离、工具白名单、敏感操作确认都在，也诚实说明没做红队测试；correctness 3 是因为过滤规则本身不牢靠，且没提输出侧再校验。",
+      "evidence_anchor": "核心是把外部内容当数据，不当指令"
+    },
+    {
+      "case_id": "ai-mid-03-memory",
+      "domain": "ai-agent",
+      "type": "mid",
+      "topic": "多轮记忆",
+      "difficulty": "mid",
+      "question": "多轮对话的记忆你一般怎么存？全塞进上下文有什么问题？",
+      "answer": "短期用最近 N 轮，保证连贯；长期把事实、偏好、任务状态结构化存下来，用摘要加检索补充。全塞上下文的问题一是贵，二是长上下文里中间信息容易被忽略，三是旧信息可能和新信息冲突。我的做法是每轮抽实体和待办，写进结构化记忆，检索时按相关性和时间排序；冲突时以最新且置信度高的为准。还要给记忆加过期和删除能力，不然错误信息会一直污染后续回答。",
+      "expected_points": ["短期 / 长期记忆", "上下文成本与冲突"],
+      "expected_band": 3,
+      "expected_scores": {
+        "correctness": 3,
+        "depth": 3,
+        "engineering_judgment": 4,
+        "structure": 4,
+        "evidence_credibility": 2
+      },
+      "notes": "短期+结构化长期记忆、成本与冲突都讲到；但没有实际存储选型、抽取失败处理和效果数据，可信度只到 2 分，整体中档。",
+      "evidence_anchor": "每轮抽实体和待办，写进结构化记忆"
+    },
+    {
+      "case_id": "ai-mid-04-rerank",
+      "domain": "ai-agent",
+      "type": "mid",
+      "topic": "精排",
+      "difficulty": "mid",
+      "question": "召回之后为什么要加 rerank？rerank 模型怎么评估？",
+      "answer": "召回阶段为了快，通常用双塔或者倒排，精度不够；rerank 用 cross-encoder 把 query 和候选一起编码，相关性判断更准。流程是先召回 50 到 100 条，rerank 取 top5 到 top10。评估要看 NDCG@k 和 MRR，还要看和人工相关性标注的一致率；同时监控延迟，rerank 是串行加的，候选太多会拖慢首字。我们一般把 rerank 放在召回后面、拼上下文前面，超时降级到不 rerank。",
+      "expected_points": ["召回 vs 精排", "NDCG 与延迟"],
+      "expected_band": 3,
+      "expected_scores": {
+        "correctness": 4,
+        "depth": 3,
+        "engineering_judgment": 4,
+        "structure": 3,
+        "evidence_credibility": 3
+      },
+      "notes": "双塔与 cross-encoder 的区别、候选量、NDCG 和延迟降级都正确；但缺少一次真实收益数据，depth 与可信度只能给中档。",
+      "evidence_anchor": "先召回 50 到 100 条，rerank 取 top5 到 top10"
+    },
+    {
+      "case_id": "ai-mid-05-streaming",
+      "domain": "ai-agent",
+      "type": "mid",
+      "topic": "流式输出",
+      "difficulty": "mid",
+      "question": "流式输出在 Agent 里怎么做？工具调用和流式怎么配合？",
+      "answer": "文本生成用 SSE 或 websocket 增量吐 token，前端按 chunk 拼接。工具调用会打断流：模型先吐 tool_call 的增量参数，攒够 JSON 后执行工具，再把结果作为新消息继续生成。要注意把 reasoning 和最终答案分开推，前端做不同展示；还要处理断线重连和重复 chunk。我们目前只在最终答案上流式，工具参数还是等完整 JSON 再解析。",
+      "expected_points": ["SSE 增量", "工具调用中断与续接"],
+      "expected_band": 3,
+      "expected_scores": {
+        "correctness": 3,
+        "depth": 3,
+        "engineering_judgment": 3,
+        "structure": 4,
+        "evidence_credibility": 3
+      },
+      "notes": "SSE、工具参数攒包、结果回灌、reasoning 分离和断线都提到，也说明了当前实现的取舍；但没有背压、乱序和首字延迟的具体处理，属于中档。",
+      "evidence_anchor": "工具调用会打断流"
+    },
+    {
+      "case_id": "ai-mid-06-mcp",
+      "domain": "ai-agent",
+      "type": "mid",
+      "topic": "MCP 协议",
+      "difficulty": "mid",
+      "question": "MCP 解决什么问题？和直接写 function calling 有什么区别？",
+      "answer": "MCP 是模型和工具/资源之间的标准协议，把工具的发现、描述和调用统一起来，客户端接一次就能用多个 server 的工具。直接 function calling 是模型 API 层的调用格式，每个应用都要自己维护工具注册、鉴权和传输。MCP 多了 server 端的能力声明和资源读取，适合把内部系统暴露成标准工具。但它不负责业务权限，细粒度授权还得自己做。我们内部试过把知识库和工单系统包成 MCP server，接入成本比每个应用单独写低。",
+      "expected_points": ["MCP 与 function calling", "能力声明与权限"],
+      "expected_band": 3,
+      "expected_scores": {
+        "correctness": 3,
+        "depth": 4,
+        "engineering_judgment": 3,
+        "structure": 3,
+        "evidence_credibility": 3
+      },
+      "notes": "协议层与 API 层的区别、能力声明、资源读取和权限边界都讲到了；correctness 3 是因为把 MCP 说成模型与工具的标准协议不够精确（客户端/服务端之间），且缺少版本协商细节。",
+      "evidence_anchor": "MCP 是模型和工具/资源之间的标准协议"
+    },
+    {
+      "case_id": "ai-mid-07-context-budget",
+      "domain": "ai-agent",
+      "type": "mid",
+      "topic": "上下文管理",
+      "difficulty": "mid",
+      "question": "上下文窗口不够时，你会怎么裁剪？裁剪顺序怎么定？",
+      "answer": "先保留系统指令和当前任务，再保留与当前问题最相关的检索片段和最近几轮对话，历史摘要放最后。裁剪不是简单截断，要按 token 预算分配，比如系统 10%、检索 50%、对话 30%、输出预留 10%。工具返回的大结果先摘要或者只留结构化字段。被裁掉的内容要能通过检索找回，不要直接丢。我们线上因为没预留输出 token，出现过回答被截断，后来把输出预算单独扣出来才稳定。",
+      "expected_points": ["裁剪优先级", "token 预算与输出预留"],
+      "expected_band": 3,
+      "expected_scores": {
+        "correctness": 4,
+        "depth": 3,
+        "engineering_judgment": 3,
+        "structure": 4,
+        "evidence_credibility": 3
+      },
+      "notes": "优先级、预算比例、工具结果摘要和输出预留都有，还有一次线上截断的教训；depth 3 是因为比例是经验值，没讲如何按模型和任务自适应。",
+      "evidence_anchor": "按 token 预算分配"
+    },
+    {
+      "case_id": "ai-low-01-vector-db",
+      "domain": "ai-agent",
+      "type": "low",
+      "topic": "向量数据库",
+      "difficulty": "mid",
+      "question": "向量数据库和普通数据库有什么区别？",
+      "answer": "向量数据库就是存向量的数据库，能算相似度，普通数据库存的是结构化数据，应该不能做向量检索吧，具体没研究过。",
+      "expected_points": ["ANN 索引与向量检索"],
+      "expected_band": 1,
+      "expected_scores": {
+        "correctness": 2,
+        "depth": 2,
+        "engineering_judgment": 2,
+        "structure": 2,
+        "evidence_credibility": 1
+      },
+      "notes": "方向大致对，但把普通数据库与向量检索对立起来（PG 装扩展也能做），没有 ANN、索引结构和适用场景，可信度 1 分。",
+      "evidence_anchor": "具体没研究过"
+    },
+    {
+      "case_id": "ai-low-02-sampling",
+      "domain": "ai-agent",
+      "type": "low",
+      "topic": "采样参数",
+      "difficulty": "mid",
+      "question": "temperature 和 top_p 有什么区别？什么时候调？",
+      "answer": "temperature 就是随机性，调高会更随机，top_p 也是随机性，两个差不多，一般默认就行，出问题再调。",
+      "expected_points": ["采样参数含义"],
+      "expected_band": 1,
+      "expected_scores": {
+        "correctness": 2,
+        "depth": 1,
+        "engineering_judgment": 2,
+        "structure": 3,
+        "evidence_credibility": 2
+      },
+      "notes": "知道两者都影响随机性，但说成差不多，没有 softmax 温度缩放、核采样和任务场景，属于低档。",
+      "evidence_anchor": "两个差不多，一般默认就行"
+    },
+    {
+      "case_id": "ai-low-03-token",
+      "domain": "ai-agent",
+      "type": "low",
+      "topic": "分词与 token",
+      "difficulty": "mid",
+      "question": "token 是怎么计算的？中文和英文一样吗？",
+      "answer": "token 就是字数吧，一个汉字一个 token，英文一个单词一个 token，具体怎么分的不清楚。",
+      "expected_points": ["BPE 分词"],
+      "expected_band": 1,
+      "expected_scores": {
+        "correctness": 1,
+        "depth": 1,
+        "engineering_judgment": 2,
+        "structure": 3,
+        "evidence_credibility": 1
+      },
+      "notes": "把 token 等同字数，中文按字、英文按词的说法都不准确，也没有 BPE/子词概念，属于事实性错误。",
+      "evidence_anchor": "具体怎么分的不清楚"
+    },
+    {
+      "case_id": "ai-empty-01-rag-vs-finetune",
+      "domain": "ai-agent",
+      "type": "empty",
+      "topic": "RAG vs 微调",
+      "difficulty": "mid",
+      "question": "RAG 和微调怎么选？",
+      "answer": "这个要看情况，各有各的好处，具体我也说不好，反正适合的就是好的。",
+      "expected_points": ["RAG 与微调取舍"],
+      "expected_band": 1,
+      "expected_scores": {
+        "correctness": 2,
+        "depth": 1,
+        "engineering_judgment": 1,
+        "structure": 2,
+        "evidence_credibility": 1
+      },
+      "notes": "正确但零信息量的套话，没有知识更新、成本、可控性等任何取舍维度。",
+      "evidence_anchor": "具体我也说不好"
+    },
+    {
+      "case_id": "ai-unverified-01-accuracy",
+      "domain": "ai-agent",
+      "type": "unverified",
+      "topic": "Agent 评测",
+      "difficulty": "mid",
+      "question": "你们 Agent 的准确率是多少？怎么测的？",
+      "answer": "我们准确率 98.7%，比之前提升了 35%，评测集有一万多条，覆盖所有场景，具体怎么标注的我没参与，报告在测试同学那里，反正老板看了很满意。",
+      "expected_points": ["评测集与标注", "指标口径"],
+      "expected_band": 3,
+      "expected_scores": {
+        "correctness": 3,
+        "depth": 3,
+        "engineering_judgment": 2,
+        "structure": 3,
+        "evidence_credibility": 2
+      },
+      "notes": "数字、评测集规模和提升幅度都给了，但准确率口径、标注规则和报告出处都不在自己手里，属于指标出处不明；不能当高分。",
+      "evidence_anchor": "报告在测试同学那里"
+    },
+    {
+      "case_id": "ai-unverified-02-latency",
+      "domain": "ai-agent",
+      "type": "unverified",
+      "topic": "RAG 性能",
+      "difficulty": "mid",
+      "question": "RAG 的端到端延迟怎么优化？",
+      "answer": "我们延迟很低，用户都感觉不到，大概几百毫秒吧，主要靠加机器和缓存，具体每个阶段的耗时没有细看，监控也没拆那么细。",
+      "expected_points": ["链路耗时拆解", "并发与缓存"],
+      "expected_band": 1,
+      "expected_scores": {
+        "correctness": 2,
+        "depth": 2,
+        "engineering_judgment": 2,
+        "structure": 3,
+        "evidence_credibility": 2
+      },
+      "notes": "只有“加机器和缓存”的结论，没有召回/精排/生成的阶段耗时，也承认监控没拆细，无法判断优化点，按低档。",
+      "evidence_anchor": "具体每个阶段的耗时没有细看"
+    },
+    {
+      "case_id": "ai-off-01-tool-403",
+      "domain": "ai-agent",
+      "type": "off_topic",
+      "topic": "工具调用错误处理",
+      "difficulty": "mid",
+      "question": "工具调用返回 403 你会怎么处理？",
+      "answer": "我觉得做 AI 最重要的是产品思维，要理解用户想要什么，我们团队每周都做用户访谈，产品经理也很支持。模型选型上我们比较看重生态，文档写得好不好很重要，社区活跃度也要看，这些比工具报错重要多了。平时我也会写一些分享，推动团队用 AI 提效。",
+      "expected_points": ["4xx 不重试与权限处理"],
+      "expected_band": 1,
+      "expected_scores": {
+        "correctness": 1,
+        "depth": 2,
+        "engineering_judgment": 1,
+        "structure": 3,
+        "evidence_credibility": 1
+      },
+      "notes": "完全没有回答 403 的处理（鉴权、权限申请、不重试、向模型回传错误），转到产品思维和模型选型，属于跑题。",
+      "evidence_anchor": "这些比工具报错重要多了"
+    },
+    {
+      "case_id": "ai-jargon-01-react",
+      "domain": "ai-agent",
+      "type": "jargon",
+      "topic": "Agent 范式",
+      "difficulty": "mid",
+      "question": "什么是 Agent 的 ReAct 模式？",
+      "answer": "ReAct 就是 Reasoning 加 Acting，reasoning trace 和 action 交替进行，observation 再反馈给模型，形成 thought-action-observation 循环。它涉及 planning、tool use 和 reflection，是 agentic workflow 的核心范式。还有 CoT、ToT、GoT 这些变体，本质上都是搜索空间和推理路径的扩展。反正把这些名词记住，面试就够用了。",
+      "expected_points": ["ReAct 循环", "规划与反思"],
+      "expected_band": 1,
+      "expected_scores": {
+        "correctness": 3,
+        "depth": 2,
+        "engineering_judgment": 1,
+        "structure": 3,
+        "evidence_credibility": 1
+      },
+      "notes": "名词和循环结构正确，但没有任何实现、失败案例或与普通 function calling 的对比，结尾还暴露应试心态，属于术语堆砌但无实践。",
+      "evidence_anchor": "反正把这些名词记住，面试就够用了"
+    },
+    {
+      "case_id": "ai-jargon-02-ann",
+      "domain": "ai-agent",
+      "type": "jargon",
+      "topic": "向量索引",
+      "difficulty": "senior",
+      "question": "向量检索里的 HNSW 和 IVF 有什么区别？",
+      "answer": "HNSW 是分层可导航小世界图，IVF 是倒排文件加聚类，PQ 是乘积量化，还有 OPQ、SQ、LSH 这些。它们都是 ANN 索引，涉及 recall、latency 和 memory 的权衡，构建参数有 M、efConstruction、nlist、nprobe。理论上讲清楚这些就能选型了，具体参数我一般用默认值，没调过。",
+      "expected_points": ["HNSW vs IVF", "参数与权衡"],
+      "expected_band": 3,
+      "expected_scores": {
+        "correctness": 3,
+        "depth": 2,
+        "engineering_judgment": 3,
+        "structure": 3,
+        "evidence_credibility": 2
+      },
+      "notes": "索引结构和参数名都对，也提到 recall/latency/memory 权衡；但明确说没调过参、没有数据，属于术语型回答，给中档偏下。",
+      "evidence_anchor": "具体参数我一般用默认值，没调过"
+    },
+    {
+      "case_id": "ai-conclusion-01-topk",
+      "domain": "ai-agent",
+      "type": "conclusion_only",
+      "topic": "检索参数",
+      "difficulty": "mid",
+      "question": "RAG 召回的 top-k 应该怎么定？",
+      "answer": "结论就是 top-k 不能太大也不能太小，太大了会引入噪声，太小了会漏召回，要根据业务情况平衡，找到最合适的值。",
+      "expected_points": ["top-k 与噪声 / 召回"],
+      "expected_band": 1,
+      "expected_scores": {
+        "correctness": 3,
+        "depth": 1,
+        "engineering_judgment": 2,
+        "structure": 3,
+        "evidence_credibility": 2
+      },
+      "notes": "只有“不能太大也不能太小”的结论，没有 token 预算、召回评测、分段取值或 rerank 后的实际 top-k，属于只答结论无机制。",
+      "evidence_anchor": "结论就是 top-k 不能太大也不能太小"
+    },
+    {
+      "case_id": "ai-conclusion-02-cost",
+      "domain": "ai-agent",
+      "type": "conclusion_only",
+      "topic": "Agent 成本",
+      "difficulty": "mid",
+      "question": "怎么降低 Agent 的工具调用成本？",
+      "answer": "要做好工具编排，能合并的合并，能缓存的缓存，能本地算的不要调模型，简单说就是降本增效。具体指标可以看调用次数和 token 消耗，反正是越少越好。",
+      "expected_points": ["工具编排与缓存", "成本指标"],
+      "expected_band": 3,
+      "expected_scores": {
+        "correctness": 4,
+        "depth": 2,
+        "engineering_judgment": 3,
+        "structure": 3,
+        "evidence_credibility": 2
+      },
+      "notes": "方向正确（合并、缓存、本地计算、调用次数与 token），但每条都停在口号，没有缓存键、合并边界、预算阈值或收益数据；给中档。",
+      "evidence_anchor": "具体指标可以看调用次数和 token 消耗"
+    },
+    {
+      "case_id": "ai-verbose-01-embedding",
+      "domain": "ai-agent",
+      "type": "verbose_offtopic",
+      "topic": "Embedding 维度",
+      "difficulty": "mid",
+      "question": "embedding 维度越高效果越好吗？",
+      "answer": "这个问题要展开讲就得先讲我们团队的 AI 平台建设。我们从去年开始做 GPU 资源池，采购了 8 卡机器，做了 K8s 调度，训练和推理都跑在上面。模型服务化用了 Triton，做了动态 batching，QPS 提升明显。团队从 3 个人扩到 12 个人，分工是数据、训练、推理和平台。我们还建了特征平台，接入了实时数仓，做了血缘管理。平时也会做技术分享，请外部专家来讲。至于 embedding 维度，我们一般用厂商默认的，没专门比较过，感觉都差不多。",
+      "expected_points": ["维度与效果 / 成本"],
+      "expected_band": 1,
+      "expected_scores": {
+        "correctness": 1,
+        "depth": 2,
+        "engineering_judgment": 2,
+        "structure": 4,
+        "evidence_credibility": 1
+      },
+      "notes": "回答很长、表达有条理，但主体是 GPU 平台、团队和特征平台，与维度问题无关；对维度只有“默认、没比较、差不多”一句，属于答得长但偏离问题。",
+      "evidence_anchor": "至于 embedding 维度，我们一般用厂商默认的"
     }
   ]
 }

@@ -194,6 +194,7 @@
 - 报告用量快照：[internal/app/report.go:295](file:///c:/Users/waiting2050/Desktop/gotest/%E9%9D%A2%E8%AF%95/internal/app/report.go#L295)（token 与调用次数，不计算金额）。
 - SSE：[internal/api/http/handlers.go:338-425](file:///c:/Users/waiting2050/Desktop/gotest/%E9%9D%A2%E8%AF%95/internal/api/http/handlers.go#L338-L425)，`Last-Event-ID` 解析在 435-449。
 - `/metrics`：[internal/api/http/metrics.go:5-12](file:///c:/Users/waiting2050/Desktop/gotest/%E9%9D%A2%E8%AF%95/internal/api/http/metrics.go#L5-L12)。
+- 评测面板：[internal/api/http/evalpage.go](file:///c:/Users/waiting2050/Desktop/gotest/%E9%9D%A2%E8%AF%95/internal/api/http/evalpage.go) 读取 `docs/eval-results/*.json`，模板内嵌在 `evalpanel/index.html`；A/B 逻辑在 [internal/agent/eval/compare.go](file:///c:/Users/waiting2050/Desktop/gotest/%E9%9D%A2%E8%AF%95/internal/agent/eval/compare.go)，命令行入口 `cmd/evaldiff`。
 
 **为什么这么设计（含代价）**：run/step 的结构化日志 + 关联 ID 让问题能定位到具体节点；指标按 provider/model/result 分桶，能看到「是哪家模型、哪种失败」；用量按 session 聚合，报告和界面能显示本场 token 用量。代价是全部指标在进程内，重启归零，没有持久化、没有 OpenTelemetry 追踪、没有跨实例聚合；日志只到 stdout，没有集中检索。
 
@@ -244,3 +245,4 @@
 10. **模型输出容错有限（做浅了）**：只做 JSON 抽取 + 一次修复提示，没有 schema 约束解码；复杂输出仍可能降级。
 11. **没有 token 级流式输出（没做）**：SSE 推的是面试事件，不是模型逐字输出；等待评估时界面是「处理中」而不是流式文字。
 12. **迁移只有向上脚本（没做回滚）**：`migrations/` 没有 down 迁移，回滚要靠备份或手工 SQL。
+13. **评测基线口径滞后（做浅了）**：回归集已扩到 60 条、prompt 已到 `eval-v3`，但真实模型基线仍是 `eval-v2` 的 30 条结果，没有重跑；`/eval` 和 `evaldiff` 只读 `docs/eval-results` 下的历史文件，不做在线 A/B，也不自动刷新数据集分布。

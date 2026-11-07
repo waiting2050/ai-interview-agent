@@ -47,6 +47,7 @@ Go 1.25 + [cloudwego/eino](https://github.com/cloudwego/eino) + PostgreSQL + Red
 | 队列消费 | PostgreSQL `FOR UPDATE SKIP LOCKED` 认领 + `lease_expires_at` 租约；多实例并行不重复，崩溃后租约过期可被其他实例接管 |
 | 限流与死信 | 按用户 + 动作的 Redis 固定窗口（创建会话 / 提交作答 / 生成报告），超限 429 `rate_limited`；匿名 demo 更严格；连续失败超阈值进入 `dead`，可查询、可人工重试 |
 | 可观测 | Prometheus 指标覆盖模型、SSE、锁、run 失败、worker 认领 / 租约、限流与死信；结构化日志带 `request_id / session_id / run_id / turn_id / worker_id / lease_id`；报告含 token 与调用次数（不计算金额） |
+| 评测 | 60 条回归集（Go 后端 35 / AI Agent 25），五个门槛指标；只读 `/eval` 面板查看历史结果、逐条失准与领域分布，`cmd/evaldiff` 对比两份结果文件 |
 
 ---
 
@@ -148,6 +149,7 @@ HTTP / SSE  →  应用服务（事务 / 幂等 / 锁）  →  eino 图（Agent 
 | --- | --- |
 | `cmd/server/` | 入口：配置、依赖组装、迁移、HTTP 启动、优雅退出 |
 | `cmd/evalrunner/` | 评分回归集批量跑分 |
+| `cmd/evaldiff/` | 对比两份已有评测结果文件（指标差异 + 判定翻转，不调模型） |
 | `internal/api/http/` | 路由、DTO、参数校验、错误映射、SSE 写出、`request_id` |
 | `internal/app/` | 用例编排：事务、幂等、锁、状态提交、事件发布、run 执行与恢复；`worker.go` 为跨实例认领 / 租约 / 死信消费 |
 | `internal/auth/` | 密码哈希、HS256 JWT 签发与校验、注册 / 登录 / 匿名 demo |
@@ -160,6 +162,7 @@ HTTP / SSE  →  应用服务（事务 / 幂等 / 锁）  →  eino 图（Agent 
 | `internal/api/http/demo/` | 演示页静态资源（`//go:embed`，无构建链） |
 | `domainpacks/` | 内嵌领域包：`go-backend` / `java-backend` / `ai-agent` |
 | `migrations/` | SQL 迁移，启动时自动执行 |
+| `docs/eval-results/` | 历史评测结果 JSON（`/eval` 与 `evaldiff` 的数据源） |
 | `deploy/docker-compose.yml` | PostgreSQL + Redis 本地依赖 |
 
 模块级职责与行号见 [拆解读物](docs/project-walkthrough.md)。
@@ -173,6 +176,7 @@ HTTP / SSE  →  应用服务（事务 / 幂等 / 锁）  →  eino 图（Agent 
 | GET | `/healthz` | 健康检查（PostgreSQL） |
 | GET | `/metrics` | Prometheus 文本指标 |
 | GET | `/demo` | 可视化演示页 |
+| GET | `/eval` | 只读评测面板：历史结果、门槛指标、逐条失准、领域分组与 A/B |
 | POST | `/v1/auth/register` | 注册并签发 JWT（邮箱 + 密码，bcrypt） |
 | POST | `/v1/auth/login` | 登录并签发 JWT |
 | POST | `/v1/auth/demo` | 匿名体验：每次创建独立临时用户，按 IP 限流 |
@@ -256,6 +260,12 @@ go test -tags=integration ./...
 go run ./cmd/evalrunner -provider heuristic
 $env:OPENAI_API_KEY="..."
 go run ./cmd/evalrunner -provider openai
+
+# A/B 对比两份已有结果文件（不调用模型，没有 key 也能跑）
+go run ./cmd/evaldiff -base docs/eval-results/<baseline>.json -candidate docs/eval-results/<candidate>.json
+
+# 只读评测面板：浏览器打开 http://localhost:8080/eval
+go run ./cmd/server
 ```
 
 | 门槛 | 要求 |
@@ -266,7 +276,15 @@ go run ./cmd/evalrunner -provider openai
 | 维度 MAE | ≤ 0.6 |
 | 证据引用率 | 100% |
 
-回归集 30 条；结果文件含时间戳、provider、模型名、prompt 版本、`dataset_sha256`、指标与逐条明细，门槛不达标时退出码为 2。真实模型基线为 **DeepSeek + `eval-v2`**（band_hit 0.80 通过）；当前代码 prompt 已到 `eval-v3`，深度锚点改动后尚未重跑。
+**回归集 60 条**：Go 后端 35、AI Agent 25。类型分布：high 15、mid 18、low 7、empty 3、exaggerated 3、off_topic 3、jargon 3、unverified 3、conclusion_only 3、verbose_offtopic 2。每条都有 `expected_band`、五维人工分、说明归因的 `notes`，以及必须能在答案原文中定位的 `evidence_anchor`；加载时会校验锚点、档位与分数是否自洽。
+
+**门槛为什么是这四个**：`schema_valid_rate=100%` 因为下游依赖结构化字段，解析失败等于不可用；`band_hit_rate≥80%` 因为三档是产品直接展示的结论，允许少量边界抖动；`adjacent_band_rate≥95%` 因为 ±1 档可接受、跨两档才是明显误判；`dimension_mae≤0.6` 因为五维是 1–5 分制，0.6 约等于 12% 满量程。`evidence_quote_rate=100%` 是硬不变量，单独列出。
+
+**失准归因**：结果文件同时记录 `deviations`（哪个维度差了几分）、`misses_by_type` 与 `misses_by_domain`。面板按领域包分组展示「期望档 → 实际档」、偏差维度、答案锚点与 `notes`；对比两份文件时列出指标差异与档位翻转。归因顺序是先看某一类（长但空洞 / 指标无出处 / 跑题 / 只答结论）是否系统性偏移，再看单个 case 的期望值是否需要人工复核。
+
+**A/B**：`cmd/evaldiff` 与 `/eval?base=a.json&candidate=b.json` 只读历史文件，不发起模型调用，没有 key 也能跑；输出五个指标的差值、门槛状态变化，以及 `improved / regressed / changed` 判定翻转。
+
+结果文件含时间戳、provider、模型名、prompt 版本、`dataset_sha256`、指标与逐条明细，门槛不达标时退出码为 2。**真实模型基线仍是 `eval-v2` 的 30 条数据**（DeepSeek，band_hit 0.80 通过）；当前代码 prompt 已到 `eval-v3`、回归集已扩到 60 条，但真实模型基线尚未重跑，不能视为 60 条口径已达标。
 
 ---
 
@@ -291,6 +309,6 @@ go run ./cmd/evalrunner -provider openai
 | --- | --- |
 | [开发计划](docs/development-plan.md) | 架构、状态机、协议、评测与里程碑的单一事实源 |
 | [设计取舍](docs/design-rationale.md) | 13 节 + 附录：为什么这样写、换一种做法会怎样 |
-| [拆解读物](docs/project-walkthrough.md) | 9 个模块 + 10 分钟演示脚本 + 12 条已知不足 |
+| [拆解读物](docs/project-walkthrough.md) | 9 个模块 + 10 分钟演示脚本 + 13 条已知不足 |
 
-已实现 M0–M9、M11–M18（M10 未做），演示页视觉轮次 R2–R5。每个里程碑的可运行验收点见[开发计划第 12 节](docs/development-plan.md#12-里程碑与验收点)。
+已实现 M0–M9、M11–M19（M10 未做），演示页视觉轮次 R2–R5。每个里程碑的可运行验收点见[开发计划第 12 节](docs/development-plan.md#12-里程碑与验收点)。
