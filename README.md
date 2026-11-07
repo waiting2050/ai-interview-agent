@@ -46,7 +46,7 @@ Go 1.25 + [cloudwego/eino](https://github.com/cloudwego/eino) + PostgreSQL + Red
 | 崩溃恢复 | `runs` / `run_steps` 节点级产物，从最后一个成功节点续跑；启动时把超时 `running` run 标记 `interrupted` |
 | 队列消费 | PostgreSQL `FOR UPDATE SKIP LOCKED` 认领 + `lease_expires_at` 租约；多实例并行不重复，崩溃后租约过期可被其他实例接管 |
 | 限流与死信 | 按用户 + 动作的 Redis 固定窗口（创建会话 / 提交作答 / 生成报告），超限 429 `rate_limited`；匿名 demo 更严格；连续失败超阈值进入 `dead`，可查询、可人工重试 |
-| 可观测 | Prometheus 指标覆盖模型、SSE、锁、run 失败、worker 认领 / 租约、限流与死信；结构化日志带 `request_id / session_id / run_id / turn_id / worker_id / lease_id`；报告含 token 与调用次数（不计算金额） |
+| 可观测 | Prometheus 指标覆盖模型、SSE、锁、run 失败、worker 认领 / 租约、限流与死信；结构化日志带 `trace_id / request_id / session_id / run_id / turn_id / worker_id / lease_id`；`trace_id` 随 run 落库、跨 worker 恢复，可选 OTLP/HTTP JSON 导出；报告含 token 与调用次数（不计算金额） |
 | 评测 | 60 条回归集（Go 后端 35 / AI Agent 25），五个门槛指标；只读 `/eval` 面板查看历史结果、逐条失准与领域分布，`cmd/evaldiff` 对比两份结果文件 |
 
 ---
@@ -165,7 +165,7 @@ HTTP / SSE  →  应用服务（事务 / 幂等 / 锁）  →  eino 图（Agent 
 | `docs/eval-results/` | 历史评测结果 JSON（`/eval` 与 `evaldiff` 的数据源） |
 | `deploy/docker-compose.yml` | PostgreSQL + Redis 本地依赖 |
 
-模块级职责与行号见 [拆解读物](docs/project-walkthrough.md)。
+模块级职责与函数入口见 [拆解读物](docs/project-walkthrough.md)，按模块速记的追问见 [面试问答](docs/interview-qa.md)。
 
 ---
 
@@ -302,15 +302,16 @@ go run ./cmd/server
 ## 已知不足
 
 - **鉴权是最小实现**：只有邮箱密码 + JWT，没有 RBAC、找回密码、第三方登录与刷新令牌；匿名 demo 的业务动作限流已走 Redis，但 demo 登录次数仍是单进程 IP 计数，多副本需统一到 Redis。
-- **简历 / JD 仍是规则语义**：正则、关键词与别名表可复现，但隐性技能、复杂排版仍会漏判；同义写法能收敛，语义相近但表述完全不同的能力仍靠人工确认；没有 embedding 语义匹配。
+- **简历 / JD 仍是规则语义**：正则、关键词与别名表可复现，但隐性技能、复杂排版仍会漏判；同义写法能收敛，语义相近但表述完全不同的能力仍靠人工确认；没有 embedding / 向量检索，这是刻意取舍而不是遗漏。
 - **图片简历与扫描版 PDF 没有 OCR**：附件只支持 txt / md / docx / pdf；PNG / JPG 返回 `image_requires_ocr`，扫描版 PDF 提不出文字。
 - **报告证据包有截断**：回答摘要、弱项条数、搜索结果都有上限；只有一轮模型点评，无跨场趋势与多轮修订。
 - **复习评分按来源分级，客观性不越界**：只有真实模型（`scoring_mode=objective`）的客观分驱动 SM-2；无 key 时 `length_heuristic` 只把按答案长度估算的分数作为参考、排程仍按自评，分歧只说「自评与长度估算差异较大」而不下「高估/低估」结论；未接评估链路时 `self_only` 仅按自评。接口与复习面板都如实标注当前模式，非 objective 模式不覆盖历史 `last_objective_*` 字段。每日上限只裁剪展示队列（`REVIEW_DAILY_LIMIT`，默认 20），不改 SM-2 到期时间；分歧还没有跨用户报表。
 - **队列是 PostgreSQL 认领（做浅了）**：`SKIP LOCKED` + 租约已支持多实例与崩溃接管，但空队列靠轮询（跨实例唤醒未接 `LISTEN/NOTIFY`），没有优先级、延迟队列与指数退避；恢复粒度是 step，不是精确断点。
-- **可观测性只在进程内**：指标重启归零，没有集中日志、分布式追踪与告警；多实例各看各的。
+- **可观测性仍以进程内为主**：`trace_id` 已贯穿 HTTP → run → worker → 模型 / 工具，并支持可选 OTLP/HTTP JSON；但指标重启归零，没有 collector、集中存储、采样与告警，多实例各看各的。
+- **真实模型基线贴着门槛**：`eval-v4` 档位命中 80.0%（48/60），再少 2 条就不达标；v3→v4 净效应是变差 1 条；5 档边界对单维度 ±1 分敏感；评测只跑单次，没有多次取众数。
 - **JD 抓取只适配静态 HTML**：不执行 JS、不碰登录墙与验证码；抓不到就要求粘贴。
 
-完整 12 条见 [拆解读物 · 已知不足](docs/project-walkthrough.md#11-已知不足)。另有明确边界：JD 抓取不代投；语音 / ASR、支付、RBAC / 找回密码 / OAuth、多端小程序不在范围内。
+完整 16 条见 [拆解读物 · 已知不足](docs/project-walkthrough.md#15-已知不足)。另有明确边界：JD 抓取不代投；语音 / ASR、支付、RBAC / 找回密码 / OAuth、多端小程序不在范围内。
 
 ---
 
@@ -320,6 +321,7 @@ go run ./cmd/server
 | --- | --- |
 | [开发计划](docs/development-plan.md) | 架构、状态机、协议、评测与里程碑的单一事实源 |
 | [设计取舍](docs/design-rationale.md) | 13 节 + 附录：为什么这样写、换一种做法会怎样 |
-| [拆解读物](docs/project-walkthrough.md) | 9 个模块 + 10 分钟演示脚本 + 13 条已知不足 |
+| [拆解读物](docs/project-walkthrough.md) | 13 个模块 + 10 分钟演示脚本 + 16 条已知不足 |
+| [面试问答](docs/interview-qa.md) | 按模块速记：每个模块 3–5 个高频追问与可背诵的答案要点 |
 
 已实现 M0–M9、M11–M19（M10 未做），演示页视觉轮次 R2–R5。每个里程碑的可运行验收点见[开发计划第 12 节](docs/development-plan.md#12-里程碑与验收点)。

@@ -52,7 +52,7 @@ HTTP/SSE  →  应用服务（事务/幂等/锁）  →  eino 图（Agent 决策
 | 断线可续播 | SSE 带 `Last-Event-ID` 重连，事件不丢不乱序 |
 | 崩溃不重复计分 | 故障注入杀进程后重启，评估条数与分数不变 |
 | 追问有硬上限 | 任何配置下 `depth` / `followups_used` 不越界，单测覆盖 |
-| 评分档位稳定 | 30 条回归集跑分，档位完全命中率 ≥ 80%，相邻一档 ≥ 95%（见 6.5） |
+| 评分档位稳定 | 60 条回归集跑分，档位完全命中率 ≥ 80%，相邻一档 ≥ 95%（见 6.5） |
 | 成本可估算 | 每场面试输出 token 数与模型调用次数摘要（不计算金额，见 10.4） |
 | 报告不全量塞上下文 | 报告链路只能通过工具按需取片段，prompt 有 token 上限 |
 
@@ -472,9 +472,9 @@ total = clamp(base + Σbonus + Σpenalty, 0, 100)
 
 **1. 小规模回归集**
 
-- 20 条代表性作答（上限 40 条），覆盖：五个维度各档位、优秀/中等/较差、超短答案、「不会」、超长跑题、含夸大 claim、含 prompt injection 文本。
+- 60 条代表性作答（固定总数，新增样本替换而非无限追加），覆盖：五个维度各档位、优秀/中等/较差、超短答案、「不会」、超长跑题、含夸大 claim、含 prompt injection 文本。
 - 每条固定字段：`case_id`、`question`、`answer`、`expected_band`（总分档位：1–2 / 3 / 4–5）、`expected_missing_points`（可选）、`notes`（人工判断理由）。
-- 数据集放 `internal/agent/eval/testdata/regression.json`，随代码版本管理，不入库、不做标注平台。M6 已落地 30 条，类型分布为 high 8 / mid 11 / low 4 / empty 2 / exaggerated 3 / off_topic 2；`expected_band` 分布为 5 档 8 条、3 档 11 条、1 档 11 条。
+- 数据集放 `internal/agent/eval/testdata/regression.json`，随代码版本管理，不入库、不做标注平台。M6 起步 30 条，M19 起固定 60 条（Go 后端 35 / AI Agent 25）；当前类型覆盖 high / mid / low / empty / exaggerated / off_topic / jargon / unverified / conclusion_only / verbose_offtopic。
 - M6 追加了 `expected_scores`（五维人工分），用于 `dimension_mae`；加载时会校验「`expected_scores` 反推的档位必须等于 `expected_band`」，防止标注自相矛盾。
 - M6 档位换算：总分 0–100 → 1 档 `<50`、3 档 `50–79.9`、5 档 `≥80`，由 `evaluation.Band` 实现；切点对应 1–5 分制上的 2.5 与 4.0。
 
@@ -1033,12 +1033,9 @@ data: {"event_id":43,"session_id":"01H...","run_id":"01H...","type":"question.as
   - 数据：内置 Go / MySQL / Redis 三套题纲；结构化简历画像（`years` / `skills` / `projects`）落 `sessions.resume_profile`，文本输入自动解析。
   - 覆盖门：`expected_points` 全覆盖即 `next_question(coverage_satisfied)`，不再受模型追问建议影响。
 - 验收：`go build ./...`、`go test ./...` 全绿；`go test -tags=integration ./...`（embedded PostgreSQL）全绿，含 profile/expected_points 持久化、恢复重放、事件幂等。
-- 未联调项：真实 provider 因缺少 API Key 未做线上联调；有 key 后执行：
-  1. 设置 `OPENAI_API_KEY`（可选 `OPENAI_BASE_URL` / `OPENAI_MODEL`），启动 `go run ./cmd/server`，日志应显示 `model provider ready provider=openai`，且无 `model provider degraded`；
-  2. `GET /healthz` 确认存储可用（provider 信息以启动日志为准）；
-  3. 创建会话并作答，检查 `evaluations.model_name` 为 `openai/<model>`、`raw_output` 为真实模型 JSON；token 计数由 `llm.ResilientClient.Stats()` 进程内累计（本期未暴露到 HTTP）；
-  4. 观察一次 401（错误 key）→ `auth` 不重试；一次超时 → 重试后降级评估继续推进。
-- 边界：原计划中的 20 条评测回归集与跑分脚本未纳入本期，留到 M4 前后的评测工作。
+- 联调结果：2026-11-07 用真实 provider（DeepSeek `deepseek-chat`）跑完 60 条，结果见 `docs/eval-results/eval-openai-deepseek-chat-eval-v4-20261107T143259Z.json`；schema 100%、档位 80.0%（48/60）、相邻档 100%、维度 MAE 0.4733、证据 100%。与 v3 的 A/B 中档位 81.7%→80.0%（−1 条，净效应变差），MAE 改善主要来自标注修正，不能记为模型提升。
+- 复跑方式：设置 `OPENAI_API_KEY`（可选 `OPENAI_BASE_URL` / `OPENAI_MODEL`）后执行 `cmd/evalrunner`；A/B 用 `cmd/evaldiff` 或 `/eval?base=&candidate=` 对比两份结果文件，不调模型、不产生费用。
+- 边界：回归集固定 60 条（Go 后端 35 / AI Agent 25）；同一 case 连续跑 3 次取众数的稳定性统计仍未接入，见拆解读物「已知不足」。
 
 ### M4 收尾与报告（已完成）
 
