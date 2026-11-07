@@ -1939,20 +1939,64 @@
     }
     const objective = result.objective || {};
     const divergence = result.divergence;
-    const calc = result.calculation || {};
+    const calc = result.calculation;
+    const mode = result.scoring_mode || "length_heuristic";
     const variantBox = reviewBody.querySelector("[data-variant-box]");
     if (variantBox) {
       variantBox.querySelectorAll("textarea, select, button").forEach((el) => { el.disabled = true; });
     }
     box.hidden = false;
+    const nextButton = `<div class="review-actions"><button class="primary" type="button" data-review-action="next">下一张</button></div>`;
+    const noteHtml = result.scoring_note
+      ? `<div class="muted">${escapeHtml(result.scoring_note)}</div>`
+      : "";
+    const scheduleHtml = calc
+      ? `<div class="muted">已排程：EF ${Number(calc.new_ease || 0).toFixed(2)}，` +
+        `间隔 ${calc.new_interval_days} 天，下次 ${formatReviewDue(calc.due_at)}</div>`
+      : `<div class="muted">本次未更新排程</div>`;
+
     if (objective.degraded) {
       box.innerHTML =
         `<div class="notice warn">评估降级（${escapeHtml(objective.error_code || "unknown")}），` +
         `本次没有更新排程，可以稍后重试。</div>` +
-        `<div class="review-actions"><button class="primary" type="button" data-review-action="next">下一张</button></div>`;
+        noteHtml +
+        nextButton;
       return;
     }
+
+    if (mode === "self_only") {
+      const selfText = result.self_grade == null
+        ? `<div class="muted">未填写自评。</div>`
+        : `<div class="muted">本次按自评 ${result.self_grade} 分排程。</div>`;
+      box.innerHTML =
+        `<div class="calc-label">自评排程</div>` +
+        noteHtml +
+        selfText +
+        scheduleHtml +
+        nextButton;
+      return;
+    }
+
     const missing = (objective.missing_points || []).map((p) => `<li>${escapeHtml(p)}</li>`).join("");
+    const missingHtml = missing ? `<div class="calc-label">仍缺要点</div><ul>${missing}</ul>` : "";
+
+    if (mode === "length_heuristic") {
+      const divergenceClass = divergence && Math.abs(divergence.delta || 0) >= 2 ? "warn" : "ok";
+      const divergenceText = divergence
+        ? `<div class="notice ${divergenceClass}">${escapeHtml(divergence.message || "")}</div>`
+        : `<div class="muted">未填写自评，本次未更新排程。</div>`;
+      box.innerHTML =
+        `<div class="calc-label">长度估算 vs 自评</div>` +
+        `<div class="review-objective-score"><strong>${objective.score}</strong> 分` +
+        `<span class="muted"> · band ${objective.band} · 仅作参考，不决定 SM-2</span></div>` +
+        noteHtml +
+        divergenceText +
+        missingHtml +
+        scheduleHtml +
+        nextButton;
+      return;
+    }
+
     const divergenceClass = divergence && (divergence.suspected_overestimate || divergence.suspected_underestimate) ? "warn" : "ok";
     const divergenceText = divergence
       ? `<div class="notice ${divergenceClass}">${escapeHtml(divergence.message || "")}</div>`
@@ -1961,11 +2005,11 @@
       `<div class="calc-label">客观分 vs 自评</div>` +
       `<div class="review-objective-score"><strong>${objective.score}</strong> 分` +
       `<span class="muted"> · band ${objective.band} · SM-2 grade ${objective.grade}</span></div>` +
+      noteHtml +
       divergenceText +
-      (missing ? `<div class="calc-label">仍缺要点</div><ul>${missing}</ul>` : "") +
-      `<div class="muted">已排程：EF ${Number(calc.new_ease || 0).toFixed(2)}，` +
-      `间隔 ${calc.new_interval_days} 天，下次 ${formatReviewDue(calc.due_at)}</div>` +
-      `<div class="review-actions"><button class="primary" type="button" data-review-action="next">下一张</button></div>`;
+      missingHtml +
+      scheduleHtml +
+      nextButton;
   }
 
   // ---------- resume attachment (local parsing only) ----------

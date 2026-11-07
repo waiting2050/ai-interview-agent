@@ -14,11 +14,14 @@ import (
 // in both modes without any extra branching here.
 type ReviewEvaluator struct {
 	evaluator *interview.Evaluator
+	objective bool
 }
 
-// NewReviewEvaluator wraps the shared evaluator.
-func NewReviewEvaluator(evaluator *interview.Evaluator) *ReviewEvaluator {
-	return &ReviewEvaluator{evaluator: evaluator}
+// NewReviewEvaluator wraps the shared evaluator. objective must be true only
+// when the underlying client is a real model; the heuristic fallback must be
+// reported as length_heuristic so it never drives SM-2.
+func NewReviewEvaluator(evaluator *interview.Evaluator, objective bool) *ReviewEvaluator {
+	return &ReviewEvaluator{evaluator: evaluator, objective: objective}
 }
 
 // EvaluateVariant runs the existing evaluation chain and converts the rubric
@@ -42,6 +45,10 @@ func (e *ReviewEvaluator) EvaluateVariant(ctx context.Context, in review.Variant
 		ErrorCode:     out.ErrorCode,
 		ModelName:     out.ModelName,
 		PromptVersion: out.PromptVersion,
+		ScoringMode:   review.ScoringModeLengthHeuristic,
+	}
+	if e.objective {
+		result.ScoringMode = review.ScoringModeObjective
 	}
 	if out.Degraded {
 		return result, nil

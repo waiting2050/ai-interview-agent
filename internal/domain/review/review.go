@@ -36,9 +36,6 @@ var (
 	ErrInvalidArgument = errors.New("invalid review input")
 	// ErrNotFound marks a missing review card.
 	ErrNotFound = errors.New("review card not found")
-	// ErrEvaluatorUnavailable marks a variant-answer request when no evaluation
-	// chain is wired in. Production always wires the heuristic fallback.
-	ErrEvaluatorUnavailable = errors.New("review evaluator unavailable")
 )
 
 // Calculation records one SM-2 update so the demo can explain the schedule.
@@ -78,6 +75,7 @@ type Card struct {
 	LastObjectiveBand  *int         `json:"last_objective_band,omitempty"`
 	LastSelfGrade      *int         `json:"last_self_grade,omitempty"`
 	LastDivergence     *int         `json:"last_divergence,omitempty"`
+	LastScoringMode    string       `json:"last_scoring_mode,omitempty"`
 	EaseFactor         float64      `json:"ease_factor"`
 	IntervalDays       int          `json:"interval_days"`
 	Repetitions        int          `json:"repetitions"`

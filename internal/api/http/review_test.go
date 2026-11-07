@@ -29,6 +29,17 @@ func (s stubReviewEvaluator) EvaluateVariant(context.Context, review.VariantEval
 
 func newReviewRouter(t *testing.T, now time.Time, cards []*review.Card) (*httptest.Server, *memory.Store) {
 	t.Helper()
+	return newReviewRouterWithEvaluator(t, now, cards, stubReviewEvaluator{result: review.VariantEvaluation{
+		Score:         45,
+		MissingPoints: []string{"没讲补偿"},
+		ModelName:     "fake-heuristic",
+		PromptVersion: "eval-test",
+		ScoringMode:   review.ScoringModeObjective,
+	}})
+}
+
+func newReviewRouterWithEvaluator(t *testing.T, now time.Time, cards []*review.Card, evaluator review.VariantEvaluator) (*httptest.Server, *memory.Store) {
+	t.Helper()
 	store := memory.New()
 	authSvc, token, userID := testAuthFor(t, store)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -63,12 +74,7 @@ func newReviewRouter(t *testing.T, now time.Time, cards []*review.Card) (*httpte
 			t.Fatal(err)
 		}
 	}
-	svc := review.New(store.Repos().Reviews, stubReviewEvaluator{result: review.VariantEvaluation{
-		Score:         45,
-		MissingPoints: []string{"没讲补偿"},
-		ModelName:     "fake-heuristic",
-		PromptVersion: "eval-test",
-	}})
+	svc := review.New(store.Repos().Reviews, evaluator)
 	svc.SetClock(func() time.Time { return now })
 	srv := httptest.NewServer(withTestAuthorization(NewRouter(Deps{
 		Auth:     authSvc,
@@ -291,9 +297,14 @@ func TestReviewVariantObjectiveDoubleTrack(t *testing.T) {
 		Calculation *review.Calculation    `json:"calculation"`
 		Objective   review.ObjectiveResult `json:"objective"`
 		Divergence  *review.Divergence     `json:"divergence"`
+		ScoringMode string                 `json:"scoring_mode"`
+		ScoringNote string                 `json:"scoring_note"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatal(err)
+	}
+	if out.ScoringMode != review.ScoringModeObjective || out.ScoringNote != review.ScoringNoteObjective {
+		t.Fatalf("scoring mode/note = %q / %q", out.ScoringMode, out.ScoringNote)
 	}
 	if out.Objective.Score != 45 || out.Objective.Band != 1 || out.Objective.Grade != 2 {
 		t.Fatalf("objective = %+v", out.Objective)
@@ -322,6 +333,102 @@ func TestReviewVariantObjectiveDoubleTrack(t *testing.T) {
 		stored.LastSelfGrade == nil || *stored.LastSelfGrade != 5 {
 		t.Fatalf("stored card = %+v", stored)
 	}
+}
+
+func TestReviewVariantScoringModes(t *testing.T) {
+	now := time.Date(2026, 11, 6, 10, 0, 0, 0, time.UTC)
+	makeCard := func(id string) *review.Card {
+		return &review.Card{
+			ID:           id,
+			SessionID:    "sess-" + id,
+			TurnID:       "turn-" + id,
+			Topic:        "Go 并发模型",
+			Question:     "讲讲 Go 的并发模型",
+			AnswerDigest: "只讲了 goroutine",
+			KeyPoints:    []string{"调度", "channel", "context"},
+			EaseFactor:   review.DefaultEase,
+			DueAt:        now,
+			LastGrade:    -1,
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		}
+	}
+	postAnswer := func(t *testing.T, baseURL, cardID, body string) variantAnswerBody {
+		t.Helper()
+		resp, err := http.Post(baseURL+"/v1/review/"+cardID+"/variant/answer", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("answer status = %d", resp.StatusCode)
+		}
+		var out variantAnswerBody
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+
+	// length_heuristic: the length score is a reference only, the self grade
+	// drives SM-2 and the divergence does not conclude over/under estimation.
+	heuristicCard := makeCard("card-h")
+	heuristicSrv, _ := newReviewRouterWithEvaluator(t, now, []*review.Card{heuristicCard},
+		stubReviewEvaluator{result: review.VariantEvaluation{
+			Score:       100,
+			ScoringMode: review.ScoringModeLengthHeuristic,
+		}})
+	heuristic := postAnswer(t, heuristicSrv.URL, heuristicCard.ID, `{"answer":"回答","self_grade":2}`)
+	if heuristic.ScoringMode != review.ScoringModeLengthHeuristic || heuristic.ScoringNote != review.ScoringNoteLengthHeuristic {
+		t.Fatalf("scoring mode/note = %q / %q", heuristic.ScoringMode, heuristic.ScoringNote)
+	}
+	if heuristic.Calculation == nil || heuristic.Calculation.Grade != 2 || heuristic.Card.LastGrade != 2 {
+		t.Fatalf("self grade must drive SM-2: %+v", heuristic.Card)
+	}
+	if heuristic.Card.LastObjectiveScore != nil || heuristic.Card.LastObjectiveBand != nil {
+		t.Fatalf("heuristic wrote objective fields: %+v", heuristic.Card)
+	}
+	if heuristic.Divergence == nil || heuristic.Divergence.SuspectedOverestimate || heuristic.Divergence.SuspectedUnderestimate {
+		t.Fatalf("heuristic divergence = %+v", heuristic.Divergence)
+	}
+	if strings.Contains(heuristic.Divergence.Message, "高估") || strings.Contains(heuristic.Divergence.Message, "低估") {
+		t.Fatalf("heuristic divergence message = %q", heuristic.Divergence.Message)
+	}
+
+	// self_only: no evaluation chain, schedule follows the self grade.
+	selfCard := makeCard("card-s")
+	selfSrv, _ := newReviewRouterWithEvaluator(t, now, []*review.Card{selfCard}, nil)
+	self := postAnswer(t, selfSrv.URL, selfCard.ID, `{"answer":"回答","self_grade":4}`)
+	if self.ScoringMode != review.ScoringModeSelfOnly || self.ScoringNote != review.ScoringNoteSelfOnly {
+		t.Fatalf("scoring mode/note = %q / %q", self.ScoringMode, self.ScoringNote)
+	}
+	if self.Objective.Score != 0 {
+		t.Fatalf("self_only objective = %+v", self.Objective)
+	}
+	if self.Calculation == nil || self.Calculation.Grade != 4 || self.Card.LastScoringMode != review.ScoringModeSelfOnly {
+		t.Fatalf("self_only schedule = %+v", self.Card)
+	}
+
+	// self_only without a self grade leaves the schedule untouched.
+	idleCard := makeCard("card-i")
+	idleSrv, _ := newReviewRouterWithEvaluator(t, now, []*review.Card{idleCard}, nil)
+	idle := postAnswer(t, idleSrv.URL, idleCard.ID, `{"answer":"回答"}`)
+	if idle.Calculation != nil || idle.Card.LastGrade != -1 {
+		t.Fatalf("self_only without self grade rescheduled: %+v", idle.Card)
+	}
+	if idle.ScoringMode != review.ScoringModeSelfOnly || !strings.Contains(idle.Message, "未填写自评") {
+		t.Fatalf("message = %q (mode %q)", idle.Message, idle.ScoringMode)
+	}
+}
+
+type variantAnswerBody struct {
+	Card        review.Card            `json:"card"`
+	Calculation *review.Calculation    `json:"calculation"`
+	Objective   review.ObjectiveResult `json:"objective"`
+	Divergence  *review.Divergence     `json:"divergence"`
+	ScoringMode string                 `json:"scoring_mode"`
+	ScoringNote string                 `json:"scoring_note"`
+	Message     string                 `json:"message"`
 }
 
 func getVariant(t *testing.T, baseURL, cardID string) review.Variant {

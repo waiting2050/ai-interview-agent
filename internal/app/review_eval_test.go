@@ -11,7 +11,7 @@ import (
 )
 
 func TestReviewEvaluatorRunsWithoutAPIKey(t *testing.T) {
-	evaluator := NewReviewEvaluator(interview.NewEvaluator(interview.NewHeuristicClient(), "fake-heuristic"))
+	evaluator := NewReviewEvaluator(interview.NewEvaluator(interview.NewHeuristicClient(), "fake-heuristic"), false)
 	pack := domainpack.Default().MustGet("go-backend")
 
 	long, err := evaluator.EvaluateVariant(context.Background(), review.VariantEvaluationInput{
@@ -33,6 +33,9 @@ func TestReviewEvaluatorRunsWithoutAPIKey(t *testing.T) {
 	}
 	if long.ModelName != "fake-heuristic" {
 		t.Fatalf("model name = %q", long.ModelName)
+	}
+	if long.ScoringMode != review.ScoringModeLengthHeuristic {
+		t.Fatalf("heuristic scoring mode = %q", long.ScoringMode)
 	}
 
 	short, err := evaluator.EvaluateVariant(context.Background(), review.VariantEvaluationInput{

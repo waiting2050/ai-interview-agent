@@ -321,6 +321,7 @@ func TestAnswerVariantUsesObjectiveGrade(t *testing.T) {
 		MissingPoints: []string{"没讲补偿"},
 		ModelName:     "fake-heuristic",
 		PromptVersion: "eval-test",
+		ScoringMode:   review.ScoringModeObjective,
 	}}
 	store := &fakeStore{cards: []*review.Card{card}}
 	svc := review.New(store, evaluator)
@@ -357,19 +358,204 @@ func TestAnswerVariantUsesObjectiveGrade(t *testing.T) {
 	if result.Calculation == nil || result.Calculation.Grade != 2 {
 		t.Fatalf("calculation = %+v", result.Calculation)
 	}
+	if result.ScoringMode != review.ScoringModeObjective || result.ScoringNote != review.ScoringNoteObjective {
+		t.Fatalf("scoring mode/note = %q / %q", result.ScoringMode, result.ScoringNote)
+	}
+	if result.Card.LastScoringMode != review.ScoringModeObjective {
+		t.Fatalf("persisted scoring mode = %q", result.Card.LastScoringMode)
+	}
 	if len(evaluator.last.ExpectedPoints) == 0 {
 		t.Fatal("variant points must be passed to the evaluator")
 	}
 }
 
-func TestAnswerVariantRequiresEvaluator(t *testing.T) {
+func TestAnswerVariantSelfOnlyUsesSelfGrade(t *testing.T) {
+	now := time.Date(2026, 11, 6, 10, 0, 0, 0, time.UTC)
 	card := newCard()
 	card.UserID = "u1"
 	store := &fakeStore{cards: []*review.Card{card}}
 	svc := review.New(store)
-	_, err := svc.AnswerVariant(context.Background(), "u1", card.ID, review.VariantAnswerInput{Answer: "回答"})
-	if !errors.Is(err, review.ErrEvaluatorUnavailable) {
-		t.Fatalf("err = %v", err)
+	svc.SetClock(func() time.Time { return now })
+
+	self := 4
+	result, err := svc.AnswerVariant(context.Background(), "u1", card.ID, review.VariantAnswerInput{
+		Answer:    "回答",
+		SelfGrade: &self,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ScoringMode != review.ScoringModeSelfOnly || result.ScoringNote != review.ScoringNoteSelfOnly {
+		t.Fatalf("scoring mode/note = %q / %q", result.ScoringMode, result.ScoringNote)
+	}
+	if result.Objective.Score != 0 || result.Divergence != nil {
+		t.Fatalf("self_only must not expose an objective score: %+v", result)
+	}
+	if result.Card.LastGrade != 4 || result.Card.LastSelfGrade == nil || *result.Card.LastSelfGrade != 4 {
+		t.Fatalf("self grade must drive SM-2: %+v", result.Card)
+	}
+	if result.Card.LastObjectiveScore != nil || result.Card.LastScoringMode != review.ScoringModeSelfOnly {
+		t.Fatalf("self_only wrote objective fields: %+v", result.Card)
+	}
+	if result.Calculation == nil || result.Calculation.Grade != 4 {
+		t.Fatalf("calculation = %+v", result.Calculation)
+	}
+}
+
+func TestAnswerVariantSelfOnlyWithoutSelfGradeDoesNotReschedule(t *testing.T) {
+	card := newCard()
+	card.UserID = "u1"
+	store := &fakeStore{cards: []*review.Card{card}}
+	svc := review.New(store)
+
+	result, err := svc.AnswerVariant(context.Background(), "u1", card.ID, review.VariantAnswerInput{Answer: "回答"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Calculation != nil || result.Card.LastGrade != -1 || !result.Card.DueAt.Equal(card.DueAt) {
+		t.Fatalf("self_only without self grade must not reschedule: %+v", result)
+	}
+	if result.ScoringMode != review.ScoringModeSelfOnly || !strings.Contains(result.Message, "未填写自评") {
+		t.Fatalf("message = %q (mode %q)", result.Message, result.ScoringMode)
+	}
+}
+
+func TestAnswerVariantLengthHeuristicUsesSelfGrade(t *testing.T) {
+	now := time.Date(2026, 11, 6, 10, 0, 0, 0, time.UTC)
+	card := newCard()
+	card.UserID = "u1"
+	// The heuristic reports a top score, but it must only be a reference.
+	evaluator := &fakeEvaluator{result: review.VariantEvaluation{
+		Score:       100,
+		ScoringMode: review.ScoringModeLengthHeuristic,
+	}}
+	store := &fakeStore{cards: []*review.Card{card}}
+	svc := review.New(store, evaluator)
+	svc.SetClock(func() time.Time { return now })
+
+	self := 2
+	result, err := svc.AnswerVariant(context.Background(), "u1", card.ID, review.VariantAnswerInput{
+		Answer:    "回答",
+		SelfGrade: &self,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ScoringMode != review.ScoringModeLengthHeuristic || result.ScoringNote != review.ScoringNoteLengthHeuristic {
+		t.Fatalf("scoring mode/note = %q / %q", result.ScoringMode, result.ScoringNote)
+	}
+	if result.Objective.Score != 100 || result.Objective.Grade != 5 {
+		t.Fatalf("objective reference = %+v", result.Objective)
+	}
+	if result.Card.LastGrade != 2 || result.Card.Repetitions != 0 || result.Card.IntervalDays != 1 {
+		t.Fatalf("self grade must drive SM-2, not the reference score: %+v", result.Card)
+	}
+	if result.Card.LastObjectiveScore != nil || result.Card.LastObjectiveBand != nil ||
+		result.Card.LastScoringMode != review.ScoringModeLengthHeuristic {
+		t.Fatalf("heuristic mode wrote objective fields: %+v", result.Card)
+	}
+	if result.Divergence == nil || result.Divergence.SuspectedOverestimate || result.Divergence.SuspectedUnderestimate {
+		t.Fatalf("heuristic divergence must not conclude: %+v", result.Divergence)
+	}
+	if !strings.Contains(result.Divergence.Message, "差异较大") || strings.Contains(result.Divergence.Message, "高估") {
+		t.Fatalf("heuristic divergence message = %q", result.Divergence.Message)
+	}
+	if result.Calculation == nil || result.Calculation.Grade != 2 {
+		t.Fatalf("calculation = %+v", result.Calculation)
+	}
+}
+
+func TestAnswerVariantLengthHeuristicWithoutSelfGradeDoesNotReschedule(t *testing.T) {
+	card := newCard()
+	card.UserID = "u1"
+	evaluator := &fakeEvaluator{result: review.VariantEvaluation{
+		Score:       100,
+		ScoringMode: review.ScoringModeLengthHeuristic,
+	}}
+	store := &fakeStore{cards: []*review.Card{card}}
+	svc := review.New(store, evaluator)
+
+	result, err := svc.AnswerVariant(context.Background(), "u1", card.ID, review.VariantAnswerInput{Answer: "回答"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Calculation != nil || result.Card.LastGrade != -1 || !result.Card.DueAt.Equal(card.DueAt) {
+		t.Fatalf("heuristic without self grade must not reschedule: %+v", result)
+	}
+	if result.Card.LastScoringMode != "" || result.Card.LastObjectiveScore != nil {
+		t.Fatalf("heuristic without self grade wrote card fields: %+v", result.Card)
+	}
+	if !strings.Contains(result.Message, "未填写自评") {
+		t.Fatalf("message = %q", result.Message)
+	}
+}
+
+func TestAnswerVariantUnknownModeFallsBackToLengthHeuristic(t *testing.T) {
+	now := time.Date(2026, 11, 6, 10, 0, 0, 0, time.UTC)
+	card := newCard()
+	card.UserID = "u1"
+	// An evaluator that does not label its source must never be treated as
+	// objective.
+	evaluator := &fakeEvaluator{result: review.VariantEvaluation{Score: 100}}
+	store := &fakeStore{cards: []*review.Card{card}}
+	svc := review.New(store, evaluator)
+	svc.SetClock(func() time.Time { return now })
+
+	self := 2
+	result, err := svc.AnswerVariant(context.Background(), "u1", card.ID, review.VariantAnswerInput{
+		Answer:    "回答",
+		SelfGrade: &self,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ScoringMode != review.ScoringModeLengthHeuristic {
+		t.Fatalf("unlabeled mode = %q", result.ScoringMode)
+	}
+	if result.Card.LastGrade != 2 || result.Card.LastObjectiveScore != nil {
+		t.Fatalf("unlabeled mode must not drive SM-2 from the score: %+v", result.Card)
+	}
+}
+
+func TestAnswerVariantModeSwitchKeepsPreviousObjectiveData(t *testing.T) {
+	now := time.Date(2026, 11, 6, 10, 0, 0, 0, time.UTC)
+	card := newCard()
+	card.UserID = "u1"
+	// Data written by a real-model run must survive later heuristic runs.
+	score, band := 80, 3
+	divergence := 2
+	card.LastObjectiveScore = &score
+	card.LastObjectiveBand = &band
+	card.LastDivergence = &divergence
+	card.LastScoringMode = review.ScoringModeObjective
+	evaluator := &fakeEvaluator{result: review.VariantEvaluation{
+		Score:       30,
+		ScoringMode: review.ScoringModeLengthHeuristic,
+	}}
+	store := &fakeStore{cards: []*review.Card{card}}
+	svc := review.New(store, evaluator)
+	svc.SetClock(func() time.Time { return now })
+
+	self := 4
+	result, err := svc.AnswerVariant(context.Background(), "u1", card.ID, review.VariantAnswerInput{
+		Answer:    "回答",
+		SelfGrade: &self,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Card.LastObjectiveScore == nil || *result.Card.LastObjectiveScore != 80 ||
+		result.Card.LastObjectiveBand == nil || *result.Card.LastObjectiveBand != 3 {
+		t.Fatalf("historical objective data was relabelled: %+v", result.Card)
+	}
+	if result.Card.LastScoringMode != review.ScoringModeLengthHeuristic {
+		t.Fatalf("mode = %q", result.Card.LastScoringMode)
+	}
+	if result.Card.LastDivergence != nil {
+		t.Fatalf("heuristic hint must not overwrite the objective divergence record: %v", result.Card.LastDivergence)
+	}
+	if result.Card.LastGrade != 4 || result.Card.LastSelfGrade == nil || *result.Card.LastSelfGrade != 4 {
+		t.Fatalf("heuristic run must schedule by self grade: %+v", result.Card)
 	}
 }
 
@@ -377,7 +563,11 @@ func TestAnswerVariantDegradedDoesNotReschedule(t *testing.T) {
 	now := time.Date(2026, 11, 6, 10, 0, 0, 0, time.UTC)
 	card := newCard()
 	card.UserID = "u1"
-	evaluator := &fakeEvaluator{result: review.VariantEvaluation{Degraded: true, ErrorCode: "model_output_invalid"}}
+	evaluator := &fakeEvaluator{result: review.VariantEvaluation{
+		Degraded:    true,
+		ErrorCode:   "model_output_invalid",
+		ScoringMode: review.ScoringModeObjective,
+	}}
 	store := &fakeStore{cards: []*review.Card{card}}
 	svc := review.New(store, evaluator)
 	svc.SetClock(func() time.Time { return now })

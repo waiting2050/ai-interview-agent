@@ -20,6 +20,26 @@ const DefaultTZOffsetMinutes = 480
 // REVIEW_DAILY_LIMIT configures another value.
 const DefaultDailyLimit = 20
 
+// Scoring modes reported by the variant-answer endpoint.
+const (
+	// ScoringModeObjective means a real model produced the score, and the
+	// objective grade drives SM-2.
+	ScoringModeObjective = "objective"
+	// ScoringModeLengthHeuristic means the heuristic fallback produced a
+	// length-based reference score. It never drives SM-2.
+	ScoringModeLengthHeuristic = "length_heuristic"
+	// ScoringModeSelfOnly means no evaluation chain is wired; only the self
+	// grade can drive SM-2.
+	ScoringModeSelfOnly = "self_only"
+)
+
+// Human-readable notes surfaced by the API and the demo panel.
+const (
+	ScoringNoteObjective       = "真实模型客观评分，客观分决定本次 SM-2 间隔"
+	ScoringNoteLengthHeuristic = "当前未配置模型，本题评分仅按答案长度估算，仅供参考；本次排程按你的自评"
+	ScoringNoteSelfOnly        = "当前未启用评估链路，本次仅按自评排程"
+)
+
 // Store persists review cards. Implementations live in internal/store.
 type Store interface {
 	SaveMany(ctx context.Context, cards []*Card) error
@@ -42,7 +62,7 @@ type VariantEvaluationInput struct {
 	Rubric         evaluation.Rubric
 }
 
-// VariantEvaluation is the objective result of one variant answer.
+// VariantEvaluation is the result of one variant answer.
 type VariantEvaluation struct {
 	Score         float64
 	MissingPoints []string
@@ -50,6 +70,9 @@ type VariantEvaluation struct {
 	ErrorCode     string
 	ModelName     string
 	PromptVersion string
+	// ScoringMode tells the service whether a real model or the heuristic
+	// fallback produced this score.
+	ScoringMode string
 }
 
 // VariantEvaluator evaluates one variant answer. Production injects the
@@ -121,7 +144,11 @@ type VariantAnswerResult struct {
 	Objective   ObjectiveResult `json:"objective"`
 	SelfGrade   *int            `json:"self_grade,omitempty"`
 	Divergence  *Divergence     `json:"divergence,omitempty"`
-	Message     string          `json:"message"`
+	// ScoringMode is objective | length_heuristic | self_only.
+	ScoringMode string `json:"scoring_mode"`
+	// ScoringNote is the user-facing sentence shown by the review panel.
+	ScoringNote string `json:"scoring_note"`
+	Message     string `json:"message"`
 }
 
 // Service exposes the deterministic review workflow.
@@ -132,8 +159,8 @@ type Service struct {
 	dailyLimit int
 }
 
-// New wires the service. An optional evaluator enables objective variant
-// scoring; without one, AnswerVariant returns ErrEvaluatorUnavailable.
+// New wires the service. An optional evaluator enables variant scoring; when
+// it is absent the endpoint still works in self_only mode.
 func New(store Store, evaluators ...VariantEvaluator) *Service {
 	s := &Service{
 		store:      store,
@@ -278,9 +305,11 @@ func (s *Service) Variant(ctx context.Context, userID, id string) (*Variant, err
 	return &result, nil
 }
 
-// AnswerVariant evaluates one variant answer through the injected chain. The
-// objective score decides the SM-2 grade; the self grade is recorded only as
-// a reference signal and never drives the schedule.
+// AnswerVariant scores one variant answer and applies the appropriate schedule.
+//
+// Only objective mode (a real model) lets the score drive SM-2. Length
+// heuristic mode returns a reference score for comparison only and schedules
+// from the self grade. Self-only mode does the same without any score.
 func (s *Service) AnswerVariant(ctx context.Context, userID, id string, in VariantAnswerInput) (*VariantAnswerResult, error) {
 	card, err := s.Get(ctx, userID, id)
 	if err != nil {
@@ -293,11 +322,25 @@ func (s *Service) AnswerVariant(ctx context.Context, userID, id string, in Varia
 	if in.SelfGrade != nil && (*in.SelfGrade < 0 || *in.SelfGrade > 5) {
 		return nil, fmt.Errorf("%w: %d", ErrInvalidGrade, *in.SelfGrade)
 	}
-	if s.evaluator == nil {
-		return nil, ErrEvaluatorUnavailable
-	}
 
 	variant := BuildVariant(card)
+	result := &VariantAnswerResult{
+		Card:      card,
+		Variant:   variant,
+		SelfGrade: in.SelfGrade,
+	}
+
+	// No evaluation chain at all: self_only.
+	if s.evaluator == nil {
+		result.ScoringMode = ScoringModeSelfOnly
+		result.ScoringNote = ScoringNoteSelfOnly
+		if in.SelfGrade == nil {
+			result.Message = "当前未启用评估链路，且未填写自评；本次不更新排程"
+			return result, nil
+		}
+		return s.applySelfGrade(ctx, result, card, *in.SelfGrade, ScoringModeSelfOnly)
+	}
+
 	out, err := s.evaluator.EvaluateVariant(ctx, VariantEvaluationInput{
 		CardID:         card.ID,
 		Topic:          card.Topic,
@@ -310,27 +353,37 @@ func (s *Service) AnswerVariant(ctx context.Context, userID, id string, in Varia
 		return nil, fmt.Errorf("evaluate variant answer: %w", err)
 	}
 
+	mode := normalizeScoringMode(out.ScoringMode)
+	result.ScoringMode = mode
+	result.ScoringNote = scoringNote(mode)
 	score := clampScore(out.Score)
-	result := &VariantAnswerResult{
-		Card:      card,
-		Variant:   variant,
-		SelfGrade: in.SelfGrade,
-		Objective: ObjectiveResult{
-			Score:         score,
-			Band:          evaluation.Band(score),
-			Grade:         ObjectiveGrade(score),
-			MissingPoints: append([]string(nil), out.MissingPoints...),
-			Degraded:      out.Degraded,
-			ErrorCode:     out.ErrorCode,
-			ModelName:     out.ModelName,
-			PromptVersion: out.PromptVersion,
-		},
+	result.Objective = ObjectiveResult{
+		Score:         score,
+		Band:          evaluation.Band(score),
+		Grade:         ObjectiveGrade(score),
+		MissingPoints: append([]string(nil), out.MissingPoints...),
+		Degraded:      out.Degraded,
+		ErrorCode:     out.ErrorCode,
+		ModelName:     out.ModelName,
+		PromptVersion: out.PromptVersion,
 	}
 	if out.Degraded {
 		result.Message = "评估降级，本次不更新排程；请稍后重试"
 		return result, nil
 	}
 
+	// length_heuristic: the score is a reference signal only.
+	if mode != ScoringModeObjective {
+		if in.SelfGrade == nil {
+			result.Message = "长度启发式评分仅供参考；未填写自评，本次不更新排程"
+			return result, nil
+		}
+		result.Divergence = buildHeuristicDivergence(*in.SelfGrade, result.Objective)
+		result.Message = result.Divergence.Message
+		return s.applySelfGrade(ctx, result, card, *in.SelfGrade, mode)
+	}
+
+	// objective: the objective grade drives SM-2.
 	updated, calc, err := GradeCard(card, result.Objective.Grade, s.now().UTC())
 	if err != nil {
 		return nil, err
@@ -339,6 +392,7 @@ func (s *Service) AnswerVariant(ctx context.Context, userID, id string, in Varia
 	band := result.Objective.Band
 	updated.LastObjectiveScore = &scoreInt
 	updated.LastObjectiveBand = &band
+	updated.LastScoringMode = ScoringModeObjective
 	if in.SelfGrade != nil {
 		self := *in.SelfGrade
 		delta := self - result.Objective.Grade
@@ -351,14 +405,82 @@ func (s *Service) AnswerVariant(ctx context.Context, userID, id string, in Varia
 		updated.LastDivergence = nil
 		result.Message = "未填写自评；本次由客观分决定排程"
 	}
-	if s.store != nil {
-		if err := s.store.Update(ctx, updated); err != nil {
-			return nil, fmt.Errorf("update review card: %w", err)
-		}
+	if err := s.persist(ctx, updated); err != nil {
+		return nil, err
 	}
 	result.Card = updated
 	result.Calculation = &calc
 	return result, nil
+}
+
+// applySelfGrade schedules from the self grade without touching the objective
+// columns, so older real-model data is never relabelled by a heuristic run.
+func (s *Service) applySelfGrade(ctx context.Context, result *VariantAnswerResult, card *Card, self int, mode string) (*VariantAnswerResult, error) {
+	updated, calc, err := GradeCard(card, self, s.now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	updated.LastSelfGrade = &self
+	updated.LastScoringMode = mode
+	// The heuristic gap is a transient hint, not an objective-vs-self record.
+	updated.LastDivergence = nil
+	if err := s.persist(ctx, updated); err != nil {
+		return nil, err
+	}
+	result.Card = updated
+	result.Calculation = &calc
+	if result.Message == "" {
+		if mode == ScoringModeSelfOnly {
+			result.Message = ScoringNoteSelfOnly
+		} else {
+			result.Message = "长度启发式仅供参考；本次排程按自评"
+		}
+	}
+	return result, nil
+}
+
+func (s *Service) persist(ctx context.Context, card *Card) error {
+	if s.store == nil {
+		return nil
+	}
+	if err := s.store.Update(ctx, card); err != nil {
+		return fmt.Errorf("update review card: %w", err)
+	}
+	return nil
+}
+
+func normalizeScoringMode(mode string) string {
+	switch mode {
+	case ScoringModeObjective:
+		return ScoringModeObjective
+	case ScoringModeLengthHeuristic:
+		return ScoringModeLengthHeuristic
+	default:
+		// Never overclaim objective scoring.
+		return ScoringModeLengthHeuristic
+	}
+}
+
+func scoringNote(mode string) string {
+	if mode == ScoringModeObjective {
+		return ScoringNoteObjective
+	}
+	return ScoringNoteLengthHeuristic
+}
+
+// buildHeuristicDivergence reports the gap without concluding over/under
+// estimation, because length-based scoring cannot support that claim.
+func buildHeuristicDivergence(self int, reference ObjectiveResult) *Divergence {
+	delta := self - reference.Grade
+	div := &Divergence{Delta: delta}
+	if delta >= 2 || delta <= -2 {
+		div.Message = fmt.Sprintf("自评 %d 与长度估算 %.1f 分（band %d）差异较大；长度估算仅供参考，本次排程按自评",
+			self, reference.Score, reference.Band)
+	} else {
+		div.Message = fmt.Sprintf("自评 %d 与长度估算 %.1f 分（band %d）接近；长度估算仅供参考，本次排程按自评",
+			self, reference.Score, reference.Band)
+	}
+	return div
 }
 
 func buildDivergence(self int, objective ObjectiveResult) *Divergence {

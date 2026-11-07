@@ -186,7 +186,7 @@ func run() error {
 	}
 	cancelRatePing()
 
-	reviewer := review.New(store.Repos().Reviews, app.NewReviewEvaluator(evaluator))
+	reviewer := review.New(store.Repos().Reviews, app.NewReviewEvaluator(evaluator, !provider.Fallback))
 	reviewer.SetDailyLimit(cfg.ReviewDailyLimit)
 
 	srv := &http.Server{

@@ -17,7 +17,7 @@ type reviewRepository struct{ q querier }
 
 const reviewColumns = `id, user_id, session_id, turn_id, topic, question, answer_digest, key_points,
 	dimension, source_score, key_topic, last_objective_score, last_objective_band,
-	last_self_grade, last_divergence, ease_factor, interval_days, repetitions, due_at, last_grade,
+	last_self_grade, last_divergence, last_scoring_mode, ease_factor, interval_days, repetitions, due_at, last_grade,
 	last_reviewed_at, last_calculation, created_at, updated_at`
 
 func (r *reviewRepository) SaveMany(ctx context.Context, cards []*review.Card) error {
@@ -32,12 +32,12 @@ func (r *reviewRepository) SaveMany(ctx context.Context, cards []*review.Card) e
 		}
 		_, err = r.q.Exec(ctx, `
 			INSERT INTO review_cards (`+reviewColumns+`)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
 			ON CONFLICT (session_id, turn_id, topic) DO NOTHING`,
 			card.ID, card.UserID, card.SessionID, card.TurnID, card.Topic, card.Question, card.AnswerDigest,
 			string(keyPoints), card.Dimension, card.SourceScore, card.KeyTopic,
 			nullableInt(card.LastObjectiveScore), nullableInt(card.LastObjectiveBand),
-			nullableInt(card.LastSelfGrade), nullableInt(card.LastDivergence),
+			nullableInt(card.LastSelfGrade), nullableInt(card.LastDivergence), card.LastScoringMode,
 			card.EaseFactor, card.IntervalDays, card.Repetitions, card.DueAt, card.LastGrade,
 			card.LastReviewedAt, string(calc), card.CreatedAt, card.UpdatedAt)
 		if err != nil {
@@ -99,14 +99,14 @@ func (r *reviewRepository) Update(ctx context.Context, card *review.Card) error 
 			key_points = $1, ease_factor = $2, interval_days = $3, repetitions = $4,
 			due_at = $5, last_grade = $6, last_reviewed_at = $7, last_calculation = $8,
 			last_objective_score = $9, last_objective_band = $10,
-			last_self_grade = $11, last_divergence = $12,
-			updated_at = $13
-		WHERE id = $14`,
+			last_self_grade = $11, last_divergence = $12, last_scoring_mode = $13,
+			updated_at = $14
+		WHERE id = $15`,
 		string(keyPoints), card.EaseFactor, card.IntervalDays, card.Repetitions,
 		card.DueAt, card.LastGrade, card.LastReviewedAt, string(calc),
 		nullableInt(card.LastObjectiveScore), nullableInt(card.LastObjectiveBand),
 		nullableInt(card.LastSelfGrade), nullableInt(card.LastDivergence),
-		card.UpdatedAt, card.ID)
+		card.LastScoringMode, card.UpdatedAt, card.ID)
 	if err != nil {
 		return fmt.Errorf("update review card: %w", err)
 	}
@@ -141,10 +141,11 @@ func scanReviewCard(row rowScanner) (*review.Card, error) {
 		objBand    pgtype.Int4
 		selfGrade  pgtype.Int4
 		divergence pgtype.Int4
+		scoring    pgtype.Text
 	)
 	if err := row.Scan(&card.ID, &card.UserID, &card.SessionID, &card.TurnID, &card.Topic, &card.Question,
 		&card.AnswerDigest, &keyPoints, &card.Dimension, &card.SourceScore, &card.KeyTopic,
-		&objScore, &objBand, &selfGrade, &divergence,
+		&objScore, &objBand, &selfGrade, &divergence, &scoring,
 		&card.EaseFactor, &card.IntervalDays, &card.Repetitions, &card.DueAt, &card.LastGrade,
 		&lastReview, &calc, &card.CreatedAt, &card.UpdatedAt); err != nil {
 		return nil, err
@@ -171,6 +172,9 @@ func scanReviewCard(row rowScanner) (*review.Card, error) {
 	if divergence.Valid {
 		v := int(divergence.Int32)
 		card.LastDivergence = &v
+	}
+	if scoring.Valid {
+		card.LastScoringMode = scoring.String
 	}
 	if len(calc) > 0 && card.LastGrade >= 0 {
 		var parsed review.Calculation
