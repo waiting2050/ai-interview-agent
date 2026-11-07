@@ -23,6 +23,70 @@ const jdTestResume = `3 年 Go 后端经验。
 - 负责订单履约与库存链路，用 Redis 缓存热点数据
 `
 
+func TestJDAnalyzeExposesWeakSkillChecks(t *testing.T) {
+	srv, _, _ := newTestRouter(t)
+	const jdText = `岗位：后端开发
+任职要求
+1. 熟悉 Kafka`
+	const resumeText = `技能：消息队列、MQ 使用经验`
+	resp, err := http.Post(srv.URL+"/v1/jd/analyze", "application/json",
+		strings.NewReader(`{"text":`+jsonString(jdText)+`,"resume_text":`+jsonString(resumeText)+`}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	var out struct {
+		Match struct {
+			WeakKeywords []string `json:"weak_keywords"`
+			SkillChecks  []struct {
+				Skill   string `json:"skill"`
+				Status  string `json:"status"`
+				Matched string `json:"matched"`
+				Source  string `json:"source"`
+			} `json:"skill_checks"`
+		} `json:"match"`
+		Gaps struct {
+			WeakSkills []struct {
+				Skill string `json:"skill"`
+			} `json:"weak_skills"`
+		} `json:"gaps"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatal(err)
+	}
+	if !containsString(out.Match.WeakKeywords, "Kafka") {
+		t.Fatalf("weak keywords = %v", out.Match.WeakKeywords)
+	}
+	found := false
+	for _, check := range out.Match.SkillChecks {
+		if check.Skill != "Kafka" {
+			continue
+		}
+		found = true
+		if check.Status != "weak" || check.Source != "parent" || check.Matched != "消息队列" {
+			t.Fatalf("check = %+v", check)
+		}
+	}
+	if !found {
+		t.Fatalf("Kafka check missing: %+v", out.Match.SkillChecks)
+	}
+	if len(out.Gaps.WeakSkills) != 1 || out.Gaps.WeakSkills[0].Skill != "Kafka" {
+		t.Fatalf("weak skills = %+v", out.Gaps.WeakSkills)
+	}
+}
+
+func containsString(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestJDAnalyzeGetAndKit(t *testing.T) {
 	srv, _, _ := newTestRouter(t)
 

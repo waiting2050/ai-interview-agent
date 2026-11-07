@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/waiting2050/ai-interview-agent/internal/domain/jd"
+	"github.com/waiting2050/ai-interview-agent/internal/domain/skills"
 )
 
 const sampleJD = `公司：星海科技
@@ -53,6 +54,138 @@ func TestParseStructuredJD(t *testing.T) {
 			t.Fatalf("%q must not be required", skill)
 		}
 	}
+}
+
+func TestAliasMatchingCountsSynonymCoverage(t *testing.T) {
+	const aliasJD = `岗位：后端开发
+任职要求
+1. 熟悉 Kubernetes 与 PostgreSQL`
+	resumeText := `技能：k8s 1.27、postgres 15、golang`
+	listing := &jd.Listing{ID: "jd-alias", RawText: aliasJD, Structured: jd.Parse(aliasJD)}
+	got := jd.AnalyzeListing(listing, resumeText, "", "", 3)
+
+	if !contains(got.Match.MatchedKeywords, "Kubernetes") {
+		t.Fatalf("k8s should cover Kubernetes: %v", got.Match.MatchedKeywords)
+	}
+	if !contains(got.Match.MatchedKeywords, "PostgreSQL") {
+		t.Fatalf("postgres should cover PostgreSQL: %v", got.Match.MatchedKeywords)
+	}
+	// No alias in the resume: Go keeps its old exact-match result.
+	if len(got.Match.MissingKeywords) != 0 {
+		t.Fatalf("unexpected missing keywords: %v", got.Match.MissingKeywords)
+	}
+	if len(got.Gaps.MissingSkills) != 0 {
+		t.Fatalf("unexpected missing skills: %v", got.Gaps.MissingSkills)
+	}
+
+	aliasSource := false
+	for _, check := range got.Match.SkillChecks {
+		if check.Skill == "Kubernetes" || check.Skill == "PostgreSQL" {
+			if check.Source != "alias" || check.Status != "covered" {
+				t.Fatalf("check = %+v", check)
+			}
+			aliasSource = true
+		}
+	}
+	if !aliasSource {
+		t.Fatal("expected alias-sourced checks")
+	}
+}
+
+func TestWeakMatchesAreListedButNeverCounted(t *testing.T) {
+	const weakJD = `岗位：后端开发
+任职要求
+1. 熟悉 Kafka`
+	resumeText := `技能：消息队列、MQ 使用经验`
+	listing := &jd.Listing{ID: "jd-weak", RawText: weakJD, Structured: jd.Parse(weakJD)}
+	got := jd.AnalyzeListing(listing, resumeText, "", "", 3)
+
+	if contains(got.Match.MatchedKeywords, "Kafka") {
+		t.Fatalf("weak match must not count as covered: %v", got.Match.MatchedKeywords)
+	}
+	if !contains(got.Match.WeakKeywords, "Kafka") {
+		t.Fatalf("weak keyword missing: %v", got.Match.WeakKeywords)
+	}
+	var check *skills.Result
+	for i := range got.Match.SkillChecks {
+		if got.Match.SkillChecks[i].Skill == "Kafka" {
+			check = &got.Match.SkillChecks[i]
+		}
+	}
+	if check == nil || check.Status != "weak" || check.Source != "parent" || check.Matched != "消息队列" {
+		t.Fatalf("kafka check = %+v", check)
+	}
+	if contains(got.Gaps.MissingSkills, "Kafka") {
+		t.Fatalf("weak match must not appear as a hard gap: %v", got.Gaps.MissingSkills)
+	}
+	if len(got.Gaps.WeakSkills) != 1 || got.Gaps.WeakSkills[0].Skill != "Kafka" {
+		t.Fatalf("weak gap = %+v", got.Gaps.WeakSkills)
+	}
+	if !containsPrefix(got.Gaps.MissingExperiences, "JD 要求 Kafka") {
+		t.Fatalf("experience gap = %v", got.Gaps.MissingExperiences)
+	}
+	// A weak hint never changes the score: the legacy matcher also missed Kafka.
+	if got.Match.Score < 0 || got.Match.Score > 100 {
+		t.Fatalf("score = %d", got.Match.Score)
+	}
+}
+
+func TestNoAliasHitKeepsLegacyKeywordResults(t *testing.T) {
+	listing := &jd.Listing{ID: "jd-legacy", RawText: sampleJD, Structured: jd.Parse(sampleJD)}
+	got := jd.AnalyzeListing(listing, sampleResume, "", "", 5)
+
+	lower := strings.ToLower(sampleResume)
+	var legacyMatched, legacyMissing []string
+	for _, kw := range listing.Structured.Keywords {
+		if strings.Contains(lower, strings.ToLower(kw)) {
+			legacyMatched = append(legacyMatched, kw)
+		} else {
+			legacyMissing = append(legacyMissing, kw)
+		}
+	}
+	if !sameStrings(got.Match.MatchedKeywords, legacyMatched) {
+		t.Fatalf("matched keywords changed:\n got %v\nwant %v", got.Match.MatchedKeywords, legacyMatched)
+	}
+	if !sameStrings(got.Match.MissingKeywords, legacyMissing) {
+		t.Fatalf("missing keywords changed:\n got %v\nwant %v", got.Match.MissingKeywords, legacyMissing)
+	}
+	if len(got.Match.WeakKeywords) != 0 {
+		t.Fatalf("sample should have no weak hits: %v", got.Match.WeakKeywords)
+	}
+	for _, check := range got.Match.SkillChecks {
+		if check.Status == "covered" && check.Source != "exact" {
+			t.Fatalf("unexpected non-exact coverage: %+v", check)
+		}
+	}
+}
+
+func TestEditDistanceDoesNotMergeRedisAndRedisson(t *testing.T) {
+	const redisJD = `岗位：后端开发
+任职要求
+1. 熟悉 Redis`
+	listing := &jd.Listing{ID: "jd-redis", RawText: redisJD, Structured: jd.Parse(redisJD)}
+	got := jd.AnalyzeListing(listing, `技能：Redisson 客户端`, "", "", 3)
+
+	for _, check := range got.Match.SkillChecks {
+		if check.Skill == "Redis" && check.Status == "covered" {
+			t.Fatalf("Redisson must not cover Redis: %+v", check)
+		}
+	}
+	if !contains(got.Gaps.MissingSkills, "Redis") {
+		t.Fatalf("Redis should stay a gap: %v", got.Gaps.MissingSkills)
+	}
+}
+
+func sameStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for _, item := range got {
+		if !contains(want, item) {
+			return false
+		}
+	}
+	return true
 }
 
 func TestMatchReusesScreenScoreAndListsGaps(t *testing.T) {

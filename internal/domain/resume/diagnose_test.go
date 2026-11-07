@@ -5,6 +5,36 @@ import (
 	"testing"
 )
 
+func TestCoverageUsesSkillAliases(t *testing.T) {
+	diag := mustAnalyze(t, AnalyzeOptions{
+		Text:   "技能：k8s 1.27、postgres 15",
+		JDText: "任职要求：熟悉 Kubernetes 与 PostgreSQL",
+	})
+	coverage := componentScore(diag.ScreenScore, "JD 关键词覆盖")
+	if coverage != 100 {
+		t.Fatalf("coverage = %d, want 100 (aliases should match)", coverage)
+	}
+}
+
+func TestCoverageDoesNotMergeRedisAndRedisson(t *testing.T) {
+	diag := mustAnalyze(t, AnalyzeOptions{
+		Text:   "技能：Redisson 客户端",
+		JDText: "任职要求：熟悉 Redis",
+	})
+	if coverage := componentScore(diag.ScreenScore, "JD 关键词覆盖"); coverage != 0 {
+		t.Fatalf("coverage = %d, want 0", coverage)
+	}
+}
+
+func componentScore(breakdown ScoreBreakdown, name string) int {
+	for _, component := range breakdown.Components {
+		if component.Name == name {
+			return component.Score
+		}
+	}
+	return -1
+}
+
 func mustAnalyze(t *testing.T, opts AnalyzeOptions) Diagnosis {
 	t.Helper()
 	diag, err := DefaultAnalyzer().Analyze(opts)

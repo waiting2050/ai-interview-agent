@@ -1432,6 +1432,11 @@ button:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
 .jd-chip.matched { background: var(--ok-soft); color: var(--ok); }
 .jd-chip.missing { background: var(--danger-soft); color: var(--danger); }
 .jd-chip.nice { background: var(--warn-soft); color: var(--warn); }
+.jd-chip.weak { background: var(--warn-soft); color: var(--warn); border: 1px dashed var(--warn); }
+.jd-weak { display: inline-block; }
+.jd-weak summary { list-style: none; cursor: pointer; }
+.jd-weak summary::-webkit-details-marker { display: none; }
+.jd-weak-note { display: block; max-width: 280px; margin-top: 4px; padding: 5px 8px; border: 1px solid #e3e8f0; border-radius: 8px; background: var(--panel); color: var(--ink-soft); font-size: var(--text-xs); line-height: 1.5; }
 .jd-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: var(--space-4); margin-top: var(--space-4); align-items: start; }
 .jd-grid .jd-section { margin-top: 0; }
 .jd-outline { margin: 0; padding-left: 20px; }

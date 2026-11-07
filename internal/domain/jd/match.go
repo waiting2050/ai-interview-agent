@@ -7,6 +7,7 @@ import (
 
 	"github.com/waiting2050/ai-interview-agent/internal/domain/domainpack"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/resume"
+	"github.com/waiting2050/ai-interview-agent/internal/domain/skills"
 )
 
 // Match reuses the M12 screen_score calibration: it is computed by the same
@@ -16,15 +17,20 @@ type Match struct {
 	Score           int                     `json:"score"`
 	Components      []resume.ScoreComponent `json:"components"`
 	MatchedKeywords []string                `json:"matched_keywords"`
-	MissingKeywords []string                `json:"missing_keywords"`
-	Note            string                  `json:"note,omitempty"`
+	// WeakKeywords are synonym-family or related hints. They never enter the
+	// coverage numerator; they are listed so the UI can show "待确认".
+	WeakKeywords    []string        `json:"weak_keywords,omitempty"`
+	MissingKeywords []string        `json:"missing_keywords"`
+	SkillChecks     []skills.Result `json:"skill_checks,omitempty"`
+	Note            string          `json:"note,omitempty"`
 }
 
 // Gap is the actionable difference between the JD and this resume.
 type Gap struct {
-	MissingKeywords    []string `json:"missing_keywords"`
-	MissingSkills      []string `json:"missing_skills"`
-	MissingExperiences []string `json:"missing_experiences"`
+	MissingKeywords    []string        `json:"missing_keywords"`
+	WeakSkills         []skills.Result `json:"weak_skills,omitempty"`
+	MissingSkills      []string        `json:"missing_skills"`
+	MissingExperiences []string        `json:"missing_experiences"`
 }
 
 // OutlineItem is one interview topic generated for this JD.
@@ -106,39 +112,62 @@ func matchResume(listing *Listing, resumeText string) (Match, Gap) {
 		}, Gap{}
 	}
 
-	matched, missing := splitKeywords(resumeText, listing.Structured.Keywords)
+	matched, weak, missing, checks := evaluateKeywords(resumeText, listing.Structured.Keywords)
 	return Match{
 		Available:       true,
 		Score:           diag.ScreenScore.Score,
 		Components:      diag.ScreenScore.Components,
 		MatchedKeywords: matched,
+		WeakKeywords:    weak,
 		MissingKeywords: missing,
+		SkillChecks:     checks,
 		Note:            "匹配度复用简历诊断的 screen_score 口径（JD 覆盖 40 / 技术密度 20 / 岗位匹配 20 / 结构 20）",
-	}, buildGap(listing, resumeText, missing)
+	}, buildGap(listing, resumeText, missing, checks)
 }
 
-func splitKeywords(resumeText string, keywords []string) (matched, missing []string) {
-	lower := strings.ToLower(resumeText)
+// evaluateKeywords applies the rule ladder (exact, alias, hierarchy, fuzzy)
+// per keyword. Weak hints are kept separate and never counted as coverage.
+func evaluateKeywords(resumeText string, keywords []string) (matched, weak, missing []string, checks []skills.Result) {
 	for _, kw := range keywords {
-		if strings.Contains(lower, strings.ToLower(kw)) {
+		check := skills.Check(resumeText, kw)
+		checks = append(checks, check)
+		switch check.Status {
+		case skills.StatusCovered:
 			matched = append(matched, kw)
-			continue
+		case skills.StatusWeak:
+			weak = append(weak, kw)
+		default:
+			missing = append(missing, kw)
 		}
-		missing = append(missing, kw)
 	}
-	return matched, missing
+	return matched, weak, missing, checks
 }
 
-func buildGap(listing *Listing, resumeText string, missingKeywords []string) Gap {
+func buildGap(listing *Listing, resumeText string, missingKeywords []string, checks []skills.Result) Gap {
 	gap := Gap{MissingKeywords: missingKeywords}
 
+	bySkill := make(map[string]skills.Result, len(checks))
+	for _, check := range checks {
+		bySkill[strings.ToLower(check.Skill)] = check
+	}
+
 	for _, skill := range listing.Structured.RequiredSkills {
-		if skillPresent(resumeText, skill) {
-			continue
+		check, ok := bySkill[strings.ToLower(skill)]
+		if !ok {
+			check = skills.Check(resumeText, skill)
+			bySkill[strings.ToLower(skill)] = check
 		}
-		gap.MissingSkills = append(gap.MissingSkills, skill)
-		gap.MissingExperiences = append(gap.MissingExperiences,
-			fmt.Sprintf("简历未体现 %s 相关项目经历", skill))
+		switch check.Status {
+		case skills.StatusCovered:
+			continue
+		case skills.StatusWeak:
+			gap.WeakSkills = append(gap.WeakSkills, check)
+			gap.MissingExperiences = append(gap.MissingExperiences, weakGapText(check))
+		default:
+			gap.MissingSkills = append(gap.MissingSkills, skill)
+			gap.MissingExperiences = append(gap.MissingExperiences,
+				fmt.Sprintf("简历未体现 %s 相关项目经历", skill))
+		}
 	}
 
 	if listing.Structured.MinYears > 0 {
@@ -153,6 +182,21 @@ func buildGap(listing *Listing, resumeText string, missingKeywords []string) Gap
 		gap.MissingExperiences = gap.MissingExperiences[:8]
 	}
 	return gap
+}
+
+// weakGapText explains a hint without concluding that the skill is missing.
+func weakGapText(check skills.Result) string {
+	relation := map[string]string{
+		skills.SourceChild:   "下位技能",
+		skills.SourceParent:  "上位技能",
+		skills.SourceSibling: "同族技能",
+		skills.SourceRelated: "相关技能",
+		skills.SourceFuzzy:   "近似写法",
+	}[check.Source]
+	if relation == "" {
+		relation = "相关技能"
+	}
+	return fmt.Sprintf("JD 要求 %s，简历仅命中%s %s，建议确认是否实际使用过", check.Skill, relation, check.Matched)
 }
 
 // Outline selects the best matching domain pack and plans its topics for this

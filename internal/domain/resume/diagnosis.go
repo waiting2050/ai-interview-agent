@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/waiting2050/ai-interview-agent/internal/domain/skills"
 )
 
 var (
@@ -553,9 +555,8 @@ func buildAnalysisContext(text string, segments []*Segment, opts AnalyzeOptions)
 		}
 	}
 	ctx.keywords = selectKeywords(opts.JDText, opts.TargetRole)
-	lowerText := strings.ToLower(text)
 	for _, kw := range ctx.keywords {
-		if strings.Contains(lowerText, strings.ToLower(kw)) {
+		if skills.Covered(text, kw) {
 			ctx.matched = append(ctx.matched, kw)
 		} else {
 			ctx.missing = append(ctx.missing, kw)

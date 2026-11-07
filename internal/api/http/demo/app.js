@@ -2327,6 +2327,28 @@
     return items.map((item) => `<span class="jd-chip ${cls}">${escapeHtml(item)}</span>`).join("");
   }
 
+  // Weak matches stay clickable so the panel can name the canonical skill
+  // behind the hint without pretending the requirement is covered.
+  function jdWeakChips(checks) {
+    if (!Array.isArray(checks) || !checks.length) {
+      return "";
+    }
+    const relationLabel = {
+      child: "下位技能",
+      parent: "上位技能",
+      sibling: "同族技能",
+      related: "相关技能",
+      fuzzy: "近似写法",
+    };
+    return checks.map((check) => {
+      const relation = relationLabel[check.source] || "相关技能";
+      return `<details class="jd-weak">` +
+        `<summary class="jd-chip weak">${escapeHtml(check.skill)}</summary>` +
+        `<span class="jd-weak-note">命中 ${escapeHtml(check.matched || "未知")}（${relation}），待确认是否实际使用过</span>` +
+        `</details>`;
+    }).join("");
+  }
+
   function renderJDResult(result) {
     const box = $("jd-result");
     const structured = result.structured || {};
@@ -2347,9 +2369,28 @@
       ? (structured.max_years ? `${structured.min_years}–${structured.max_years} 年` : `${structured.min_years} 年以上`)
       : "年限未识别";
 
-    const matchedSet = new Set((match.matched_keywords || []).map((kw) => String(kw).toLowerCase()));
-    const requiredMatched = (structured.required_skills || []).filter((kw) => matchedSet.has(String(kw).toLowerCase()));
-    const requiredMissing = (structured.required_skills || []).filter((kw) => !matchedSet.has(String(kw).toLowerCase()));
+    const required = structured.required_skills || [];
+    const checks = Array.isArray(match.skill_checks) ? match.skill_checks : [];
+    const requiredChecks = [];
+    for (const skill of required) {
+      const found = checks.find((check) => String(check.skill).toLowerCase() === String(skill).toLowerCase());
+      if (found) {
+        requiredChecks.push(found);
+      }
+    }
+    let requiredMatched = [];
+    let requiredWeak = [];
+    let requiredMissing = [];
+    if (requiredChecks.length) {
+      requiredMatched = requiredChecks.filter((check) => check.status === "covered").map((check) => check.skill);
+      requiredWeak = requiredChecks.filter((check) => check.status === "weak");
+      requiredMissing = requiredChecks.filter((check) => check.status === "missing").map((check) => check.skill);
+    } else {
+      // Fallback for an older payload without skill_checks.
+      const matchedSet = new Set((match.matched_keywords || []).map((kw) => String(kw).toLowerCase()));
+      requiredMatched = required.filter((kw) => matchedSet.has(String(kw).toLowerCase()));
+      requiredMissing = required.filter((kw) => !matchedSet.has(String(kw).toLowerCase()));
+    }
 
     const outlineHtml = outline.map((item) => (
       `<li><b>${escapeHtml(item.topic)}</b> <span class="muted">· ${escapeHtml(item.difficulty)}</span>` +
@@ -2370,8 +2411,8 @@
       `</div></div>` +
       `<div class="jd-grid">` +
       `<div class="jd-section"><h4>技能覆盖</h4>` +
-      `<p class="muted">必备技能（红 = 简历未体现）</p>` +
-      `<div class="jd-chips">${jdChips(requiredMatched, "matched")}${jdChips(requiredMissing, "missing")}</div>` +
+      `<p class="muted">必备技能（绿 = 已覆盖 · 黄 = 弱匹配，点击查看 · 红 = 缺口）</p>` +
+      `<div class="jd-chips">${jdChips(requiredMatched, "matched")}${jdWeakChips(requiredWeak)}${jdChips(requiredMissing, "missing")}</div>` +
       `<p class="muted">加分项</p>` +
       `<div class="jd-chips">${jdChips(structured.nice_to_have, "nice")}</div></div>` +
       `<div class="jd-section"><h4>该 JD 的面试题纲（复用领域包 Plan）</h4><ol class="jd-outline">${outlineHtml}</ol></div>` +

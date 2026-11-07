@@ -253,14 +253,3 @@ func containsAny(haystack string, needles []string) bool {
 	}
 	return false
 }
-
-// skillPresent reports whether a canonical skill appears in text using the
-// same vocabulary rules as Parse, so matching and parsing never disagree.
-func skillPresent(text, canonical string) bool {
-	for _, rule := range skillVocab {
-		if rule.canonical == canonical {
-			return rule.pattern.MatchString(text)
-		}
-	}
-	return strings.Contains(strings.ToLower(text), strings.ToLower(canonical))
-}
