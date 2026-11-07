@@ -99,12 +99,12 @@ internal/api/http ──────► internal/app ──────► inter
 - `compose.NewGraph[I, O]` 组装「加载快照 → 评估 → 决策 → 生成问题」的有向图。
 - `compose.ChatTemplate` 组装 system / 历史摘要 / 当前问题 / 候选人答案。
 - `model.ChatModel`（`Generate` / `Stream`）做模型调用，测试时替换为假模型。
-- `ToolsNode` + 模型绑定工具 + 分支，用于报告阶段的「按需回查对话」。
 - `schema.Message` 只在 agent 层内部流转。
 
 **刻意不用**（MVP 阶段）：
 
 - eino 的 ADK / agentic 新抽象：API 仍在演进，学习成本高，且会把 Agent 生命周期锁进框架。
+- eino `ToolsNode` 自主工具循环：报告回查由代码固定执行 3 次只读调用，模型不绑定工具，调用次数可审计。
 - eino 的 interrupt/resume、checkpoint 做人类等待：面试的「等待作答」天然跨请求，框架级挂起会把长连接、事务、恢复三者耦合，难排障。
 - 预置的 ReAct Agent / 多 Agent 协作：本场景是单 Agent 有限状态循环，自己写状态机更可控。
 
