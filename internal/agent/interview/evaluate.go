@@ -110,7 +110,7 @@ func (e *Evaluator) Evaluate(ctx context.Context, in EvaluateInput) (Outcome, er
 			System:      system,
 			User:        user,
 			Temperature: e.temperature,
-			MaxTokens:   800,
+			MaxTokens:   2000,
 		}
 		if attempt > 1 {
 			req.User = user + "\n\n" + prompt.RepairMessage(issues)

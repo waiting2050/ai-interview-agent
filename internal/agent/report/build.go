@@ -3,6 +3,7 @@ package report
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -23,6 +24,10 @@ type Outcome struct {
 	Attempts      int
 	ModelName     string
 	PromptVersion string
+	// ValidationIssues lists every field-level problem found in the last
+	// attempt. Fatal issues cause degradation; warnings only fall back to
+	// deterministic values for the affected field.
+	ValidationIssues []string
 }
 
 // Generator is the seam the app depends on; tests inject stubs.
@@ -69,13 +74,14 @@ func (b *Builder) Generate(ctx context.Context, ev tools.Bundle) (Outcome, error
 	}
 	system := prompt.ReportSystem(dims...)
 	var issues []string
+	var lastIssues []string
 
 	for attempt := 1; attempt <= b.maxAttempts; attempt++ {
 		req := llm.Request{
 			System:      system,
 			User:        user,
 			Temperature: 0.3,
-			MaxTokens:   900,
+			MaxTokens:   1800,
 		}
 		if attempt > 1 {
 			req.User = user + "\n\n" + prompt.ReportRepairMessage(issues)
@@ -91,6 +97,7 @@ func (b *Builder) Generate(ctx context.Context, ev tools.Bundle) (Outcome, error
 			out.ErrorCode = ErrorCodeModelUnavailable
 			out.Report.Degraded = true
 			out.Report.ErrorCode = ErrorCodeModelUnavailable
+			out.Report.ErrorDetail = "model_unavailable: " + truncateRunes(err.Error(), 300)
 			out.Report.Sections = out.Report.RenderSections()
 			return out, nil
 		}
@@ -99,21 +106,29 @@ func (b *Builder) Generate(ctx context.Context, ev tools.Bundle) (Outcome, error
 		out.RawOutput = truncateRunes(resp.Text, 2000)
 		generated, parseErr := parseGenerated(resp.Text)
 		if parseErr != nil {
-			issues = []string{parseErr.Error()}
+			lastIssues = []string{parseErr.Error()}
+			issues = lastIssues
 			continue
 		}
-		issues = validateGenerated(generated, ev.Overview.Turns)
-		if len(issues) == 0 {
+		fatal, warnings := validateGenerated(generated, ev.Overview.Turns)
+		lastIssues = append(issueStrings(fatal), issueStrings(warnings)...)
+		if len(fatal) == 0 {
+			out.ValidationIssues = lastIssues
 			out.Report = merge(base, generated, ev)
 			out.Report.Sections = out.Report.RenderSections()
 			return out, nil
 		}
+		issues = issueStrings(fatal)
 	}
 
 	out.Degraded = true
 	out.ErrorCode = ErrorCodeOutputInvalid
 	out.Report.Degraded = true
 	out.Report.ErrorCode = ErrorCodeOutputInvalid
+	if len(lastIssues) > 0 {
+		out.Report.ErrorDetail = truncateRunes(strings.Join(lastIssues, "; "), 600)
+	}
+	out.ValidationIssues = lastIssues
 	out.Report.Sections = out.Report.RenderSections()
 	return out, nil
 }
@@ -131,59 +146,229 @@ type generated struct {
 	NextSteps    []string `json:"next_steps"`
 }
 
+// fieldIssue names the exact JSON path and expected type so a degraded report
+// can be diagnosed from logs without replaying the model call.
+type fieldIssue struct {
+	Path     string
+	Expected string
+	Detail   string
+}
+
+func (i fieldIssue) String() string {
+	if i.Expected == "" {
+		return fmt.Sprintf("%s: %s", i.Path, i.Detail)
+	}
+	return fmt.Sprintf("%s (期望 %s): %s", i.Path, i.Expected, i.Detail)
+}
+
+func issueStrings(in []fieldIssue) []string {
+	out := make([]string, 0, len(in))
+	for _, issue := range in {
+		out = append(out, issue.String())
+	}
+	return out
+}
+
 func parseGenerated(raw string) (*generated, error) {
-	text := strings.TrimSpace(raw)
-	if start, end := strings.Index(text, "{"), strings.LastIndex(text, "}"); start >= 0 && end > start {
-		text = text[start : end+1]
+	text, err := extractJSONObject(raw)
+	if err != nil {
+		return nil, err
 	}
 	var out generated
 	if err := json.Unmarshal([]byte(text), &out); err != nil {
-		return nil, fmt.Errorf("输出不是合法 JSON：%v", err)
+		var typeErr *json.UnmarshalTypeError
+		if errors.As(err, &typeErr) {
+			path := "$"
+			if typeErr.Field != "" {
+				path = "$." + typeErr.Field
+			}
+			if typeErr.Value == "object" || typeErr.Value == "array" {
+				return nil, fmt.Errorf("%s (期望 %s): 实际类型是 %s", path, typeErr.Type, typeErr.Value)
+			}
+			return nil, fmt.Errorf("%s (期望 %s): 类型不匹配", path, typeErr.Type)
+		}
+		return nil, fmt.Errorf("$ (期望 JSON 对象): %v", err)
 	}
 	return &out, nil
 }
 
-func validateGenerated(in *generated, turns []tools.TurnBrief) []string {
-	var issues []string
+// extractJSONObject tolerates the decorations models still emit: markdown
+// fences, prose before/after the object, and full-width structural punctuation.
+func extractJSONObject(raw string) (string, error) {
+	text := strings.TrimSpace(strings.TrimPrefix(raw, "\uFEFF"))
+	if start := strings.Index(text, "```"); start >= 0 {
+		rest := text[start+3:]
+		if nl := strings.IndexByte(rest, '\n'); nl >= 0 {
+			rest = rest[nl+1:]
+		}
+		if end := strings.LastIndex(rest, "```"); end >= 0 {
+			rest = rest[:end]
+		}
+		text = strings.TrimSpace(rest)
+	}
+	text = normalizeJSONPunct(text)
+	start := strings.IndexByte(text, '{')
+	if start < 0 {
+		return "", fmt.Errorf("$ (期望 JSON 对象): 输出中没有找到 {")
+	}
+	end, ok := matchingBrace(text, start)
+	if !ok {
+		return "", fmt.Errorf("$ (期望 JSON 对象): 花括号不匹配，输出可能在对象中途被截断")
+	}
+	return text[start : end+1], nil
+}
+
+// matchingBrace finds the closing brace for the object starting at start while
+// ignoring braces inside string literals.
+func matchingBrace(text string, start int) (int, bool) {
+	depth := 0
+	inString := false
+	escaped := false
+	for i := start; i < len(text); i++ {
+		c := text[i]
+		if inString {
+			switch {
+			case escaped:
+				escaped = false
+			case c == '\\':
+				escaped = true
+			case c == '"':
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return i, true
+			}
+		}
+	}
+	return 0, false
+}
+
+// normalizeJSONPunct converts full-width structural punctuation to ASCII. Only
+// characters outside ASCII string literals are rewritten, so Chinese prose
+// inside values keeps its original punctuation.
+func normalizeJSONPunct(text string) string {
+	var b strings.Builder
+	b.Grow(len(text))
+	inString := false
+	for _, r := range text {
+		if !inString {
+			switch r {
+			case '“':
+				b.WriteByte('"')
+				inString = true
+				continue
+			case '”':
+				b.WriteByte('"')
+				continue
+			case '：':
+				b.WriteByte(':')
+				continue
+			case '，':
+				b.WriteByte(',')
+				continue
+			case '；':
+				b.WriteByte(';')
+				continue
+			}
+			if r == '"' {
+				inString = true
+			}
+			b.WriteRune(r)
+			continue
+		}
+		if r == '"' || r == '”' {
+			inString = false
+		}
+		if r == '”' {
+			b.WriteByte('"')
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// validateGenerated splits problems into fatal and warning classes. Missing or
+// short commentary fields are warnings: merge keeps the deterministic fallback
+// for that field instead of degrading the whole report. Only structural errors
+// such as an unknown turn_id remain fatal.
+func validateGenerated(in *generated, turns []tools.TurnBrief) ([]fieldIssue, []fieldIssue) {
+	var fatal, warnings []fieldIssue
 	verdict := strings.TrimSpace(in.Verdict)
-	if n := len([]rune(verdict)); n < 20 || n > 800 {
-		issues = append(issues, fmt.Sprintf("verdict 长度应在 20-800 字，当前 %d", n))
+	switch {
+	case verdict == "":
+		warnings = append(warnings, fieldIssue{"verdict", "string, 120-260 字", "缺失，保留确定性总评"})
+	case len([]rune(verdict)) < 20 || len([]rune(verdict)) > 800:
+		warnings = append(warnings, fieldIssue{"verdict", "string, 20-800 字",
+			fmt.Sprintf("长度 %d，按原值截断或保留确定性总评", len([]rune(verdict)))})
 	}
 	if len(in.DimensionComments) == 0 {
-		issues = append(issues, "dimension_comments 不能为空")
+		warnings = append(warnings, fieldIssue{"dimension_comments", "object<string,string>", "缺失，保留确定性维度点评"})
 	}
+
 	known := map[string]bool{}
 	for _, turn := range turns {
 		known[turn.TurnID] = true
 	}
-	for _, q := range in.Questions {
+	for i, q := range in.Questions {
 		if !known[q.TurnID] {
-			issues = append(issues, fmt.Sprintf("questions 中出现未知 turn_id %q", q.TurnID))
+			fatal = append(fatal, fieldIssue{
+				fmt.Sprintf("questions[%d].turn_id", i),
+				"string, 必须来自 turn_summaries",
+				fmt.Sprintf("未知取值 %q", q.TurnID),
+			})
 			continue
 		}
-		if n := len([]rune(strings.TrimSpace(q.Comment))); n < 5 || n > 300 {
-			issues = append(issues, fmt.Sprintf("turn %s 的 comment 长度应在 5-300 字，当前 %d", q.TurnID, n))
+		comment := strings.TrimSpace(q.Comment)
+		if comment == "" {
+			warnings = append(warnings, fieldIssue{
+				fmt.Sprintf("questions[%d].comment", i),
+				"string, 20-80 字",
+				"缺失，保留确定性逐题点评",
+			})
+			continue
+		}
+		if n := len([]rune(comment)); n < 5 || n > 300 {
+			warnings = append(warnings, fieldIssue{
+				fmt.Sprintf("questions[%d].comment", i),
+				"string, 5-300 字",
+				fmt.Sprintf("长度 %d", n),
+			})
 		}
 	}
-	if len(in.Improvements) == 0 || len(in.Improvements) > 5 {
-		issues = append(issues, fmt.Sprintf("improvements 应有 1-5 条，当前 %d", len(in.Improvements)))
+	switch n := len(in.Improvements); {
+	case n == 0:
+		warnings = append(warnings, fieldIssue{"improvements", "string[], 1-5 条", "缺失，保留确定性改进项"})
+	case n > 5:
+		warnings = append(warnings, fieldIssue{"improvements", "string[], 1-5 条", fmt.Sprintf("条数 %d，仅取前 3 条", n)})
 	}
-	for i, point := range in.Improvements {
-		if n := len([]rune(strings.TrimSpace(point))); n < 5 || n > 160 {
-			issues = append(issues, fmt.Sprintf("improvements[%d] 长度应在 5-160 字，当前 %d", i, n))
-		}
+	if len(in.NextSteps) == 0 {
+		warnings = append(warnings, fieldIssue{"next_steps", "string[], 2-6 条", "缺失，保留确定性练习建议"})
 	}
-	if len(in.NextSteps) == 0 || len(in.NextSteps) > 6 {
-		issues = append(issues, fmt.Sprintf("next_steps 应有 1-6 条，当前 %d", len(in.NextSteps)))
+
+	if verdict == "" && len(in.DimensionComments) == 0 && len(in.Questions) == 0 {
+		fatal = append(fatal, fieldIssue{"$", "JSON 对象", "所有点评字段为空，视为无有效输出"})
 	}
-	return issues
+	return fatal, warnings
 }
 
 func merge(base domain.Report, in *generated, ev tools.Bundle) domain.Report {
 	out := base
 	out.Degraded = false
 	out.ErrorCode = ""
-	out.Verdict = strings.TrimSpace(in.Verdict)
+	out.ErrorDetail = ""
+	if verdict := strings.TrimSpace(in.Verdict); verdict != "" {
+		out.Verdict = truncateRunes(verdict, 800)
+	}
 
 	for i := range out.Dimensions {
 		if comment, ok := in.DimensionComments[out.Dimensions[i].Dimension]; ok {

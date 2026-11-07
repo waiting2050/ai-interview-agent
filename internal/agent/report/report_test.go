@@ -174,3 +174,116 @@ func TestFallbackIsDeterministic(t *testing.T) {
 		t.Fatalf("improvements = %+v", a.Improvements)
 	}
 }
+
+func generateScripted(t *testing.T, raw string) (reportagent.Outcome, error) {
+	t.Helper()
+	builder := reportagent.NewBuilder(llm.NewEinoClient(llm.Scripted("scripted", raw), "scripted"), "scripted")
+	return builder.Generate(context.Background(), bundle())
+}
+
+func TestGenerateStripsMarkdownFence(t *testing.T) {
+	out, err := generateScripted(t, "```json\n"+validJSON+"\n```")
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if out.Degraded || out.Report.Degraded {
+		t.Fatalf("fenced JSON should parse: %+v", out.ValidationIssues)
+	}
+	if !strings.Contains(out.Report.Verdict, "本次面试") {
+		t.Fatalf("verdict = %q", out.Report.Verdict)
+	}
+}
+
+func TestGenerateFillsMissingFieldsFromFallback(t *testing.T) {
+	raw := `{"verdict": "本次面试完成两道 Go 题目，GMP 调度讲得清楚，但内存模型相关细节明显不足。"}`
+	out, err := generateScripted(t, raw)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if out.Degraded || out.Report.Degraded {
+		t.Fatalf("missing optional fields should not degrade: %+v", out.ValidationIssues)
+	}
+	if len(out.Report.Improvements) != 3 || len(out.Report.NextSteps) < 2 {
+		t.Fatalf("fallback fields were not filled: %+v", out.Report)
+	}
+	if out.Report.Questions[0].Comment == "" || out.Report.Dimensions[0].Comment == "" {
+		t.Fatalf("deterministic comments missing: %+v", out.Report)
+	}
+	if !strings.Contains(out.Report.Verdict, "内存模型") {
+		t.Fatalf("model verdict was not kept: %q", out.Report.Verdict)
+	}
+}
+
+func TestGenerateIgnoresExtraFields(t *testing.T) {
+	raw := strings.Replace(validJSON, "{", `{"model_notes": {"version": 2}, "schema_version": 9,`, 1)
+	out, err := generateScripted(t, raw)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if out.Degraded {
+		t.Fatalf("extra fields should be ignored: %+v", out.ValidationIssues)
+	}
+	if !strings.Contains(out.Report.Verdict, "本次面试") {
+		t.Fatalf("verdict = %q", out.Report.Verdict)
+	}
+}
+
+func TestGenerateToleratesChinesePunctuation(t *testing.T) {
+	raw := `{“verdict”： “本次面试完成两道 Go 题目，总体基础扎实，GMP 调度讲得清楚，但内存模型细节不足。”，
+“dimension_comments”： {“correctness”： “结论基本正确，机制细节还需确认。”}，
+“improvements”： [“补齐内存模型机制细节”， “准备一个线上抢占场景”， “补充压测数据”]，
+“next_steps”： [“针对内存模型做专项练习并录音。”， “整理逐题自查清单。”]}`
+	out, err := generateScripted(t, raw)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if out.Degraded || out.Report.Degraded {
+		t.Fatalf("full-width punctuation should parse: %+v", out.ValidationIssues)
+	}
+	if !strings.Contains(out.Report.Verdict, "GMP") {
+		t.Fatalf("verdict = %q", out.Report.Verdict)
+	}
+}
+
+func TestGenerateExtractsJSONFromProse(t *testing.T) {
+	raw := "以下是报告，请查收：\n" + validJSON + "\n以上，如需调整请告诉我。"
+	out, err := generateScripted(t, raw)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if out.Degraded {
+		t.Fatalf("JSON wrapped in prose should parse: %+v", out.ValidationIssues)
+	}
+}
+
+func TestGenerateRejectsUnknownTurnIDWithFieldPath(t *testing.T) {
+	raw := strings.Replace(validJSON, `"turn_id": "t1"`, `"turn_id": "ghost"`, 1)
+	out, err := generateScripted(t, raw)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if !out.Degraded || out.ErrorCode != reportagent.ErrorCodeOutputInvalid {
+		t.Fatalf("outcome = %+v", out)
+	}
+	detail := strings.Join(out.ValidationIssues, "; ")
+	if !strings.Contains(detail, "questions[0].turn_id") || !strings.Contains(detail, "turn_summaries") {
+		t.Fatalf("missing field path detail: %q", detail)
+	}
+	if out.Report.ErrorDetail == "" {
+		t.Fatalf("report error detail is empty")
+	}
+}
+
+func TestGenerateReportsTypeMismatchPath(t *testing.T) {
+	out, err := generateScripted(t, `{"verdict": 123}`)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if !out.Degraded || out.ErrorCode != reportagent.ErrorCodeOutputInvalid {
+		t.Fatalf("outcome = %+v", out)
+	}
+	detail := strings.Join(out.ValidationIssues, "; ")
+	if !strings.Contains(detail, "verdict") || !strings.Contains(detail, "string") {
+		t.Fatalf("type mismatch path missing: %q", detail)
+	}
+}

@@ -29,7 +29,15 @@ const (
 	EnvMaxRetries   = "MODEL_MAX_RETRIES"
 )
 
-const defaultOpenAIModel = "gpt-4o-mini"
+// Defaults target DeepSeek's OpenAI-compatible endpoint. DeepSeek retired
+// deepseek-chat / deepseek-reasoner on 2026-07-24; deepseek-flash is the
+// current model id (the legacy deepseek-v4-flash alias still resolves but
+// points at the same V4.1-Flash model). OpenAI or other compatible services
+// must set OPENAI_BASE_URL and OPENAI_MODEL explicitly.
+const (
+	defaultOpenAIModel = "deepseek-flash"
+	defaultOpenAIBase  = "https://api.deepseek.com/v1"
+)
 
 // ProviderConfig is the resolved model selection. APIKey is never logged.
 type ProviderConfig struct {
@@ -65,6 +73,9 @@ func LoadProviderConfig() (ProviderConfig, error) {
 	}
 	if cfg.Model == "" {
 		cfg.Model = defaultOpenAIModel
+	}
+	if cfg.BaseURL == "" {
+		cfg.BaseURL = defaultOpenAIBase
 	}
 	if cfg.Provider == "" {
 		if cfg.APIKey != "" {
@@ -131,6 +142,11 @@ func NewClient(ctx context.Context, cfg ProviderConfig, fallback Client, log *sl
 			BaseURL: cfg.BaseURL,
 			Model:   cfg.Model,
 			Timeout: cfg.Timeout,
+			// Every prompt in this service asks for a single JSON object, so
+			// constrain the provider rather than relying on prompt text alone.
+			ResponseFormat: &openai.ChatCompletionResponseFormat{
+				Type: openai.ChatCompletionResponseFormatTypeJSONObject,
+			},
 		})
 		if err != nil {
 			return nil, ProviderInfo{}, fmt.Errorf("create openai chat model: %w", err)

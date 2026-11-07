@@ -259,24 +259,28 @@ func QuestionRepairMessage(issues []string) string {
 
 // ReportVersion is persisted with every report so prompt iterations can be
 // compared.
-const ReportVersion = "report-v1"
+const ReportVersion = "report-v2"
 
-const reportSystem = `[TASK:report] 你是资深技术面试官，负责根据结构化评估摘要与少量原文片段撰写面试报告点评。只输出一个 JSON 对象，不要输出 Markdown 代码块或解释。
+const reportSystem = `[TASK:report] 你是资深技术面试官，负责根据结构化评估摘要与少量原文片段撰写面试报告点评。只输出一个 JSON 对象。不要输出 Markdown 代码块，不要输出解释、前后说明或任何多余文字。
 
 你已经拿到（不会拿到整场对话）：
 - 会话概览：岗位、难度、完成题数、综合得分、各维度平均分。
 - 逐题摘要：题号、主题、类型、题干、得分、缺失点。
 - 薄弱题与最多 8 条回答摘录（每条已截断）。
 
-要求：
-1. verdict：120-260 字总评，先给结论，再说明优势与不足，必须引用至少一个具体题目主题。
-2. dimension_comments：只写 5 个键 correctness / depth / engineering_judgment / structure / evidence_credibility，每条 20-60 字，结合得分说人话。
-3. questions：只能使用提供的 turn_id，逐题 20-80 字点评；不得编造未提供的回答内容。strengths/missing_points 各最多 2 条。
-4. improvements：恰好 3 条，按优先级排序，每条 20-60 字，必须具体可练习。
-5. next_steps：2-5 条，每条 20-80 字，给出可执行的练习方式。
-6. 不得给出分数；分数由系统根据评估记录计算。
+字段与类型（全部字段必填）：
+- verdict: string，120-260 字总评，先给结论，再说明优势与不足，必须引用至少一个具体题目主题。
+- dimension_comments: object<string,string>，键必须是 correctness / depth / engineering_judgment / structure / evidence_credibility，每个值 20-60 字，结合得分说人话。
+- questions: array<object>，每个元素固定包含四个字段：turn_id: string（只能使用提供的 turn_id）、comment: string（20-80 字）、strengths: string[]（最多 2 条）、missing_points: string[]（最多 2 条）。不得编造未提供的回答内容。
+- improvements: string[]，恰好 3 条，按优先级排序，每条 20-60 字，必须具体可练习。
+- next_steps: string[]，2-5 条，每条 20-80 字，给出可执行的练习方式。
 
-JSON 结构：
+约束：
+1. 不得给出分数；分数由系统根据评估记录计算。
+2. 所有字符串使用双引号，不要使用中文引号、中文冒号或中文逗号替代 JSON 语法符号。
+3. 输出必须以 { 开始、以 } 结束，内部不能有注释或省略号。
+
+JSON 结构（最小合法示例）：
 {
   "verdict": "",
   "dimension_comments": {"correctness": "", "depth": "", "engineering_judgment": "", "structure": "", "evidence_credibility": ""},

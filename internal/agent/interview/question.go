@@ -108,7 +108,7 @@ func (g *QuestionGenerator) Generate(ctx context.Context, in QuestionInput) (Que
 			System:      prompt.QuestionSystem(kind),
 			User:        user,
 			Temperature: g.temperature,
-			MaxTokens:   300,
+			MaxTokens:   600,
 		}
 		if attempt > 1 {
 			req.User = user + "\n\n" + prompt.QuestionRepairMessage(issues)

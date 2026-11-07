@@ -10,7 +10,7 @@ Go 1.25 + [cloudwego/eino](https://github.com/cloudwego/eino) + PostgreSQL + Red
 
 ## 一条视觉主线
 
-以下截图均为 1440 宽、1.5x，按求职顺序排列。前两屏来自同一份简历的规则版演示（不调用模型），结果整宽展示在主面板，左侧栏只保留简历 / JD 输入入口；后四屏来自一场真实 `deepseek-chat` 会话（4 道题：3 主问题 + 1 追问），**面试与报告文字由 deepseek-chat 生成；评分由确定性公式计算**（维度分 × 权重 + 加减分），不依赖模型。
+以下截图均为 1440 宽、1.5x，按求职顺序排列。前两屏来自同一份简历的规则版演示（不调用模型），结果整宽展示在主面板，左侧栏只保留简历 / JD 输入入口；后四屏来自一场真实 DeepSeek 会话（5 道题：3 主问题 + 2 追问），**面试与报告文字由 DeepSeek 生成；评分由确定性公式计算**（维度分 × 权重 + 加减分），不依赖模型。
 
 ### 简历诊断
 
@@ -28,25 +28,25 @@ Go 1.25 + [cloudwego/eino](https://github.com/cloudwego/eino) + PostgreSQL + Red
 
 ![面试进行中](docs/screenshots/flow-r5-interview.png)
 
-SSE 已连接，进度停在第 1 / 3 题；题纲进度条出现「追问 1 / 上限 3」支线，当前问题就是由第 1 题触发的追问。本场使用真实 `deepseek-chat`，首屏即可看到已用时长与事件流。
+SSE 已连接，进度停在第 1 / 3 题；题纲进度条出现「追问 1 / 上限 3」支线，当前问题就是由第 1 题触发的追问。首屏即可看到已用时长与事件流。
 
 ### 单题评分依据
 
 ![单题评分依据](docs/screenshots/flow-r5-rationale.png)
 
-第一题 17.0 分：维度分 × 权重表、加权公式、加分 / 扣分、证据摘录、缺失要点与 `follow_up` 决策理由全部展开。分数由确定性公式计算，模型只提供维度分与点评。
+第一题 20.0 分：维度分 × 权重表、加权公式、加分 / 扣分、证据摘录、缺失要点与决策理由全部展开。分数由确定性公式计算，模型只提供维度分与点评。
 
 ### 复盘报告
 
 ![复盘报告](docs/screenshots/flow-r5-report.png)
 
-4 题收尾后总分 27.5（待提升）：维度雷达、逐题趋势与 SM-2 遗忘曲线预测。本次报告因模型输出未通过校验而**降级为确定性拼装**（页面黄色提示 `report_output_invalid`），面试与报告文字仍由 `deepseek-chat` 生成，评分不依赖降级结果。
+5 题收尾后总分 27.8（待提升），题纲覆盖 5 / 3：维度雷达、逐题趋势与 SM-2 遗忘曲线预测。报告点评由 DeepSeek 生成，评分由确定性公式计算。
 
 ### 间隔复习
 
 ![间隔复习](docs/screenshots/flow-r5-review.png)
 
-报告提交的同一事务生成复习卡；这里今日到期第 1 / 13 张，正面问题、参考答案折叠与 0–5 自评按钮同屏。自评 4 后写回 EF 2.50 / 间隔 1 天 / 次日到期。
+报告提交的同一事务生成复习卡；这里今日到期第 1 / 21 张（到期 11/06），正面问题、参考答案折叠与 0–5 自评按钮同屏，自评后按 SM-2 写回下次到期时间。
 
 ## 三分钟跑起来
 
@@ -223,9 +223,9 @@ HTTP / SSE  →  应用服务（事务 / 幂等 / 锁）  →  eino 图（Agent 
 | `LOCK_ACQUIRE_TIMEOUT` | `3s` | 抢锁最长等待，超时返回 `409 lock_busy` |
 | `RUN_STALE_AFTER` | `60s` | run 超过该时间未更新视为崩溃遗留 |
 | `MODEL_PROVIDER` | 见说明 | `heuristic` 或 `openai`；留空时有 `OPENAI_API_KEY` 则选 openai，否则 heuristic |
-| `OPENAI_BASE_URL` | 空（官方默认） | 任意 OpenAI 兼容服务 base URL |
+| `OPENAI_BASE_URL` | `https://api.deepseek.com/v1` | 任意 OpenAI 兼容服务 base URL；OpenAI 官方改为 `https://api.openai.com/v1` |
 | `OPENAI_API_KEY` | 空 | 为空时真实 provider 自动降级为 heuristic，启动日志 Warn |
-| `OPENAI_MODEL` | `gpt-4o-mini` | 模型名 |
+| `OPENAI_MODEL` | `deepseek-flash` | 模型名；DeepSeek 现行模型，旧名 `deepseek-v4-flash` 仍兼容，`deepseek-chat` / `deepseek-reasoner` 已于 2026-07-24 停用；OpenAI 可用 `gpt-4o-mini` |
 | `MODEL_TIMEOUT` | `30s` | 单次模型调用超时 |
 | `MODEL_MAX_RETRIES` | `2` | 可重试失败的最大重试次数（0..5） |
 

@@ -281,8 +281,18 @@ func (r *Runner) executeReport(ctx context.Context, run *session.Run) error {
 		return err
 	}
 
-	r.logger(ctx).Info("report run succeeded", "degraded", outcome.Degraded,
-		"tool_calls", evidence.Calls, "sections", len(outcome.Report.Sections))
+	if outcome.Degraded {
+		r.logger(ctx).Warn("report run degraded",
+			"error_code", outcome.ErrorCode,
+			"validation_issues", outcome.ValidationIssues,
+			"attempts", outcome.Attempts,
+			"tool_calls", evidence.Calls)
+	} else {
+		r.logger(ctx).Info("report run succeeded", "degraded", false,
+			"validation_warnings", outcome.ValidationIssues,
+			"attempts", outcome.Attempts,
+			"tool_calls", evidence.Calls, "sections", len(outcome.Report.Sections))
+	}
 	return nil
 }
 
@@ -380,7 +390,7 @@ func (r *Runner) commitReport(ctx context.Context, run *session.Run, outcome rep
 		}); err != nil {
 			return err
 		}
-		if err := appendEvent(ctx, r.logger(ctx), repos.Events, sess.ID, run.ID, session.EventReportCompleted, map[string]any{
+		completed := map[string]any{
 			"report_id":            record.ID,
 			"overall_score":        doc.OverallScore,
 			"degraded":             doc.Degraded,
@@ -392,7 +402,11 @@ func (r *Runner) commitReport(ctx context.Context, run *session.Run, outcome rep
 			"prompt_tokens":        doc.PromptTokens,
 			"completion_tokens":    doc.CompletionTokens,
 			"total_tokens":         doc.TotalTokens,
-		}); err != nil {
+		}
+		if doc.ErrorDetail != "" {
+			completed["error_detail"] = doc.ErrorDetail
+		}
+		if err := appendEvent(ctx, r.logger(ctx), repos.Events, sess.ID, run.ID, session.EventReportCompleted, completed); err != nil {
 			return err
 		}
 		if err := appendEvent(ctx, r.logger(ctx), repos.Events, sess.ID, run.ID, session.EventSessionPhase, map[string]any{

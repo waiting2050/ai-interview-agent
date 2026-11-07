@@ -76,6 +76,7 @@ type Report struct {
 	GeneratedAt   time.Time        `json:"generated_at"`
 	Degraded      bool             `json:"degraded"`
 	ErrorCode     string           `json:"error_code,omitempty"`
+	ErrorDetail   string           `json:"error_detail,omitempty"`
 	OverallScore  float64          `json:"overall_score"`
 	PlanItems     int              `json:"plan_items"`
 	ScoreBand     string           `json:"score_band"`
