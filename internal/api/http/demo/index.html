@@ -7,6 +7,28 @@
   <link rel="stylesheet" href="/demo/style.css">
 </head>
 <body>
+<div id="auth-gate" class="auth-gate" hidden>
+  <div class="auth-card">
+    <h2>登录或匿名体验</h2>
+    <p class="hint">登录后可保存自己的会话、报告与复习卡。匿名体验会创建一个独立的临时账号，匿名用户之间互相看不到对方的会话。</p>
+    <form id="auth-form" autocomplete="on">
+      <label>
+        邮箱
+        <input id="auth-email" type="email" autocomplete="email" placeholder="you@example.com">
+      </label>
+      <label>
+        密码
+        <input id="auth-password" type="password" autocomplete="current-password" placeholder="至少 8 位">
+      </label>
+    </form>
+    <div class="auth-actions">
+      <button id="auth-login" type="button">登录</button>
+      <button id="auth-register" class="secondary" type="button">注册并登录</button>
+      <button id="auth-demo" class="ghost" type="button">匿名体验</button>
+    </div>
+    <p id="auth-status" class="auth-status muted"></p>
+  </div>
+</div>
 <header class="topbar">
   <div class="brand">
     <span class="logo">AI</span>

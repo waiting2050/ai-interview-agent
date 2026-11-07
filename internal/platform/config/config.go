@@ -4,6 +4,8 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"strconv"
@@ -25,6 +27,20 @@ type Config struct {
 	LockTTL time.Duration
 	// LockAcquireTimeout bounds how long a command waits for a busy lock.
 	LockAcquireTimeout time.Duration
+
+	// JWTSecret signs access tokens. It comes from JWT_SECRET; when unset a
+	// random per-process secret is generated and JWTSecretGenerated is true so
+	// startup can warn that tokens will not survive a restart.
+	JWTSecret string
+	// JWTSecretGenerated reports that JWTSecret was not provided by the
+	// environment.
+	JWTSecretGenerated bool
+	// JWTTTL is the access-token lifetime.
+	JWTTTL time.Duration
+	// DemoLoginLimit caps anonymous demo logins per source IP inside
+	// DemoLoginWindow.
+	DemoLoginLimit  int
+	DemoLoginWindow time.Duration
 }
 
 func Load() (Config, error) {
@@ -37,6 +53,9 @@ func Load() (Config, error) {
 		RunStaleAfter:      60 * time.Second,
 		LockTTL:            10 * time.Second,
 		LockAcquireTimeout: 3 * time.Second,
+		JWTTTL:             24 * time.Hour,
+		DemoLoginLimit:     5,
+		DemoLoginWindow:    time.Hour,
 	}
 
 	var err error
@@ -52,6 +71,27 @@ func Load() (Config, error) {
 	if cfg.RedisDB, err = intEnv("REDIS_DB", 0); err != nil {
 		return Config{}, err
 	}
+	if cfg.JWTTTL, err = durationEnv("JWT_TTL", cfg.JWTTTL); err != nil {
+		return Config{}, err
+	}
+	if cfg.DemoLoginLimit, err = intEnv("DEMO_LOGIN_LIMIT", cfg.DemoLoginLimit); err != nil {
+		return Config{}, err
+	}
+	if cfg.DemoLoginWindow, err = durationEnv("DEMO_LOGIN_WINDOW", cfg.DemoLoginWindow); err != nil {
+		return Config{}, err
+	}
+
+	cfg.JWTSecret = os.Getenv("JWT_SECRET")
+	if cfg.JWTSecret == "" {
+		// Never commit a default secret. A random temporary one keeps
+		// local demos running while startup logs a loud warning.
+		secret, err := randomSecret()
+		if err != nil {
+			return Config{}, fmt.Errorf("generate temporary JWT secret: %w", err)
+		}
+		cfg.JWTSecret = secret
+		cfg.JWTSecretGenerated = true
+	}
 
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("DATABASE_URL must not be empty")
@@ -65,6 +105,14 @@ func env(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func randomSecret() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
 }
 
 func durationEnv(key string, fallback time.Duration) (time.Duration, error) {

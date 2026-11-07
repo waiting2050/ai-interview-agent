@@ -41,7 +41,7 @@ HTTP/SSE  →  应用服务（事务/幂等/锁）  →  eino 图（Agent 决策
 
 ### 1.2 非目标
 
-见第 13 节 YAGNI。简单说：不做语音、不做支付、不做登录、不做小程序、不做前端大屏。
+见第 13 节 YAGNI。简单说：不做语音、不做支付、不做 RBAC / 找回密码 / 第三方登录、不做小程序、不做前端大屏。
 
 ### 1.3 质量目标（可验收，不是口号）
 
@@ -636,6 +636,9 @@ ReportRun（同步或异步执行）
 | `run_steps` | `run_id`、`step_name`、`status`、`attempt`、`input_hash`、`output_json`、`error_code`、`started_at`、`finished_at` | PK `(run_id, step_name)` |
 | `session_events` | `event_id bigserial`、`session_id`、`run_id`、`type`、`payload jsonb`、`created_at` | PK `event_id`；`(session_id, event_id)` 索引 |
 | `reports` | `id`、`session_id`、`run_id`、`status`、`schema_version`、`structured jsonb`、`markdown`、`overall_score`、`degraded`、`error_code`、`model_name`、`prompt_version`、`tool_calls`、`created_at`、`updated_at` | PK `id`；UNIQUE `session_id`（一个会话只有一份报告）；`(created_at DESC)` 索引 |
+| `users` | `id`、`email`、`password_hash`、`is_demo`、`created_at` | PK `id`；`lower(email)` 唯一索引 |
+
+**归属字段（M17）**：`sessions`、`runs`、`run_steps`、`session_events`、`turns`、`evaluations`、`reports`、`review_cards`、`jd_listings` 均带 `user_id` 与非空约束，并各自有 `(user_id, ...)` 索引。`usr_legacy` 是历史数据占位用户，密码哈希为空，永不参与登录。
 
 **设计说明**：
 
@@ -672,6 +675,9 @@ Redis 只做协调与加速；**删掉 Redis 后系统仍应正确**（退化为
 
 | 方法 | 路径 | 作用 | 返回 |
 | --- | --- | --- | --- |
+| `POST` | `/v1/auth/register` | 注册并签发 JWT | `201 {access_token, token_type, expires_in, user}` |
+| `POST` | `/v1/auth/login` | 登录并签发 JWT | `200` 同上；错误凭据 `401 invalid_credentials` |
+| `POST` | `/v1/auth/demo` | 匿名体验（独立临时用户） | `200` 同上；超限 `429 demo_rate_limited` |
 | `POST` | `/v1/sessions` | 创建面试会话 | `201 {session_id, status, state_version}` |
 | `GET` | `/v1/sessions/{id}` | 查询会话快照 | `200` 会话摘要 |
 | `POST` | `/v1/sessions/{id}/start` | 生成题纲与第一题 | `202 {run_id}` |
@@ -1146,13 +1152,24 @@ data: {"event_id":43,"session_id":"01H...","run_id":"01H...","type":"question.as
 
 ---
 
+### M17 鉴权与用户隔离（已完成）
+
+- 账号：`users` 表；注册 / 登录用邮箱 + 密码（bcrypt，cost 10），JWT 为自实现 HS256，默认 24h，校验只看签名与 `exp`，不查会话表。
+- 归属：`sessions / runs / run_steps / session_events / turns / evaluations / reports / review_cards / jd_listings` 均加 `user_id` + 索引；子表写入时从 `sessions` 派生 owner，避免调用方漏传。
+- 越权：全站统一 **404**（不泄露资源存在性）；未登录为 **401**。SSE 在订阅前校验会话归属；EventSource 无法带 Header，仅 `/events` 允许 `?access_token=`。
+- 匿名 demo：每次 `POST /v1/auth/demo` 创建独立临时用户，天然隔离；单 IP 独立限流（默认 5 次 / 小时，进程内窗口）。
+- 数据迁移：`0008_auth.sql` 把历史行回填到 `usr_legacy`；该用户密码哈希为空，无法通过任何登录路径认证，旧数据不会暴露给新账号。回填后删除列默认值，新行漏写 owner 会直接失败。
+- 验收：未登录 401、跨用户 404、demo 用户互不可见、SSE 越权拒绝均有测试覆盖；既有测试全绿。
+
+---
+
 ## 13. 不做清单（YAGNI）
 
 明确不做，避免范围蔓延：
 
 - **语音/ASR/TTS**：只做文本输入输出。
 - **支付/订阅/计费**：不做。
-- **OAuth/登录/多租户**：MVP 单用户本地部署；公开部署前必须补鉴权（这是安全前置条件，不是功能）。
+- **RBAC / 找回密码 / 第三方登录**：M17 只做邮箱密码 + JWT；没有角色权限、邮件找回、OAuth 与刷新令牌。
 - **小程序/多端**：不做；只提供 HTTP/SSE API。
 - **前端 SPA / 大屏**：最多提供 curl/HTML 演示页，不做完整前端工程。
 - **简历 OCR / 图片解析**：MVP 支持 PDF/DOCX/TXT/MD 本地解析；PNG/JPG 仅返回「需 OCR/多模态，尚未启用」，不实现。
@@ -1178,7 +1195,7 @@ data: {"event_id":43,"session_id":"01H...","run_id":"01H...","type":"question.as
 | 长答案/长报告超 token | 成本与截断 | 分段工具回查 + 摘要分层 + 硬性 token 上限 |
 | SSE 事件重复 | 前端重复渲染 | 事件 `event_id` 去重；至少一次语义明示 |
 | 崩溃时模型重复调用 | 成本增加 | 节点产物缓存；只重跑未成功节点 |
-| 无鉴权公网部署 | 数据泄露 | README 明确仅本地；鉴权列为上线前置 |
+| 鉴权被绕过或越权 | 数据泄露 | 全站 Bearer 校验 + 归属统一 404；SSE 订阅前校验；demo 用户每次新建、按 IP 限流 |
 | prompt injection（答案内含指令） | 评分被操控 | 数据/指令分隔 + 输出 schema 校验 + critic |
 
 开放问题（M2 前定稿）：

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/waiting2050/ai-interview-agent/internal/domain/user"
 )
 
 // DefaultTZOffsetMinutes is Asia/Shanghai (UTC+8). The API accepts an explicit
@@ -15,7 +17,7 @@ type Store interface {
 	SaveMany(ctx context.Context, cards []*Card) error
 	Get(ctx context.Context, id string) (*Card, error)
 	ListBySession(ctx context.Context, sessionID string) ([]*Card, error)
-	ListDue(ctx context.Context, before time.Time, limit int) ([]*Card, error)
+	ListDue(ctx context.Context, userID string, before time.Time, limit int) ([]*Card, error)
 	Update(ctx context.Context, card *Card) error
 }
 
@@ -51,8 +53,9 @@ func (s *Service) SetClock(now func() time.Time) {
 	}
 }
 
-// Due lists cards due before the end of the caller's local day.
-func (s *Service) Due(ctx context.Context, tzOffsetMinutes, limit int) (DueResult, error) {
+// Due lists cards due before the end of the caller's local day. Cards are
+// always scoped to one owner.
+func (s *Service) Due(ctx context.Context, userID string, tzOffsetMinutes, limit int) (DueResult, error) {
 	offset := clampOffset(tzOffsetMinutes)
 	if limit <= 0 {
 		limit = 20
@@ -65,7 +68,7 @@ func (s *Service) Due(ctx context.Context, tzOffsetMinutes, limit int) (DueResul
 	if s.store == nil {
 		return result, nil
 	}
-	cards, err := s.store.ListDue(ctx, end, limit)
+	cards, err := s.store.ListDue(ctx, ownerOrLegacy(userID), end, limit)
 	if err != nil {
 		return DueResult{}, fmt.Errorf("list due review cards: %w", err)
 	}
@@ -76,8 +79,9 @@ func (s *Service) Due(ctx context.Context, tzOffsetMinutes, limit int) (DueResul
 	return result, nil
 }
 
-// ListBySession returns every card produced by one interview session.
-func (s *Service) ListBySession(ctx context.Context, sessionID string) ([]*Card, error) {
+// ListBySession returns every card produced by one interview session, but only
+// when the session belongs to the caller.
+func (s *Service) ListBySession(ctx context.Context, userID, sessionID string) ([]*Card, error) {
 	if sessionID == "" {
 		return nil, fmt.Errorf("%w: session_id is required", ErrInvalidArgument)
 	}
@@ -88,23 +92,33 @@ func (s *Service) ListBySession(ctx context.Context, sessionID string) ([]*Card,
 	if err != nil {
 		return nil, fmt.Errorf("list review cards: %w", err)
 	}
-	if cards == nil {
-		cards = []*Card{}
+	owned := make([]*Card, 0, len(cards))
+	for _, card := range cards {
+		if card.UserID == ownerOrLegacy(userID) {
+			owned = append(owned, card)
+		}
 	}
-	return cards, nil
+	return owned, nil
 }
 
-// Get returns one card.
-func (s *Service) Get(ctx context.Context, id string) (*Card, error) {
+// Get returns one card if it belongs to the caller.
+func (s *Service) Get(ctx context.Context, userID, id string) (*Card, error) {
 	if s.store == nil {
 		return nil, ErrNotFound
 	}
-	return s.store.Get(ctx, id)
+	card, err := s.store.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if card.UserID != ownerOrLegacy(userID) {
+		return nil, ErrNotFound
+	}
+	return card, nil
 }
 
 // Grade applies one SM-2 update and persists the new schedule.
-func (s *Service) Grade(ctx context.Context, id string, grade int) (*GradeResult, error) {
-	card, err := s.Get(ctx, id)
+func (s *Service) Grade(ctx context.Context, userID, id string, grade int) (*GradeResult, error) {
+	card, err := s.Get(ctx, userID, id)
 	if err != nil {
 		return nil, err
 	}
@@ -121,13 +135,20 @@ func (s *Service) Grade(ctx context.Context, id string, grade int) (*GradeResult
 }
 
 // Retest returns a deterministic rephrasing of a card's question.
-func (s *Service) Retest(ctx context.Context, id string) (*Retest, error) {
-	card, err := s.Get(ctx, id)
+func (s *Service) Retest(ctx context.Context, userID, id string) (*Retest, error) {
+	card, err := s.Get(ctx, userID, id)
 	if err != nil {
 		return nil, err
 	}
 	result := BuildRetest(card)
 	return &result, nil
+}
+
+func ownerOrLegacy(userID string) string {
+	if userID == "" {
+		return user.LegacyID
+	}
+	return userID
 }
 
 // EndOfToday returns the first instant of tomorrow in the given fixed offset.

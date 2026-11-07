@@ -17,6 +17,7 @@ import (
 	domainreport "github.com/waiting2050/ai-interview-agent/internal/domain/report"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/review"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/session"
+	"github.com/waiting2050/ai-interview-agent/internal/domain/user"
 	"github.com/waiting2050/ai-interview-agent/internal/ports"
 )
 
@@ -24,6 +25,7 @@ type Store struct {
 	mu sync.RWMutex
 
 	sessions   map[string]*session.Session
+	users      map[string]*user.User
 	runs       map[string]*session.Run
 	runKeys    map[string]string           // sessionID|kind|key -> runID
 	steps      map[string]*session.RunStep // runID|stepName
@@ -49,6 +51,7 @@ var _ ports.Store = (*Store)(nil)
 func New() *Store {
 	s := &Store{
 		sessions:   map[string]*session.Session{},
+		users:      map[string]*user.User{},
 		runs:       map[string]*session.Run{},
 		runKeys:    map[string]string{},
 		steps:      map[string]*session.RunStep{},
@@ -63,6 +66,7 @@ func New() *Store {
 		subs:       map[string]map[chan struct{}]struct{}{},
 	}
 	s.repos = ports.Repositories{
+		Users:       &userRepo{s: s},
 		Sessions:    &sessionRepo{s: s},
 		Events:      &eventRepo{s: s},
 		Runs:        &runRepo{s: s},
@@ -123,6 +127,47 @@ func (s *Store) broadcast(sessionID string) {
 		default:
 		}
 	}
+}
+
+type userRepo struct{ s *Store }
+
+func (r *userRepo) Create(_ context.Context, in *user.User) error {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	for _, existing := range r.s.users {
+		if existing.Email == in.Email {
+			return user.ErrEmailTaken
+		}
+	}
+	if _, ok := r.s.users[in.ID]; ok {
+		return user.ErrEmailTaken
+	}
+	cp := *in
+	r.s.users[in.ID] = &cp
+	return nil
+}
+
+func (r *userRepo) GetByID(_ context.Context, id string) (*user.User, error) {
+	r.s.mu.RLock()
+	defer r.s.mu.RUnlock()
+	u, ok := r.s.users[id]
+	if !ok {
+		return nil, user.ErrNotFound
+	}
+	cp := *u
+	return &cp, nil
+}
+
+func (r *userRepo) GetByEmail(_ context.Context, email string) (*user.User, error) {
+	r.s.mu.RLock()
+	defer r.s.mu.RUnlock()
+	for _, u := range r.s.users {
+		if u.Email == email {
+			cp := *u
+			return &cp, nil
+		}
+	}
+	return nil, user.ErrNotFound
 }
 
 type sessionRepo struct{ s *Store }
@@ -614,11 +659,14 @@ func (r *reviewRepo) ListBySession(_ context.Context, sessionID string) ([]*revi
 	return cards, nil
 }
 
-func (r *reviewRepo) ListDue(_ context.Context, before time.Time, limit int) ([]*review.Card, error) {
+func (r *reviewRepo) ListDue(_ context.Context, userID string, before time.Time, limit int) ([]*review.Card, error) {
 	r.s.mu.RLock()
 	defer r.s.mu.RUnlock()
 	cards := make([]*review.Card, 0)
 	for _, card := range r.s.reviews {
+		if card.UserID != userID {
+			continue
+		}
 		if card.DueAt.Before(before) {
 			cards = append(cards, cloneReviewCard(card))
 		}

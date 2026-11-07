@@ -58,13 +58,15 @@ func newTestRouter(t *testing.T) (*httptest.Server, *app.Service, *obs.Metrics) 
 		Evaluator:   fixedEvaluator{},
 		Metrics:     metrics,
 	})
-	srv := httptest.NewServer(NewRouter(Deps{
+	authSvc, token, _ := testAuthFor(t, store)
+	srv := httptest.NewServer(withTestAuthorization(NewRouter(Deps{
+		Auth:       authSvc,
 		Service:    svc,
 		Health:     store.Ping,
 		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Metrics:    metrics,
 		JDAnalyzer: jd.New(store.Repos().JDs, nil),
-	}))
+	}), token))
 	t.Cleanup(srv.Close)
 	return srv, svc, metrics
 }
@@ -603,12 +605,14 @@ func TestCommandReturnsRetryableBusyWhenLockHeld(t *testing.T) {
 		Locker:      locker,
 		Metrics:     metrics,
 	})
-	srv := httptest.NewServer(NewRouter(Deps{
+	authSvc, token, _ := testAuthFor(t, store)
+	srv := httptest.NewServer(withTestAuthorization(NewRouter(Deps{
+		Auth:    authSvc,
 		Service: svc,
 		Health:  store.Ping,
 		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Metrics: metrics,
-	}))
+	}), token))
 	t.Cleanup(srv.Close)
 
 	resp, err := http.Post(srv.URL+"/v1/sessions", "application/json", strings.NewReader(`{

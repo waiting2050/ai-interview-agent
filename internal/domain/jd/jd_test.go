@@ -131,7 +131,7 @@ func TestServiceFetchesURLAndPersists(t *testing.T) {
 	})
 	svc.SetClock(func() time.Time { return now })
 
-	got, err := svc.Analyze(context.Background(), jd.AnalyzeInput{
+	got, err := svc.Analyze(context.Background(), "", jd.AnalyzeInput{
 		URL:        "https://jobs.example.com/123",
 		ResumeText: sampleResume,
 	})
@@ -151,7 +151,7 @@ func TestServiceFetchesURLAndPersists(t *testing.T) {
 		t.Fatal("listing was not persisted")
 	}
 
-	cached, err := svc.Get(context.Background(), got.JDID)
+	cached, err := svc.Get(context.Background(), "", got.JDID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestServicePrefersPastedTextAndSkipsFetch(t *testing.T) {
 		return jd.Fetched{}, errors.New("should not be called")
 	})
 
-	got, err := svc.Analyze(context.Background(), jd.AnalyzeInput{
+	got, err := svc.Analyze(context.Background(), "", jd.AnalyzeInput{
 		URL:  "https://www.zhipin.com/job_detail/abc.html",
 		Text: sampleJD,
 	})
@@ -190,18 +190,18 @@ func TestServiceErrors(t *testing.T) {
 	store := &fakeStore{saved: map[string]*jd.Listing{}}
 	svc := jd.New(store, nil)
 
-	if _, err := svc.Analyze(context.Background(), jd.AnalyzeInput{}); !errors.Is(err, jd.ErrInvalidArgument) {
+	if _, err := svc.Analyze(context.Background(), "", jd.AnalyzeInput{}); !errors.Is(err, jd.ErrInvalidArgument) {
 		t.Fatalf("empty input err = %v", err)
 	}
-	if _, err := svc.Analyze(context.Background(), jd.AnalyzeInput{
+	if _, err := svc.Analyze(context.Background(), "", jd.AnalyzeInput{
 		Text: sampleJD, Difficulty: "expert",
 	}); !errors.Is(err, jd.ErrInvalidArgument) {
 		t.Fatalf("bad difficulty err = %v", err)
 	}
-	if _, err := svc.Analyze(context.Background(), jd.AnalyzeInput{URL: "https://jobs.example.com/1"}); !errors.Is(err, jd.ErrFetchFailed) {
+	if _, err := svc.Analyze(context.Background(), "", jd.AnalyzeInput{URL: "https://jobs.example.com/1"}); !errors.Is(err, jd.ErrFetchFailed) {
 		t.Fatalf("fetch nil err = %v", err)
 	}
-	if _, err := svc.Get(context.Background(), "missing"); !errors.Is(err, jd.ErrNotFound) {
+	if _, err := svc.Get(context.Background(), "", "missing"); !errors.Is(err, jd.ErrNotFound) {
 		t.Fatalf("get err = %v", err)
 	}
 }

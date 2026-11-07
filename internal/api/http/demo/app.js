@@ -2,6 +2,49 @@
   "use strict";
 
   const $ = (id) => document.getElementById(id);
+  const AUTH_TOKEN_KEY = "ai-interview-demo-token";
+  let authToken = "";
+  try {
+    authToken = localStorage.getItem(AUTH_TOKEN_KEY) || "";
+  } catch (ignored) {
+    authToken = "";
+  }
+
+  function authHeaders() {
+    return authToken ? { Authorization: "Bearer " + authToken } : {};
+  }
+
+  function saveAuthToken(token) {
+    authToken = token || "";
+    try {
+      if (authToken) {
+        localStorage.setItem(AUTH_TOKEN_KEY, authToken);
+      } else {
+        localStorage.removeItem(AUTH_TOKEN_KEY);
+      }
+    } catch (ignored) {
+      // Private browsing may block storage; the in-memory token still works.
+    }
+  }
+
+  function showAuthGate(message) {
+    const gate = $("auth-gate");
+    const status = $("auth-status");
+    if (gate) {
+      gate.hidden = false;
+    }
+    if (status) {
+      status.textContent = message || "";
+      status.classList.toggle("is-error", Boolean(message));
+    }
+  }
+
+  function hideAuthGate() {
+    const gate = $("auth-gate");
+    if (gate) {
+      gate.hidden = true;
+    }
+  }
   // Fallback rubric for sample mode and before a session is created. Real
   // sessions replace it with the domain pack rubric returned by the server.
   const DEFAULT_RUBRIC = {
@@ -735,13 +778,21 @@
 
   async function api(path, options) {
     const opts = Object.assign({ headers: {} }, options || {});
-    opts.headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
+    opts.headers = Object.assign(
+      { "Content-Type": "application/json" },
+      authHeaders(),
+      opts.headers || {}
+    );
     const res = await fetch(path, opts);
     let body = null;
     try {
       body = await res.json();
     } catch (ignored) {
       body = null;
+    }
+    if (res.status === 401) {
+      saveAuthToken("");
+      showAuthGate("登录已过期，请重新登录或使用匿名体验。");
     }
     if (!res.ok) {
       const err = new Error((body && body.message) || `HTTP ${res.status}`);
@@ -804,7 +855,8 @@
     }
     state.streamClosed = false;
     setSSE("SSE 连接中…", "waiting");
-    const es = new EventSource(`/v1/sessions/${state.sessionId}/events`);
+    const query = authToken ? `?access_token=${encodeURIComponent(authToken)}` : "";
+    const es = new EventSource(`/v1/sessions/${state.sessionId}/events${query}`);
     state.es = es;
     es.onopen = () => {
       if (!state.streamClosed) {
@@ -1898,7 +1950,11 @@
     try {
       const form = new FormData();
       form.append("file", file);
-      const res = await fetch("/v1/resume/parse", { method: "POST", body: form });
+      const res = await fetch("/v1/resume/parse", {
+        method: "POST",
+        body: form,
+        headers: authHeaders(),
+      });
       let body = null;
       try {
         body = await res.json();
@@ -2693,6 +2749,63 @@
       submitAnswer();
     }
   });
+
+  // ---------- minimal auth gate ----------
+
+  async function submitAuth(mode) {
+    const emailEl = $("auth-email");
+    const passwordEl = $("auth-password");
+    const status = $("auth-status");
+    const buttons = ["auth-login", "auth-register", "auth-demo"].map($);
+
+    const email = emailEl ? emailEl.value.trim() : "";
+    const password = passwordEl ? passwordEl.value : "";
+    if (mode !== "demo" && (!email || !password)) {
+      showAuthGate("请填写邮箱和密码，或直接选择匿名体验。");
+      return;
+    }
+
+    buttons.forEach((btn) => { if (btn) btn.disabled = true; });
+    if (status) {
+      status.textContent = mode === "demo" ? "正在创建临时账号…" : "正在验证…";
+      status.classList.remove("is-error");
+    }
+    const path = mode === "demo" ? "/v1/auth/demo" : mode === "register" ? "/v1/auth/register" : "/v1/auth/login";
+    const payload = mode === "demo" ? {} : { email, password };
+    try {
+      const res = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) {
+        const message = (body && body.message) || `HTTP ${res.status}`;
+        throw new Error(message);
+      }
+      saveAuthToken(body && body.access_token);
+      hideAuthGate();
+      if (status) status.textContent = "";
+      refreshReviewEntry();
+    } catch (err) {
+      showAuthGate((err && err.message) || "登录失败，请稍后重试。");
+    } finally {
+      buttons.forEach((btn) => { if (btn) btn.disabled = false; });
+    }
+  }
+
+  $("auth-login").addEventListener("click", () => submitAuth("login"));
+  $("auth-register").addEventListener("click", () => submitAuth("register"));
+  $("auth-demo").addEventListener("click", () => submitAuth("demo"));
+  $("auth-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitAuth("login");
+  });
+  if (authToken) {
+    hideAuthGate();
+  } else {
+    showAuthGate("");
+  }
 
   if (new URLSearchParams(location.search).get("sample") === "1") {
     loadSample();

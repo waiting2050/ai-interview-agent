@@ -16,6 +16,7 @@ import (
 	"github.com/waiting2050/ai-interview-agent/internal/agent/report"
 	httpapi "github.com/waiting2050/ai-interview-agent/internal/api/http"
 	"github.com/waiting2050/ai-interview-agent/internal/app"
+	"github.com/waiting2050/ai-interview-agent/internal/auth"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/jd"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/review"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/config"
@@ -141,13 +142,26 @@ func run() error {
 	// shared across requests, so frequent analyses cannot exceed the limit.
 	jobFetcher := jobfetch.NewHTTPFetcher(jobfetch.Options{})
 
+	signer, err := auth.NewSigner([]byte(cfg.JWTSecret), cfg.JWTTTL)
+	if err != nil {
+		return fmt.Errorf("create jwt signer: %w", err)
+	}
+	if cfg.JWTSecretGenerated {
+		logger.Warn("JWT_SECRET is not set; using a random per-process secret. " +
+			"Issued tokens stop working after a restart. Set JWT_SECRET in production.")
+	}
+	authSvc := auth.New(store.Repos().Users, signer)
+
 	srv := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: httpapi.NewRouter(httpapi.Deps{
-			Service: svc,
-			Health:  store.Ping,
-			Logger:  logger,
-			Metrics: metrics,
+			Service:         svc,
+			Auth:            authSvc,
+			Health:          store.Ping,
+			Logger:          logger,
+			Metrics:         metrics,
+			DemoLoginLimit:  cfg.DemoLoginLimit,
+			DemoLoginWindow: cfg.DemoLoginWindow,
 			JDAnalyzer: jd.New(store.Repos().JDs, func(ctx context.Context, rawURL string) (jd.Fetched, error) {
 				result, err := jobFetcher.Fetch(ctx, rawURL)
 				if err != nil {

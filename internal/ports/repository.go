@@ -14,6 +14,7 @@ import (
 	domainreport "github.com/waiting2050/ai-interview-agent/internal/domain/report"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/review"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/session"
+	"github.com/waiting2050/ai-interview-agent/internal/domain/user"
 )
 
 var (
@@ -21,6 +22,13 @@ var (
 	ErrStateConflict     = errors.New("state conflict")
 	ErrIdempotencyReused = errors.New("idempotency key reused with a different request")
 )
+
+// UserRepository persists minimal accounts for the auth layer.
+type UserRepository interface {
+	Create(ctx context.Context, u *user.User) error
+	GetByID(ctx context.Context, id string) (*user.User, error)
+	GetByEmail(ctx context.Context, email string) (*user.User, error)
+}
 
 type SessionRepository interface {
 	Create(ctx context.Context, s *session.Session) error
@@ -102,8 +110,8 @@ type JDRepository interface {
 // JDAnalyzer is the M15 rule-based JD pipeline. It parses a URL or pasted text,
 // matches it against a resume and plans an outline without calling a model.
 type JDAnalyzer interface {
-	Analyze(ctx context.Context, in jd.AnalyzeInput) (jd.Analysis, error)
-	Get(ctx context.Context, id string) (*jd.Listing, error)
+	Analyze(ctx context.Context, userID string, in jd.AnalyzeInput) (jd.Analysis, error)
+	Get(ctx context.Context, userID, id string) (*jd.Listing, error)
 }
 
 // ReviewRepository persists M11 spaced-repetition cards and their SM-2 state.
@@ -111,23 +119,24 @@ type ReviewRepository interface {
 	SaveMany(ctx context.Context, cards []*review.Card) error
 	Get(ctx context.Context, id string) (*review.Card, error)
 	ListBySession(ctx context.Context, sessionID string) ([]*review.Card, error)
-	ListDue(ctx context.Context, before time.Time, limit int) ([]*review.Card, error)
+	ListDue(ctx context.Context, userID string, before time.Time, limit int) ([]*review.Card, error)
 	Update(ctx context.Context, card *review.Card) error
 }
 
 // Reviewer is the M11 review workflow used by the HTTP layer. Card generation
 // and scheduling are deterministic rule code and never call a model.
 type Reviewer interface {
-	Due(ctx context.Context, tzOffsetMinutes, limit int) (review.DueResult, error)
-	ListBySession(ctx context.Context, sessionID string) ([]*review.Card, error)
-	Get(ctx context.Context, id string) (*review.Card, error)
-	Grade(ctx context.Context, id string, grade int) (*review.GradeResult, error)
-	Retest(ctx context.Context, id string) (*review.Retest, error)
+	Due(ctx context.Context, userID string, tzOffsetMinutes, limit int) (review.DueResult, error)
+	ListBySession(ctx context.Context, userID, sessionID string) ([]*review.Card, error)
+	Get(ctx context.Context, userID, id string) (*review.Card, error)
+	Grade(ctx context.Context, userID, id string, grade int) (*review.GradeResult, error)
+	Retest(ctx context.Context, userID, id string) (*review.Retest, error)
 }
 
 // Repositories is the set of repositories bound to either the pool or an
 // active transaction.
 type Repositories struct {
+	Users       UserRepository
 	Sessions    SessionRepository
 	Events      EventRepository
 	Runs        RunRepository

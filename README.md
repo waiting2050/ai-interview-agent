@@ -110,6 +110,10 @@ go run ./cmd/server
 | `OPENAI_BASE_URL` | `https://api.deepseek.com/v1` | 任意 OpenAI 兼容 base URL |
 | `OPENAI_MODEL` | `deepseek-flash` | 模型名；旧名 `deepseek-v4-flash` 仍兼容 |
 | `RUN_STALE_AFTER` | `60s` | 超过该时间未更新的 `running` run 视为崩溃遗留 |
+| `JWT_SECRET` | 无 | **生产必须设置**；缺失时启动生成随机临时值并打 `WARN`，重启后旧 token 失效 |
+| `JWT_TTL` | `24h` | 访问令牌有效期 |
+| `DEMO_LOGIN_LIMIT` | `5` | 单 IP 在窗口内允许的匿名 demo 登录次数 |
+| `DEMO_LOGIN_WINDOW` | `1h` | 匿名 demo 限流窗口 |
 
 ---
 
@@ -130,6 +134,7 @@ HTTP / SSE  →  应用服务（事务 / 幂等 / 锁）  →  eino 图（Agent 
 | `cmd/evalrunner/` | 评分回归集批量跑分 |
 | `internal/api/http/` | 路由、DTO、参数校验、错误映射、SSE 写出、`request_id` |
 | `internal/app/` | 用例编排：事务、幂等、锁、状态提交、事件发布、run 执行与恢复 |
+| `internal/auth/` | 密码哈希、HS256 JWT 签发与校验、注册 / 登录 / 匿名 demo |
 | `internal/agent/` | eino 图、prompt、模型调用、评估 / 出题 / 报告、只读工具 |
 | `internal/domain/` | 会话、评估、报告、追问、领域包、题纲、简历、JD、复习规则 |
 | `internal/ports/` | 仓储 / 模型 / 事件 / 锁接口与事务边界 |
@@ -152,6 +157,9 @@ HTTP / SSE  →  应用服务（事务 / 幂等 / 锁）  →  eino 图（Agent 
 | GET | `/healthz` | 健康检查（PostgreSQL） |
 | GET | `/metrics` | Prometheus 文本指标 |
 | GET | `/demo` | 可视化演示页 |
+| POST | `/v1/auth/register` | 注册并签发 JWT（邮箱 + 密码，bcrypt） |
+| POST | `/v1/auth/login` | 登录并签发 JWT |
+| POST | `/v1/auth/demo` | 匿名体验：每次创建独立临时用户，按 IP 限流 |
 | POST | `/v1/resume/parse` | 解析简历附件（txt / md / docx / pdf） |
 | POST | `/v1/resume/analyze` | 规则版简历诊断 |
 | POST | `/v1/jd/analyze` | 解析 URL 或粘贴文本并与简历匹配 |
@@ -176,26 +184,35 @@ HTTP / SSE  →  应用服务（事务 / 幂等 / 锁）  →  eino 图（Agent 
 
 事件顺序：`session.created` → `run.started` → `session.started` → `question.asked` → `session.phase`；作答后追加 `answer.received` → `evaluation.completed`（或 `degraded`）→ `decision.made`；收尾后追加 `report.started` → `report.section` ×5 → `report.tool_calls` → `report.completed` → `session.completed`。
 
+除 `/healthz`、`/metrics`、`/demo` 与三个 `/v1/auth/*` 端点外，所有 `/v1` 接口都要求 `Authorization: Bearer <token>`；缺失或过期返回 `401 unauthorized`。跨账号访问统一返回 **404**，不泄露资源是否存在；SSE 订阅前同样校验归属。EventSource 无法自定义 Header，因此 `GET /v1/sessions/{id}/events` 额外接受 `?access_token=`（其他路径不接受查询参数令牌）。
+
+**数据归属与旧数据**：`sessions / runs / run_steps / session_events / turns / evaluations / reports / review_cards / jd_listings` 均带 `user_id` 与索引。迁移 `0008_auth.sql` 把历史行回填到占位用户 `usr_legacy`；该用户密码哈希为空，任何登录路径都无法认证为它，因此旧数据不会暴露给新注册账号。新行必须显式写入 owner，迁移后的列已去掉默认值，漏写会直接失败。
+
 <details>
 <summary>命令行完整流程（PowerShell / curl）</summary>
 
 ```powershell
+# 先登录或匿名体验，拿到 Bearer token
+curl.exe -s -X POST http://localhost:8080/v1/auth/demo -o token.json
+$token = (Get-Content token.json | ConvertFrom-Json).access_token
+$h = @("-H", "Authorization: Bearer $token")
+
 # PowerShell 5.1 内联 -d 传中文会按 GBK 发送，先落 UTF-8 文件
 $json = '{"candidate_name":"张三","target_role":"Go 后端开发","resume_text":"三年 Go 经验","jd_text":"熟悉分布式系统"}'
 [System.IO.File]::WriteAllText("$PWD\session.json", $json, (New-Object System.Text.UTF8Encoding($false)))
 
-curl.exe -i -X POST http://localhost:8080/v1/sessions -H "Content-Type: application/json; charset=utf-8" --data-binary "@session.json"
+curl.exe -i -X POST http://localhost:8080/v1/sessions @h -H "Content-Type: application/json; charset=utf-8" --data-binary "@session.json"
 
-curl.exe -i -X POST http://localhost:8080/v1/sessions/<session_id>/start -H "Idempotency-Key: start-demo-1"
-curl.exe -s   http://localhost:8080/v1/sessions/<session_id>          # 取 pending_turn_id
+curl.exe -i -X POST http://localhost:8080/v1/sessions/<session_id>/start @h -H "Idempotency-Key: start-demo-1"
+curl.exe -s   http://localhost:8080/v1/sessions/<session_id> @h          # 取 pending_turn_id
 
 $answer = '{"turn_id":"<turn_id>","answer":"我在订单服务里用本地消息表加定时补偿保证最终一致性，压测峰值 1.2 万 TPS。"}'
 [System.IO.File]::WriteAllText("$PWD\answer.json", $answer, (New-Object System.Text.UTF8Encoding($false)))
-curl.exe -i -X POST http://localhost:8080/v1/sessions/<session_id>/answers -H "Content-Type: application/json; charset=utf-8" -H "Idempotency-Key: answer-demo-1" --data-binary "@answer.json"
+curl.exe -i -X POST http://localhost:8080/v1/sessions/<session_id>/answers @h -H "Content-Type: application/json; charset=utf-8" -H "Idempotency-Key: answer-demo-1" --data-binary "@answer.json"
 
-curl.exe -i -X POST http://localhost:8080/v1/sessions/<session_id>/finish -H "Idempotency-Key: finish-demo-1"
-curl.exe -s   http://localhost:8080/v1/sessions/<session_id>/report
-curl.exe -N   http://localhost:8080/v1/sessions/<session_id>/events     # Ctrl+C 退出
+curl.exe -i -X POST http://localhost:8080/v1/sessions/<session_id>/finish @h -H "Idempotency-Key: finish-demo-1"
+curl.exe -s   http://localhost:8080/v1/sessions/<session_id>/report @h
+curl.exe -N   "http://localhost:8080/v1/sessions/<session_id>/events?access_token=$token"  # Ctrl+C 退出
 ```
 
 </details>
@@ -234,7 +251,7 @@ go run ./cmd/evalrunner -provider openai
 
 ## 已知不足
 
-- **没有鉴权**：接口匿名可用，会话 ID 就是能力凭证；仅适合本地演示，公网部署不可接受。
+- **鉴权是最小实现**：只有邮箱密码 + JWT，没有 RBAC、找回密码、第三方登录与刷新令牌；匿名 demo 限流是单进程内存计数，多副本需改用 Redis。
 - **简历 / JD 仍是规则语义**：正则与关键词可复现，但同义词、隐性技能、复杂排版会漏判；没有 embedding 语义匹配。
 - **图片简历与扫描版 PDF 没有 OCR**：附件只支持 txt / md / docx / pdf；PNG / JPG 返回 `image_requires_ocr`，扫描版 PDF 提不出文字。
 - **报告证据包有截断**：回答摘要、弱项条数、搜索结果都有上限；只有一轮模型点评，无跨场趋势与多轮修订。
@@ -243,7 +260,7 @@ go run ./cmd/evalrunner -provider openai
 - **可观测性只在进程内**：指标重启归零，没有集中日志、分布式追踪与告警；多实例各看各的。
 - **JD 抓取只适配静态 HTML**：不执行 JS、不碰登录墙与验证码；抓不到就要求粘贴。
 
-完整 12 条见 [拆解读物 · 已知不足](docs/project-walkthrough.md#11-已知不足)。另有明确边界：JD 抓取不代投；语音 / ASR、支付、OAuth、多端小程序不在范围内。
+完整 12 条见 [拆解读物 · 已知不足](docs/project-walkthrough.md#11-已知不足)。另有明确边界：JD 抓取不代投；语音 / ASR、支付、RBAC / 找回密码 / OAuth、多端小程序不在范围内。
 
 ---
 
@@ -255,4 +272,4 @@ go run ./cmd/evalrunner -provider openai
 | [设计取舍](docs/design-rationale.md) | 13 节 + 附录：为什么这样写、换一种做法会怎样 |
 | [拆解读物](docs/project-walkthrough.md) | 9 个模块 + 10 分钟演示脚本 + 12 条已知不足 |
 
-已实现 M0–M9、M11–M16（M10 未做），演示页视觉轮次 R2–R5。每个里程碑的可运行验收点见[开发计划第 12 节](docs/development-plan.md#12-里程碑与验收点)。
+已实现 M0–M9、M11–M17（M10 未做），演示页视觉轮次 R2–R5。每个里程碑的可运行验收点见[开发计划第 12 节](docs/development-plan.md#12-里程碑与验收点)。

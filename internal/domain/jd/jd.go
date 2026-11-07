@@ -32,6 +32,7 @@ type Structured struct {
 // the same result later with the original fetched_at and source URL.
 type Listing struct {
 	ID         string     `json:"id"`
+	UserID     string     `json:"-"`
 	SourceKind string     `json:"source_kind"`
 	SourceURL  string     `json:"source_url,omitempty"`
 	FetchedAt  time.Time  `json:"fetched_at"`

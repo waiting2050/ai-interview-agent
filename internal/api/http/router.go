@@ -4,16 +4,25 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/waiting2050/ai-interview-agent/internal/app"
+	"github.com/waiting2050/ai-interview-agent/internal/auth"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/obs"
 	"github.com/waiting2050/ai-interview-agent/internal/ports"
 )
 
 type Deps struct {
 	Service *app.Service
-	Health  func(ctx context.Context) error
-	Logger  *slog.Logger
+	// Auth backs /v1/auth/* and verifies bearer tokens for every other /v1
+	// route. Nil makes protected routes answer 503 rather than run unauthenticated.
+	Auth   *auth.Service
+	Health func(ctx context.Context) error
+	Logger *slog.Logger
+	// DemoLoginLimit caps anonymous demo logins per source IP inside
+	// DemoLoginWindow. Zero falls back to five per hour.
+	DemoLoginLimit  int
+	DemoLoginWindow time.Duration
 	// Metrics backs GET /metrics. Nil falls back to a fresh empty registry.
 	Metrics *obs.Metrics
 	// ResumeAnalyzer backs POST /v1/resume/analyze. Nil falls back to the
@@ -37,12 +46,24 @@ func NewRouter(deps Deps) http.Handler {
 	}
 
 	h := &handlers{deps: deps}
+	limit := deps.DemoLoginLimit
+	window := deps.DemoLoginWindow
+	if limit <= 0 {
+		limit = 5
+	}
+	if window <= 0 {
+		window = time.Hour
+	}
+	h.demoLimiter = newDemoLimiter(limit, window)
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", h.health)
 	mux.HandleFunc("GET /metrics", h.metrics)
 	mux.HandleFunc("GET /demo", h.demoPage)
 	mux.Handle("GET /demo/", demoStatic())
+	mux.HandleFunc("POST /v1/auth/register", h.register)
+	mux.HandleFunc("POST /v1/auth/login", h.login)
+	mux.HandleFunc("POST /v1/auth/demo", h.demoLogin)
 	mux.HandleFunc("POST /v1/resume/parse", h.parseResume)
 	mux.HandleFunc("POST /v1/resume/analyze", h.analyzeResume)
 	mux.HandleFunc("POST /v1/jd/analyze", h.analyzeJD)
@@ -65,5 +86,5 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("GET /v1/sessions/{id}/events", h.subscribeEvents)
 	mux.HandleFunc("POST /v1/sessions/{id}/runs/{run_id}/retry", h.retryRun)
 
-	return withRequestID(mux, deps.Logger)
+	return withRequestID(withAuth(mux, deps.Auth), deps.Logger)
 }

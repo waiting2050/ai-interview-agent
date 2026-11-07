@@ -364,6 +364,9 @@ func (r *Runner) commitReport(ctx context.Context, run *session.Run, outcome rep
 		// M11: weak points become review cards in the same transaction that
 		// persists the report. Card creation is deterministic and model-free.
 		if cards := review.BuildCards(sess.ID, &doc, now); len(cards) > 0 {
+			for _, card := range cards {
+				card.UserID = ownerOrLegacy(sess.OwnerID)
+			}
 			if err := repos.Reviews.SaveMany(ctx, cards); err != nil {
 				return fmt.Errorf("persist review cards: %w", err)
 			}

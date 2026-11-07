@@ -53,6 +53,7 @@ type Calculation struct {
 // DueAt are the SM-2 state.
 type Card struct {
 	ID              string       `json:"id"`
+	UserID          string       `json:"user_id,omitempty"`
 	SessionID       string       `json:"session_id"`
 	TurnID          string       `json:"source_turn_id,omitempty"`
 	Topic           string       `json:"topic"`

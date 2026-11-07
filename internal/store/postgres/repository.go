@@ -15,7 +15,7 @@ import (
 
 type sessionRepository struct{ q querier }
 
-const sessionColumns = `id, candidate_name, target_role, resume_text, resume_profile, jd_text, domain, config,
+const sessionColumns = `id, candidate_name, user_id, target_role, resume_text, resume_profile, jd_text, domain, config,
 	status, phase, state_version, pending_turn_id, plan_cursor, followups_used,
 	started_at, ended_at, created_at, updated_at`
 
@@ -31,8 +31,8 @@ func (r *sessionRepository) Create(ctx context.Context, s *session.Session) erro
 
 	_, err = r.q.Exec(ctx, `
 		INSERT INTO sessions (`+sessionColumns+`)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
-		s.ID, s.CandidateName, s.TargetRole, s.ResumeText, string(profile), s.JDText, s.Domain, string(cfg),
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+		s.ID, s.CandidateName, s.OwnerID, s.TargetRole, s.ResumeText, string(profile), s.JDText, s.Domain, string(cfg),
 		string(s.Status), string(s.Phase), s.StateVersion, s.PendingTurnID, s.PlanCursor, s.FollowupsUsed,
 		s.StartedAt, s.EndedAt, s.CreatedAt, s.UpdatedAt)
 	if err != nil {
@@ -81,7 +81,7 @@ func scanSession(row pgx.Row) (*session.Session, error) {
 		phase   string
 	)
 	if err := row.Scan(
-		&s.ID, &s.CandidateName, &s.TargetRole, &s.ResumeText, &profile, &s.JDText, &s.Domain, &cfg,
+		&s.ID, &s.CandidateName, &s.OwnerID, &s.TargetRole, &s.ResumeText, &profile, &s.JDText, &s.Domain, &cfg,
 		&status, &phase, &s.StateVersion, &s.PendingTurnID, &s.PlanCursor, &s.FollowupsUsed,
 		&s.StartedAt, &s.EndedAt, &s.CreatedAt, &s.UpdatedAt,
 	); err != nil {
@@ -112,8 +112,8 @@ func (r *eventRepository) Append(ctx context.Context, event *session.Event) erro
 	}
 
 	err := r.q.QueryRow(ctx, `
-		INSERT INTO session_events (session_id, run_id, type, payload, created_at)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO session_events (session_id, user_id, run_id, type, payload, created_at)
+		VALUES ($1, (SELECT user_id FROM sessions WHERE id = $1), $2, $3, $4, $5)
 		RETURNING event_id`,
 		event.SessionID, event.RunID, event.Type, payload, event.CreatedAt,
 	).Scan(&event.ID)
@@ -169,8 +169,9 @@ func (r *runRepository) Create(ctx context.Context, run *session.Run) (bool, *se
 		input = []byte("{}")
 	}
 	tag, err := r.q.Exec(ctx, `
-		INSERT INTO runs (`+runColumns+`)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+		INSERT INTO runs (id, session_id, user_id, kind, status, idempotency_key, request_hash,
+			input_json, attempt, error_code, last_step, created_at, updated_at, finished_at)
+		SELECT $1, $2, (SELECT user_id FROM sessions WHERE id = $2), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
 		ON CONFLICT (session_id, kind, idempotency_key) DO NOTHING`,
 		run.ID, run.SessionID, string(run.Kind), string(run.Status), run.IdempotencyKey, run.RequestHash,
 		string(input), run.Attempt, run.ErrorCode, run.LastStep, run.CreatedAt, run.UpdatedAt, run.FinishedAt)
@@ -371,8 +372,8 @@ func (r *stepRepository) ListByRun(ctx context.Context, runID string) ([]session
 
 func (r *stepRepository) Start(ctx context.Context, step *session.RunStep) error {
 	_, err := r.q.Exec(ctx, `
-		INSERT INTO run_steps (run_id, step_name, status, attempt, input_hash, started_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO run_steps (run_id, user_id, step_name, status, attempt, input_hash, started_at)
+		SELECT $1, (SELECT user_id FROM runs WHERE id = $1), $2, $3, $4, $5, $6
 		ON CONFLICT (run_id, step_name) DO UPDATE
 		SET status = $3, attempt = $4, input_hash = $5, started_at = $6,
 		    output_json = NULL, error_code = '', finished_at = NULL`,

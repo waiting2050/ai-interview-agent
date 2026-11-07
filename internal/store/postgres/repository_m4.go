@@ -23,8 +23,9 @@ func (r *reportRepository) Create(ctx context.Context, rec *domainreport.Record)
 		return false, nil, fmt.Errorf("marshal report: %w", err)
 	}
 	tag, err := r.q.Exec(ctx, `
-		INSERT INTO reports (`+reportColumns+`)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+		INSERT INTO reports (`+reportColumns+`, user_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
+			(SELECT user_id FROM sessions WHERE id = $2))
 		ON CONFLICT (session_id) DO NOTHING`,
 		rec.ID, rec.SessionID, rec.RunID, rec.Status, rec.Report.SchemaVersion, string(structured), rec.Markdown,
 		rec.Report.OverallScore, rec.Report.Degraded, rec.Report.ErrorCode, rec.Report.ModelName,

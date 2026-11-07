@@ -93,6 +93,7 @@ func (s *Store) SubscribeEvents(ctx context.Context, sessionID string) (<-chan s
 
 func newRepositories(q querier) ports.Repositories {
 	return ports.Repositories{
+		Users:       &userRepository{q: q},
 		Sessions:    &sessionRepository{q: q},
 		Events:      &eventRepository{q: q},
 		Runs:        &runRepository{q: q},

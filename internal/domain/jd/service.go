@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/waiting2050/ai-interview-agent/internal/domain/user"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/idgen"
 )
 
@@ -67,8 +68,12 @@ func (s *Service) SetClock(now func() time.Time) {
 
 // Analyze turns a URL or pasted text into a persisted listing plus match,
 // gaps and outline. Pasted text wins when both are supplied, so a user can
-// label a Boss listing with its source URL without us fetching it.
-func (s *Service) Analyze(ctx context.Context, in AnalyzeInput) (Analysis, error) {
+// label a Boss listing with its source URL without us fetching it. userID is
+// stamped on the listing so later reads can enforce ownership.
+func (s *Service) Analyze(ctx context.Context, userID string, in AnalyzeInput) (Analysis, error) {
+	if userID == "" {
+		userID = user.LegacyID
+	}
 	text := strings.TrimSpace(in.Text)
 	sourceURL := strings.TrimSpace(in.URL)
 	sourceKind := SourcePaste
@@ -108,6 +113,7 @@ func (s *Service) Analyze(ctx context.Context, in AnalyzeInput) (Analysis, error
 
 	listing := &Listing{
 		ID:         idgen.New(),
+		UserID:     userID,
 		SourceKind: sourceKind,
 		SourceURL:  sourceURL,
 		FetchedAt:  fetchedAt,
@@ -123,10 +129,25 @@ func (s *Service) Analyze(ctx context.Context, in AnalyzeInput) (Analysis, error
 	return AnalyzeListing(listing, in.ResumeText, in.TargetRole, difficulty, limit), nil
 }
 
-// Get returns a cached listing by id.
-func (s *Service) Get(ctx context.Context, id string) (*Listing, error) {
+// Get returns a cached listing by id. A listing owned by another account is
+// reported as missing so the API can answer a uniform 404.
+func (s *Service) Get(ctx context.Context, userID, id string) (*Listing, error) {
 	if s.store == nil {
 		return nil, ErrNotFound
 	}
-	return s.store.Get(ctx, id)
+	listing, err := s.store.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if listing.UserID != ownerOrLegacy(userID) {
+		return nil, ErrNotFound
+	}
+	return listing, nil
+}
+
+func ownerOrLegacy(userID string) string {
+	if userID == "" {
+		return user.LegacyID
+	}
+	return userID
 }

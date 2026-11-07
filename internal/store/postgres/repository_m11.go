@@ -15,7 +15,7 @@ import (
 
 type reviewRepository struct{ q querier }
 
-const reviewColumns = `id, session_id, turn_id, topic, question, answer_digest, key_points,
+const reviewColumns = `id, user_id, session_id, turn_id, topic, question, answer_digest, key_points,
 	dimension, ease_factor, interval_days, repetitions, due_at, last_grade,
 	last_reviewed_at, last_calculation, created_at, updated_at`
 
@@ -31,9 +31,9 @@ func (r *reviewRepository) SaveMany(ctx context.Context, cards []*review.Card) e
 		}
 		_, err = r.q.Exec(ctx, `
 			INSERT INTO review_cards (`+reviewColumns+`)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
 			ON CONFLICT (session_id, turn_id, topic) DO NOTHING`,
-			card.ID, card.SessionID, card.TurnID, card.Topic, card.Question, card.AnswerDigest,
+			card.ID, card.UserID, card.SessionID, card.TurnID, card.Topic, card.Question, card.AnswerDigest,
 			string(keyPoints), card.Dimension, card.EaseFactor, card.IntervalDays,
 			card.Repetitions, card.DueAt, card.LastGrade, card.LastReviewedAt, string(calc),
 			card.CreatedAt, card.UpdatedAt)
@@ -66,9 +66,9 @@ func (r *reviewRepository) ListBySession(ctx context.Context, sessionID string) 
 	return collectReviewCards(rows)
 }
 
-func (r *reviewRepository) ListDue(ctx context.Context, before time.Time, limit int) ([]*review.Card, error) {
+func (r *reviewRepository) ListDue(ctx context.Context, userID string, before time.Time, limit int) ([]*review.Card, error) {
 	rows, err := r.q.Query(ctx, `SELECT `+reviewColumns+` FROM review_cards
-		WHERE due_at < $1 ORDER BY due_at, id LIMIT $2`, before, limit)
+		WHERE user_id = $1 AND due_at < $2 ORDER BY due_at, id LIMIT $3`, userID, before, limit)
 	if err != nil {
 		return nil, fmt.Errorf("list due review cards: %w", err)
 	}
@@ -124,7 +124,7 @@ func scanReviewCard(row rowScanner) (*review.Card, error) {
 		calc       []byte
 		lastReview pgtype.Timestamptz
 	)
-	if err := row.Scan(&card.ID, &card.SessionID, &card.TurnID, &card.Topic, &card.Question,
+	if err := row.Scan(&card.ID, &card.UserID, &card.SessionID, &card.TurnID, &card.Topic, &card.Question,
 		&card.AnswerDigest, &keyPoints, &card.Dimension, &card.EaseFactor, &card.IntervalDays,
 		&card.Repetitions, &card.DueAt, &card.LastGrade, &lastReview, &calc,
 		&card.CreatedAt, &card.UpdatedAt); err != nil {

@@ -11,24 +11,56 @@ import (
 	"testing"
 	"time"
 
+	"github.com/waiting2050/ai-interview-agent/internal/app"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/review"
+	"github.com/waiting2050/ai-interview-agent/internal/domain/session"
 	"github.com/waiting2050/ai-interview-agent/internal/store/memory"
 )
 
 func newReviewRouter(t *testing.T, now time.Time, cards []*review.Card) (*httptest.Server, *memory.Store) {
 	t.Helper()
 	store := memory.New()
+	authSvc, token, userID := testAuthFor(t, store)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	seen := map[string]bool{}
+	for _, card := range cards {
+		if card.UserID == "" {
+			card.UserID = userID
+		}
+		seen[card.SessionID] = true
+	}
 	if len(cards) > 0 {
 		if err := store.Repos().Reviews.SaveMany(context.Background(), cards); err != nil {
 			t.Fatal(err)
 		}
 	}
+	// listReviews verifies session ownership through the app service, so seed
+	// one owned session per card.
+	for sessionID := range seen {
+		err := store.Repos().Sessions.Create(context.Background(), &session.Session{
+			ID:            sessionID,
+			OwnerID:       userID,
+			CandidateName: "review-test",
+			TargetRole:    "backend",
+			ResumeText:    "resume",
+			JDText:        "jd",
+			Config:        session.DefaultConfig(),
+			Status:        session.StatusCreated,
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	svc := review.New(store.Repos().Reviews)
 	svc.SetClock(func() time.Time { return now })
-	srv := httptest.NewServer(NewRouter(Deps{
-		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+	srv := httptest.NewServer(withTestAuthorization(NewRouter(Deps{
+		Auth:     authSvc,
+		Service:  app.New(store, app.Options{Logger: logger, Synchronous: true}),
+		Logger:   logger,
 		Reviewer: svc,
-	}))
+	}), token))
 	t.Cleanup(srv.Close)
 	return srv, store
 }
@@ -184,9 +216,12 @@ func TestReviewGradeValidationAndSchedule(t *testing.T) {
 }
 
 func TestReviewUnavailableWithoutService(t *testing.T) {
-	srv := httptest.NewServer(NewRouter(Deps{
+	store := memory.New()
+	authSvc, token, _ := testAuthFor(t, store)
+	srv := httptest.NewServer(withTestAuthorization(NewRouter(Deps{
+		Auth:   authSvc,
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-	}))
+	}), token))
 	t.Cleanup(srv.Close)
 
 	resp, err := http.Get(srv.URL + "/v1/review/due")

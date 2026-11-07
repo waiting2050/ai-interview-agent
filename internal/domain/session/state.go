@@ -135,6 +135,9 @@ func (c Config) Validate() error {
 type Session struct {
 	ID            string
 	CandidateName string
+	// OwnerID is the account that created the session. An empty value means
+	// the pre-auth placeholder owner.
+	OwnerID       string
 	TargetRole    string
 	ResumeText    string
 	ResumeProfile resume.Profile

@@ -20,7 +20,8 @@ func (h *handlers) analyzeJD(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, r, fmt.Errorf("%w: %s", jd.ErrInvalidArgument, err))
 		return
 	}
-	result, err := h.deps.JDAnalyzer.Analyze(r.Context(), req)
+	identity, _ := identityFrom(r.Context())
+	result, err := h.deps.JDAnalyzer.Analyze(r.Context(), identity.UserID, req)
 	if err != nil {
 		h.writeError(w, r, err)
 		return
@@ -35,7 +36,8 @@ func (h *handlers) getJD(w http.ResponseWriter, r *http.Request) {
 		h.writeJDUnavailable(w)
 		return
 	}
-	listing, err := h.deps.JDAnalyzer.Get(r.Context(), r.PathValue("id"))
+	identity, _ := identityFrom(r.Context())
+	listing, err := h.deps.JDAnalyzer.Get(r.Context(), identity.UserID, r.PathValue("id"))
 	if err != nil {
 		h.writeError(w, r, err)
 		return
@@ -55,7 +57,8 @@ func (h *handlers) generateApplyKit(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, r, fmt.Errorf("%w: %s", jd.ErrInvalidArgument, err))
 		return
 	}
-	listing, err := h.deps.JDAnalyzer.Get(r.Context(), r.PathValue("id"))
+	identity, _ := identityFrom(r.Context())
+	listing, err := h.deps.JDAnalyzer.Get(r.Context(), identity.UserID, r.PathValue("id"))
 	if err != nil {
 		h.writeError(w, r, err)
 		return

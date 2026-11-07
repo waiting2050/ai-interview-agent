@@ -9,6 +9,7 @@ import (
 	"github.com/waiting2050/ai-interview-agent/internal/domain/resume"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/review"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/session"
+	"github.com/waiting2050/ai-interview-agent/internal/domain/user"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/reqctx"
 	"github.com/waiting2050/ai-interview-agent/internal/ports"
 )
@@ -145,6 +146,21 @@ func (h *handlers) writeError(w http.ResponseWriter, r *http.Request, err error)
 		body.Code = "review_card_not_found"
 		body.Message = "复习卡不存在"
 		writeJSON(w, http.StatusNotFound, body)
+
+	case errors.Is(err, user.ErrInvalidArgument):
+		body.Code = "invalid_argument"
+		body.Message = err.Error()
+		writeJSON(w, http.StatusBadRequest, body)
+
+	case errors.Is(err, user.ErrEmailTaken):
+		body.Code = "email_taken"
+		body.Message = "该邮箱已注册"
+		writeJSON(w, http.StatusConflict, body)
+
+	case errors.Is(err, user.ErrInvalidCredentials):
+		body.Code = "invalid_credentials"
+		body.Message = "邮箱或密码不正确"
+		writeJSON(w, http.StatusUnauthorized, body)
 
 	default:
 		h.deps.Logger.Error("http handler error", "request_id", body.RequestID, "error", err)

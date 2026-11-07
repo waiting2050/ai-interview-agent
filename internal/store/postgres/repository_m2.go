@@ -25,8 +25,9 @@ func (r *turnRepository) Create(ctx context.Context, turn *session.Turn) error {
 		return fmt.Errorf("marshal expected points: %w", err)
 	}
 	_, err = r.q.Exec(ctx, `
-		INSERT INTO turns (`+turnColumns+`)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+		INSERT INTO turns (`+turnColumns+`, user_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,
+			(SELECT user_id FROM sessions WHERE id = $2))`,
 		turn.ID, turn.SessionID, turn.Seq, string(turn.Kind), turn.ParentTurnID, turn.Topic, turn.Depth, turn.Question,
 		points, string(turn.Status), turn.AnswerText, turn.AnswerHash, turn.AnsweredAt, turn.CreatedAt, turn.UpdatedAt)
 	if err != nil {
@@ -185,8 +186,9 @@ func (r *evaluationRepository) Upsert(ctx context.Context, rec *evaluation.Recor
 	_, err = r.q.Exec(ctx, `
 		INSERT INTO evaluations (turn_id, session_id, schema_version, scores, base_score, weighted_score,
 			bonus, penalty, evidence, missing_points, confidence, model_name, prompt_version,
-			raw_output, degraded, error_code, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+			raw_output, degraded, error_code, created_at, user_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
+			(SELECT user_id FROM sessions WHERE id = $2))
 		ON CONFLICT (turn_id) DO UPDATE SET
 			schema_version = EXCLUDED.schema_version,
 			scores = EXCLUDED.scores,

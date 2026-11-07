@@ -21,7 +21,8 @@ import (
 const maxRequestBody = 1 << 20 // 1 MiB
 
 type handlers struct {
-	deps Deps
+	deps        Deps
+	demoLimiter *demoLimiter
 }
 
 func (h *handlers) health(w http.ResponseWriter, r *http.Request) {
@@ -143,7 +144,9 @@ func (h *handlers) createSession(w http.ResponseWriter, r *http.Request) {
 		profile = *req.ResumeProfile
 	}
 
+	identity, _ := identityFrom(r.Context())
 	sess, err := h.deps.Service.CreateSession(r.Context(), app.CreateSessionInput{
+		OwnerID:       identity.UserID,
 		CandidateName: req.CandidateName,
 		TargetRole:    req.TargetRole,
 		ResumeText:    req.ResumeText,
@@ -160,15 +163,17 @@ func (h *handlers) createSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handlers) getSession(w http.ResponseWriter, r *http.Request) {
-	sess, err := h.deps.Service.GetSession(r.Context(), r.PathValue("id"))
-	if err != nil {
-		h.writeError(w, r, err)
+	sess, ok := h.requireSessionOwner(w, r)
+	if !ok {
 		return
 	}
 	writeJSON(w, http.StatusOK, toSessionDTO(sess))
 }
 
 func (h *handlers) startSession(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.requireSessionOwner(w, r); !ok {
+		return
+	}
 	body, err := readOptionalBody(w, r)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, errorBody{
@@ -197,6 +202,9 @@ type submitAnswerRequest struct {
 }
 
 func (h *handlers) submitAnswer(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.requireSessionOwner(w, r); !ok {
+		return
+	}
 	var req submitAnswerRequest
 	if err := decodeJSON(w, r, &req); err != nil {
 		h.writeError(w, r, err)
@@ -228,6 +236,9 @@ func writeAccepted(w http.ResponseWriter, result app.StartResult) {
 }
 
 func (h *handlers) finishSession(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.requireSessionOwner(w, r); !ok {
+		return
+	}
 	result, err := h.deps.Service.Finish(r.Context(), app.FinishCommand{
 		SessionID:      r.PathValue("id"),
 		IdempotencyKey: r.Header.Get("Idempotency-Key"),
@@ -240,6 +251,9 @@ func (h *handlers) finishSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handlers) generateReport(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.requireSessionOwner(w, r); !ok {
+		return
+	}
 	result, err := h.deps.Service.Report(r.Context(), app.FinishCommand{
 		SessionID:      r.PathValue("id"),
 		IdempotencyKey: r.Header.Get("Idempotency-Key"),
@@ -280,6 +294,9 @@ type reportDTO struct {
 }
 
 func (h *handlers) getReport(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.requireSessionOwner(w, r); !ok {
+		return
+	}
 	rec, err := h.deps.Service.GetReport(r.Context(), r.PathValue("id"))
 	if err != nil {
 		h.writeError(w, r, err)
@@ -299,6 +316,9 @@ func (h *handlers) getReport(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handlers) abortSession(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.requireSessionOwner(w, r); !ok {
+		return
+	}
 	id := r.PathValue("id")
 	if err := h.deps.Service.Abort(r.Context(), id); err != nil {
 		h.writeError(w, r, err)
@@ -313,6 +333,9 @@ func (h *handlers) abortSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handlers) retryRun(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.requireSessionOwner(w, r); !ok {
+		return
+	}
 	sessionID := r.PathValue("id")
 	runID := r.PathValue("run_id")
 	if err := h.deps.Service.Retry(r.Context(), sessionID, runID); err != nil {
@@ -338,8 +361,7 @@ type eventEnvelope struct {
 func (h *handlers) subscribeEvents(w http.ResponseWriter, r *http.Request) {
 	sessionID := r.PathValue("id")
 	log := h.deps.Logger.With("session_id", sessionID, "request_id", reqctx.From(r.Context()))
-	if _, err := h.deps.Service.GetSession(r.Context(), sessionID); err != nil {
-		h.writeError(w, r, err)
+	if _, ok := h.requireSessionOwner(w, r); !ok {
 		return
 	}
 

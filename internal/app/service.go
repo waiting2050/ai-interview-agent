@@ -17,6 +17,7 @@ import (
 	"github.com/waiting2050/ai-interview-agent/internal/domain/domainpack"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/resume"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/session"
+	"github.com/waiting2050/ai-interview-agent/internal/domain/user"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/idgen"
 	platformlock "github.com/waiting2050/ai-interview-agent/internal/platform/lock"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/obs"
@@ -35,6 +36,15 @@ var (
 
 type RunInProgressError struct {
 	RunID string
+}
+
+// ownerOrLegacy keeps historical rows and direct internal calls on the
+// pre-auth placeholder account instead of silently writing an empty owner.
+func ownerOrLegacy(ownerID string) string {
+	if strings.TrimSpace(ownerID) == "" {
+		return user.LegacyID
+	}
+	return ownerID
 }
 
 func (e *RunInProgressError) Error() string {
@@ -150,6 +160,9 @@ func New(store ports.Store, opts Options) *Service {
 }
 
 type CreateSessionInput struct {
+	// OwnerID is the account that will own the session. Empty is treated as
+	// the pre-auth legacy owner so internal callers and old tests keep working.
+	OwnerID       string
 	CandidateName string
 	TargetRole    string
 	ResumeText    string
@@ -193,6 +206,7 @@ func (s *Service) CreateSession(ctx context.Context, in CreateSessionInput) (*se
 
 	sess := &session.Session{
 		ID:            idgen.New(),
+		OwnerID:       ownerOrLegacy(in.OwnerID),
 		CandidateName: in.CandidateName,
 		TargetRole:    in.TargetRole,
 		ResumeText:    in.ResumeText,

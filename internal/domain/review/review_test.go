@@ -239,7 +239,7 @@ func TestDueFiltersByLocalDay(t *testing.T) {
 	svc := review.New(store)
 	svc.SetClock(func() time.Time { return now })
 
-	result, err := svc.Due(context.Background(), 480, 10)
+	result, err := svc.Due(context.Background(), "", 480, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +280,7 @@ func (f *fakeStore) ListBySession(_ context.Context, sessionID string) ([]*revie
 	return out, nil
 }
 
-func (f *fakeStore) ListDue(_ context.Context, before time.Time, limit int) ([]*review.Card, error) {
+func (f *fakeStore) ListDue(_ context.Context, _ string, before time.Time, limit int) ([]*review.Card, error) {
 	out := []*review.Card{}
 	for _, c := range f.cards {
 		if c.DueAt.Before(before) {

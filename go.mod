@@ -9,6 +9,7 @@ require (
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/redis/go-redis/v9 v9.7.3
+	golang.org/x/crypto v0.31.0
 	golang.org/x/text v0.29.0
 	gopkg.in/yaml.v3 v3.0.1
 	rsc.io/pdf v0.1.1
