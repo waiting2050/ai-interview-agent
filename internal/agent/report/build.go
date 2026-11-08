@@ -14,6 +14,12 @@ import (
 	domain "github.com/waiting2050/ai-interview-agent/internal/domain/report"
 )
 
+// ReportMaxTokens is the single output budget shared by the deterministic and
+// autonomous report paths. The measured five-section report needs 1,213
+// completion tokens (docs/eval-results/tool-mode-compare.json), so the
+// autonomous loop must never use a smaller cap than the deterministic call.
+const ReportMaxTokens = 1800
+
 // Outcome is the generator result. Degraded means the report is complete but
 // the commentary came from deterministic assembly instead of the model.
 type Outcome struct {
@@ -29,6 +35,9 @@ type Outcome struct {
 	ToolMode           string
 	ToolRounds         int
 	ToolDegradedReason string
+	// ToolRoundTraces keeps every raw model response from the autonomous loop
+	// (bounded) so a degraded run can be explained from direct evidence.
+	ToolRoundTraces []ToolRoundTrace
 	// ValidationIssues lists every field-level problem found in the last
 	// attempt. Fatal issues cause degradation; warnings only fall back to
 	// deterministic values for the affected field.
@@ -93,7 +102,7 @@ func (b *Builder) Generate(ctx context.Context, ev tools.Bundle) (Outcome, error
 			System:      system,
 			User:        user,
 			Temperature: 0.3,
-			MaxTokens:   1800,
+			MaxTokens:   ReportMaxTokens,
 		}
 		if attempt > 1 {
 			req.User = user + "\n\n" + prompt.ReportRepairMessage(issues)

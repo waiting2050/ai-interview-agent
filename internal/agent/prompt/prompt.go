@@ -399,7 +399,7 @@ const reportToolProtocol = `## 工具动作协议（本轮允许）
 2) {"action":"final","report":{ ...上一节的报告 JSON... }} 表示提交最终报告。
 
 只读工具目录（所有工具都只能访问当前会话）：
-- get_session_overview：无参数。会话概览默认已内联在 user 消息中，通常无需再调用。
+- get_session_overview：无参数。起始 user 消息不含任何会话证据，通常应先用它获取概览。
 - list_weak_turns：{"limit":1-10}，返回得分最低的已答题。
 - search_turns：{"query?":string,"topic?":string,"min_score?":0-100,"max_score?":0-100,"limit":1-8}，按题干/回答片段或主题筛选。
 - get_turn：{"turn_id":string}，读取单题回答摘录；turn_id 必须来自已给摘要。
@@ -411,14 +411,19 @@ const reportToolProtocol = `## 工具动作协议（本轮允许）
 3. 单次结果可能 truncated=true；此时只能基于已返回部分判断，不得假设被截断内容。
 4. 每次 final 都必须遵守上一节的字段与长度约束。`
 
-// ReportToolUser renders the user message for the autonomous loop. The
-// deterministic overview is inlined so the model does not spend its first call
-// re-reading what the system already collected.
-func ReportToolUser(in ReportInput, overviewJSON string) string {
-	return ReportUser(in) + "\n\n<session_overview_json>\n" + overviewJSON +
-		"\n</session_overview_json>\n\n" +
-		"请按工具动作协议：需要补充证据就输出一个 tool 动作，证据足够就输出 final。" +
-		"回合上限 6 轮、工具调用上限 12 次、总耗时上限 20 秒；到上限后必须直接 final。"
+// ReportToolStartUser is the autonomous loop's opening message. It carries the
+// session id and the tool catalog only: no evidence is pre-collected, so every
+// fact in the report has to come from a model-chosen tool call.
+func ReportToolStartUser(sessionID string, toolNames []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "会话 id：%s\n", sessionID)
+	b.WriteString("\n起始上下文未预采集任何会话证据；请先调用工具获取事实，再提交 final。\n\n<available_tools>\n")
+	for _, name := range toolNames {
+		fmt.Fprintf(&b, "- %s\n", name)
+	}
+	b.WriteString("</available_tools>\n\n")
+	b.WriteString("回合上限 6 轮、工具调用上限 12 次、总耗时上限 20 秒；到上限后必须直接 final。")
+	return b.String()
 }
 
 // ReportToolResultMessage wraps a tool envelope for the next model round.

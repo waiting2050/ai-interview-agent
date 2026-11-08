@@ -122,7 +122,7 @@ func TestToolLoopRejectsUnknownTool(t *testing.T) {
 	q := tools.NewQuery(sessionID, store.Repos(), tools.Options{})
 
 	var events []recordedEvent
-	out, err := builder.GenerateWithTools(context.Background(), bundle(), q, sinkOf(&events))
+	out, err := builder.GenerateWithTools(context.Background(), sessionID, nil, q, &testAssembler{b: bundle()}, sinkOf(&events))
 	if err != nil {
 		t.Fatalf("loop: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestToolLoopRejectsOutOfScopeTurnID(t *testing.T) {
 	q := tools.NewQuery(sessionID, store.Repos(), tools.Options{})
 
 	var events []recordedEvent
-	out, err := builder.GenerateWithTools(context.Background(), bundle(), q, sinkOf(&events))
+	out, err := builder.GenerateWithTools(context.Background(), sessionID, nil, q, &testAssembler{b: bundle()}, sinkOf(&events))
 	if err != nil {
 		t.Fatalf("loop: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestToolLoopRejectsInvalidArgs(t *testing.T) {
 	q := tools.NewQuery(sessionID, store.Repos(), tools.Options{})
 
 	var events []recordedEvent
-	out, err := builder.GenerateWithTools(context.Background(), bundle(), q, sinkOf(&events))
+	out, err := builder.GenerateWithTools(context.Background(), sessionID, nil, q, &testAssembler{b: bundle()}, sinkOf(&events))
 	if err != nil {
 		t.Fatalf("loop: %v", err)
 	}
@@ -187,7 +187,7 @@ func TestToolLoopSingleToolTimeout(t *testing.T) {
 	}}
 
 	var events []recordedEvent
-	out, err := builder.GenerateWithTools(context.Background(), bundle(), exec, sinkOf(&events))
+	out, err := builder.GenerateWithTools(context.Background(), "sess-1", nil, exec, &testAssembler{b: bundle()}, sinkOf(&events))
 	if err != nil {
 		t.Fatalf("loop: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestToolLoopMaxRoundsDegrades(t *testing.T) {
 	}}
 
 	var events []recordedEvent
-	out, err := builder.GenerateWithTools(context.Background(), bundle(), exec, sinkOf(&events))
+	out, err := builder.GenerateWithTools(context.Background(), "sess-1", nil, exec, &testAssembler{b: bundle()}, sinkOf(&events))
 	if err != nil {
 		t.Fatalf("loop: %v", err)
 	}
@@ -233,7 +233,7 @@ func TestToolLoopMaxCallsDegrades(t *testing.T) {
 	}}
 
 	var events []recordedEvent
-	out, err := builder.GenerateWithTools(context.Background(), bundle(), exec, sinkOf(&events))
+	out, err := builder.GenerateWithTools(context.Background(), "sess-1", nil, exec, &testAssembler{b: bundle()}, sinkOf(&events))
 	if err != nil {
 		t.Fatalf("loop: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestToolLoopTotalBudgetDegrades(t *testing.T) {
 	}}
 
 	var events []recordedEvent
-	out, err := builder.GenerateWithTools(context.Background(), bundle(), exec, sinkOf(&events))
+	out, err := builder.GenerateWithTools(context.Background(), "sess-1", nil, exec, &testAssembler{b: bundle()}, sinkOf(&events))
 	if err != nil {
 		t.Fatalf("loop: %v", err)
 	}
@@ -286,7 +286,7 @@ func TestToolLoopTruncatesLargeResult(t *testing.T) {
 	q := tools.NewQuery(sessionID, store.Repos(), tools.Options{MaxResultRunes: 400})
 
 	var events []recordedEvent
-	out, err := builder.GenerateWithTools(context.Background(), bundle(), q, sinkOf(&events))
+	out, err := builder.GenerateWithTools(context.Background(), sessionID, nil, q, &testAssembler{b: bundle()}, sinkOf(&events))
 	if err != nil {
 		t.Fatalf("loop: %v", err)
 	}
@@ -318,7 +318,7 @@ func TestToolLoopEmptyResultDoesNotFabricate(t *testing.T) {
 	q := tools.NewQuery(sessionID, store.Repos(), tools.Options{})
 
 	var events []recordedEvent
-	out, err := builder.GenerateWithTools(context.Background(), bundle(), q, sinkOf(&events))
+	out, err := builder.GenerateWithTools(context.Background(), sessionID, nil, q, &testAssembler{b: bundle()}, sinkOf(&events))
 	if err != nil {
 		t.Fatalf("loop: %v", err)
 	}
@@ -353,7 +353,7 @@ func TestToolLoopHeuristicFallsBack(t *testing.T) {
 	}}
 
 	var events []recordedEvent
-	out, err := builder.GenerateWithTools(context.Background(), bundle(), exec, sinkOf(&events))
+	out, err := builder.GenerateWithTools(context.Background(), "sess-1", nil, exec, &testAssembler{b: bundle()}, sinkOf(&events))
 	if err != nil {
 		t.Fatalf("loop: %v", err)
 	}
@@ -375,7 +375,7 @@ func TestToolLoopEventOrder(t *testing.T) {
 	q := tools.NewQuery(sessionID, store.Repos(), tools.Options{})
 	var events []recordedEvent
 
-	out, err := builder.GenerateWithTools(context.Background(), bundle(), q, sinkOf(&events))
+	out, err := builder.GenerateWithTools(context.Background(), sessionID, nil, q, &testAssembler{b: bundle()}, sinkOf(&events))
 	if err != nil {
 		t.Fatalf("loop: %v", err)
 	}
@@ -425,4 +425,118 @@ func hasEventTruncated(events []recordedEvent) bool {
 		}
 	}
 	return false
+}
+
+// testAssembler stands in for the deterministic evidence collection that runs
+// after the model phase, never before round 1.
+type testAssembler struct {
+	b          tools.Bundle
+	records    []tools.CallRecord
+	collectErr error
+	calls      int
+}
+
+func (a *testAssembler) Collect(context.Context) (tools.Bundle, error) {
+	a.calls++
+	return a.b, a.collectErr
+}
+
+func (a *testAssembler) Records() []tools.CallRecord { return a.records }
+func (a *testAssembler) Calls() int                  { return len(a.records) }
+func (a *testAssembler) Breakdown() map[string]int {
+	out := map[string]int{}
+	for _, r := range a.records {
+		out[r.Tool]++
+	}
+	return out
+}
+
+type recordingClient struct {
+	inner llm.Client
+	reqs  []llm.Request
+	onGen func()
+}
+
+func (c *recordingClient) Generate(ctx context.Context, req llm.Request) (llm.Response, error) {
+	c.reqs = append(c.reqs, req)
+	if c.onGen != nil {
+		c.onGen()
+	}
+	return c.inner.Generate(ctx, req)
+}
+
+// TestAutonomousStartsWithoutPreCollectedEvidence asserts the two fixes:
+// round 1 sees only the task, the tool catalog and the session id, and no code
+// path calls a tool before the model asks for one.
+func TestAutonomousStartsWithoutPreCollectedEvidence(t *testing.T) {
+	_, sessionID := toolFixture(t)
+	asm := &testAssembler{b: bundle()}
+	client := &recordingClient{inner: llm.NewEinoClient(llm.Scripted("loop", finalAction()), "fake")}
+	client.onGen = func() {
+		if asm.calls != 0 {
+			t.Fatalf("deterministic assembly ran before the first model round")
+		}
+	}
+	builder := reportagent.NewBuilder(client, "fake").WithAutonomous(true, reportagent.AutonomousConfig{MaxRounds: 4})
+	exec := &fakeExec{fn: func(context.Context, string, json.RawMessage) (tools.Result, error) {
+		return tools.Result{Tool: "get_turn", Status: tools.StatusOK}, nil
+	}}
+
+	out, err := builder.GenerateWithTools(context.Background(), sessionID, nil, exec, asm, nil)
+	if err != nil {
+		t.Fatalf("loop: %v", err)
+	}
+	if exec.calls != 0 {
+		t.Fatalf("a tool ran without a model action: %d", exec.calls)
+	}
+	if asm.calls != 1 {
+		t.Fatalf("assembly calls = %d, want exactly one post-model collection", asm.calls)
+	}
+	if len(client.reqs) != 1 {
+		t.Fatalf("model requests = %d", len(client.reqs))
+	}
+	start := client.reqs[0]
+	if start.MaxTokens != reportagent.ReportMaxTokens {
+		t.Fatalf("max tokens = %d, want %d", start.MaxTokens, reportagent.ReportMaxTokens)
+	}
+	if !strings.Contains(start.User, "起始上下文未预采集") {
+		t.Fatalf("start message is missing the no-pre-collection note: %s", start.User)
+	}
+	if strings.Contains(start.User, "session_overview_json") {
+		t.Fatalf("start message still inlines the deterministic overview")
+	}
+	if !strings.Contains(start.User, "get_session_overview") {
+		t.Fatalf("start message is missing the tool catalog: %s", start.User)
+	}
+	if out.Degraded || len(out.Report.Sections) != 5 {
+		t.Fatalf("outcome = %+v", out)
+	}
+}
+
+// TestReportMaxTokensCoversMeasuredReport guards the regression that caused the
+// first dual-mode run: the autonomous cap must not be smaller than the output
+// the deterministic report actually needs.
+func TestReportMaxTokensCoversMeasuredReport(t *testing.T) {
+	// docs/eval-results/tool-mode-compare.json: deterministic completion = 1,213.
+	const measuredDeterministicCompletionTokens = 1213
+	if reportagent.ReportMaxTokens < measuredDeterministicCompletionTokens {
+		t.Fatalf("ReportMaxTokens = %d, below the measured report size %d",
+			reportagent.ReportMaxTokens, measuredDeterministicCompletionTokens)
+	}
+}
+
+// TestDeterministicUsesSharedOutputBudget keeps the deterministic arm on the
+// same budget and tool mode after the autonomous refactor.
+func TestDeterministicUsesSharedOutputBudget(t *testing.T) {
+	client := &recordingClient{inner: llm.NewEinoClient(llm.Scripted("scripted", validJSON), "scripted")}
+	out, err := reportagent.NewBuilder(client, "scripted").Generate(context.Background(), bundle())
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if len(client.reqs) != 1 || client.reqs[0].MaxTokens != reportagent.ReportMaxTokens {
+		t.Fatalf("requests = %d max_tokens = %d", len(client.reqs), client.reqs[0].MaxTokens)
+	}
+	if out.Report.ToolMode != "deterministic" || out.ToolRounds != 0 {
+		t.Fatalf("deterministic mode changed: %q rounds=%d", out.Report.ToolMode, out.ToolRounds)
+	}
 }

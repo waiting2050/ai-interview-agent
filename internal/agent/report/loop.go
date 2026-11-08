@@ -34,6 +34,9 @@ const (
 	ReasonOutputInvalid = "report_output_invalid"
 )
 
+// traceRawRunes bounds the raw response kept per model round for audit.
+const traceRawRunes = 2000
+
 // Event is one autonomous-loop event for the app to persist. Payload keys
 // mirror the design document: tool, status, duration_ms, result_bytes and
 // truncated.
@@ -52,6 +55,27 @@ type ToolExecutor interface {
 	Records() []tools.CallRecord
 	Calls() int
 	Breakdown() map[string]int
+}
+
+// BundleSource collects the deterministic evidence used to assemble the report
+// skeleton and to validate turn references. The autonomous loop calls it only
+// after the model phase, so the model never starts from pre-collected facts.
+type BundleSource interface {
+	Collect(ctx context.Context) (tools.Bundle, error)
+	Records() []tools.CallRecord
+	Calls() int
+	Breakdown() map[string]int
+}
+
+// ToolRoundTrace is one raw model response kept for post-run audit. Truncated
+// marks that Raw was shortened to traceRawRunes.
+type ToolRoundTrace struct {
+	Round            int    `json:"round"`
+	Action           string `json:"action,omitempty"`
+	Raw              string `json:"raw"`
+	Truncated        bool   `json:"truncated"`
+	Error            string `json:"error,omitempty"`
+	CompletionTokens int    `json:"completion_tokens"`
 }
 
 // AutonomousConfig are the three hard limits. Zero values fall back to the
@@ -78,7 +102,7 @@ func (c *AutonomousConfig) normalize() {
 // REPORT_TOOL_MODE=autonomous. The deterministic Generator interface stays
 // unchanged so existing callers and tests keep working.
 type AutonomousGenerator interface {
-	GenerateWithTools(ctx context.Context, ev tools.Bundle, exec ToolExecutor, sink EventSink) (Outcome, error)
+	GenerateWithTools(ctx context.Context, sessionID string, dims []string, exec ToolExecutor, assemble BundleSource, sink EventSink) (Outcome, error)
 }
 
 // WithAutonomous enables the model-chosen tool loop. available=false models a
@@ -106,10 +130,13 @@ type action struct {
 	Report json.RawMessage `json:"report"`
 }
 
-// GenerateWithTools runs the bounded model↔tool loop. The deterministic fallback
-// is always available: any budget, transport or output failure returns a
-// complete report instead of failing the run.
-func (b *Builder) GenerateWithTools(ctx context.Context, ev tools.Bundle, exec ToolExecutor, sink EventSink) (Outcome, error) {
+// GenerateWithTools runs the bounded model↔tool loop. Round 1 starts from the
+// task, the tool catalog and the session id only: no evidence is pre-collected.
+// Evidence is assembled once, after the model phase, to build the report
+// skeleton and validate turn ids. The deterministic fallback is always
+// available: any budget, transport or output failure returns a complete report
+// instead of failing the run.
+func (b *Builder) GenerateWithTools(ctx context.Context, sessionID string, dims []string, exec ToolExecutor, assemble BundleSource, sink EventSink) (Outcome, error) {
 	if sink == nil {
 		sink = b.sink
 	}
@@ -120,34 +147,27 @@ func (b *Builder) GenerateWithTools(ctx context.Context, ev tools.Bundle, exec T
 	}
 
 	now := b.now().UTC()
-	base := Fallback(ev, now)
-	base.ModelName = b.modelName
-	base.PromptVersion = prompt.ReportVersion
-
-	out := Outcome{Report: base, ModelName: b.modelName, PromptVersion: prompt.ReportVersion, ToolMode: "autonomous"}
+	out := Outcome{ModelName: b.modelName, PromptVersion: prompt.ReportVersion, ToolMode: "autonomous"}
+	out.Report.SessionID = sessionID
+	out.Report.GeneratedAt = now
 	out.Report.ToolMode = "autonomous"
-
-	if ev.Overview.AnsweredTurns == 0 {
-		out.Report.Degraded = true
-		out.Report.ErrorCode = ErrorCodeNoAnswers
-		out.Degraded = true
-		out.ErrorCode = ErrorCodeNoAnswers
-		out.Report.Sections = out.Report.RenderSections()
-		return out, nil
-	}
 
 	if !b.modelAvailable {
 		emit(EventToolDegraded, map[string]any{"reason": ReasonHeuristic})
-		// The heuristic provider is deterministic by construction: assemble the
-		// report from evaluation data without spending a model call.
-		out.Report = base
-		out.Report.Degraded = false
-		out.Report.ErrorCode = ""
-		out.Report.ToolCalls = ev.Calls
-		out.Report.ToolBreakdown = ev.ToolBreakdown
-		out.Report.ToolCallsDetail = details(ev.ToolCalls)
+		ev, err := b.collectEvidence(ctx, assemble)
+		if err != nil {
+			return Outcome{}, err
+		}
+		out.Report = b.baseReport(ev, now)
+		if ev.Overview.AnsweredTurns == 0 {
+			out.Report.Degraded = true
+			out.Report.ErrorCode = ErrorCodeNoAnswers
+			out.Degraded = true
+			out.ErrorCode = ErrorCodeNoAnswers
+		}
 		out.ToolDegradedReason = ReasonHeuristic
 		out.Report.ToolDegradeReason = ReasonHeuristic
+		b.finish(&out, 0, exec, assemble)
 		out.Report.Sections = out.Report.RenderSections()
 		return out, nil
 	}
@@ -160,20 +180,34 @@ func (b *Builder) GenerateWithTools(ctx context.Context, ev tools.Bundle, exec T
 	}
 	defer cancel()
 
-	overviewJSON, _ := json.Marshal(ev.Overview)
-	user := prompt.ReportToolUser(buildPromptInput(ev), string(overviewJSON))
-	dims := make([]prompt.DimensionSpec, 0, len(ev.Overview.Dimensions))
-	for _, d := range ev.Overview.Dimensions {
-		dims = append(dims, prompt.DimensionSpec{Key: d.Dimension, Name: d.Name})
+	user := prompt.ReportToolStartUser(sessionID, tools.AvailableTools())
+	specs := make([]prompt.DimensionSpec, 0, len(dims))
+	for _, key := range dims {
+		specs = append(specs, prompt.DimensionSpec{Key: key, Name: key})
 	}
-	system := prompt.ReportToolSystem(dims...)
+	system := prompt.ReportToolSystem(specs...)
 
 	var (
 		rounds       int
 		invalidCount int
 		degrade      string
 		transcript   []string
+		bundle       *tools.Bundle
 	)
+
+	// collect runs once, after the model phase. Assembly uses the parent
+	// context so a run-level deadline does not block the deterministic skeleton.
+	collect := func() (tools.Bundle, error) {
+		if bundle != nil {
+			return *bundle, nil
+		}
+		ev, err := b.collectEvidence(ctx, assemble)
+		if err != nil {
+			return tools.Bundle{}, err
+		}
+		bundle = &ev
+		return ev, nil
+	}
 
 	appendTurn := func(text string) {
 		transcript = append(transcript, text)
@@ -184,24 +218,30 @@ func (b *Builder) GenerateWithTools(ctx context.Context, ev tools.Bundle, exec T
 
 	for rounds < cfg.MaxRounds {
 		if runCtx.Err() != nil {
-			return b.budgetFallback(out, ev, rounds, exec, emit)
+			return b.budgetFallback(ctx, out, rounds, exec, assemble, emit)
 		}
 		rounds++
 		resp, err := b.client.Generate(runCtx, llm.Request{
-			System: system, User: composeUser(user, transcript), Temperature: 0.2, MaxTokens: 1200,
+			System: system, User: composeUser(user, transcript), Temperature: 0.2, MaxTokens: ReportMaxTokens,
 		})
 		if err != nil {
 			if ctx.Err() != nil {
 				return Outcome{}, fmt.Errorf("generate report: %w", err)
 			}
 			if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
-				return b.budgetFallback(out, ev, rounds, exec, emit)
+				return b.budgetFallback(ctx, out, rounds, exec, assemble, emit)
+			}
+			ev, cErr := collect()
+			if cErr != nil {
+				return Outcome{}, cErr
 			}
 			return b.modelFallback(out, ev, err), nil
 		}
 		out.Attempts = rounds
 
 		act, parseErr := parseAction(resp.Text)
+		trace := traceRound(rounds, resp, act, parseErr)
+		out.ToolRoundTraces = append(out.ToolRoundTraces, trace)
 		if parseErr != nil {
 			appendTurn(prompt.ReportToolInvalidActionMessage(parseErr.Error()))
 			continue
@@ -210,18 +250,28 @@ func (b *Builder) GenerateWithTools(ctx context.Context, ev tools.Bundle, exec T
 			generated, err := parseFinal(act)
 			if err != nil {
 				out.ValidationIssues = []string{err.Error()}
+				setTraceError(out.ToolRoundTraces, err.Error())
 				appendTurn(prompt.ReportRepairMessage([]string{err.Error()}))
 				continue
 			}
+			ev, cErr := collect()
+			if cErr != nil {
+				return Outcome{}, cErr
+			}
+			if ev.Overview.AnsweredTurns == 0 {
+				return b.noAnswers(out, ev, now, rounds, exec, assemble)
+			}
 			fatal, warnings := validateGenerated(generated, ev.Overview.Turns)
 			if len(fatal) > 0 {
-				out.ValidationIssues = issueStrings(fatal)
-				appendTurn(prompt.ReportRepairMessage(issueStrings(fatal)))
+				issues := issueStrings(fatal)
+				out.ValidationIssues = issues
+				setTraceError(out.ToolRoundTraces, strings.Join(issues, "；"))
+				appendTurn(prompt.ReportRepairMessage(issues))
 				continue
 			}
 			out.ValidationIssues = issueStrings(warnings)
-			out.Report = merge(base, generated, ev)
-			b.finish(&out, "autonomous", rounds, exec)
+			out.Report = merge(b.baseReport(ev, now), generated, ev)
+			b.finish(&out, rounds, exec, assemble)
 			out.Report.Sections = out.Report.RenderSections()
 			return out, nil
 		}
@@ -248,7 +298,7 @@ func (b *Builder) GenerateWithTools(ctx context.Context, ev tools.Bundle, exec T
 				return Outcome{}, fmt.Errorf("execute tool: %w", execErr)
 			}
 			if errors.Is(runCtx.Err(), context.DeadlineExceeded) || errors.Is(execErr, tools.ErrTimeout) && runCtx.Err() != nil {
-				return b.budgetFallback(out, ev, rounds, exec, emit)
+				return b.budgetFallback(ctx, out, rounds, exec, assemble, emit)
 			}
 			reason := classifyToolError(execErr)
 			if reason == tools.StatusTimeout || reason == tools.StatusError {
@@ -299,20 +349,31 @@ func (b *Builder) GenerateWithTools(ctx context.Context, ev tools.Bundle, exec T
 	resp, err := b.client.Generate(runCtx, llm.Request{
 		System:      system,
 		User:        composeUser(user, append(transcript, prompt.ReportToolForceFinalMessage(degrade))),
-		Temperature: 0.2, MaxTokens: 1200,
+		Temperature: 0.2, MaxTokens: ReportMaxTokens,
 	})
 	if err == nil {
 		out.Attempts = rounds
-		if act, parseErr := parseAction(resp.Text); parseErr == nil && act.Action == "final" {
+		act, parseErr := parseAction(resp.Text)
+		out.ToolRoundTraces = append(out.ToolRoundTraces, traceRound(rounds, resp, act, parseErr))
+		if parseErr == nil && act.Action == "final" {
 			if generated, genErr := parseFinal(act); genErr == nil {
+				ev, cErr := collect()
+				if cErr != nil {
+					return Outcome{}, cErr
+				}
 				fatal, warnings := validateGenerated(generated, ev.Overview.Turns)
 				if len(fatal) == 0 {
 					out.ValidationIssues = issueStrings(warnings)
-					out.Report = merge(base, generated, ev)
-					b.finish(&out, "autonomous", rounds, exec)
+					out.Report = merge(b.baseReport(ev, now), generated, ev)
+					out.Report.ToolDegradeReason = degrade
+					b.finish(&out, rounds, exec, assemble)
 					out.Report.Sections = out.Report.RenderSections()
 					return out, nil
 				}
+				out.ValidationIssues = issueStrings(fatal)
+				setTraceError(out.ToolRoundTraces, strings.Join(out.ValidationIssues, "；"))
+			} else {
+				setTraceError(out.ToolRoundTraces, genErr.Error())
 			}
 		}
 	}
@@ -320,34 +381,96 @@ func (b *Builder) GenerateWithTools(ctx context.Context, ev tools.Bundle, exec T
 		return Outcome{}, fmt.Errorf("generate forced final: %w", err)
 	}
 
+	ev, cErr := collect()
+	if cErr != nil {
+		return Outcome{}, cErr
+	}
+
 	// Forced final failed: the deterministic report is still complete.
 	out.Degraded = true
 	out.ErrorCode = ReasonOutputInvalid
+	out.Report = b.baseReport(ev, now)
 	out.Report.Degraded = true
 	out.Report.ErrorCode = ReasonOutputInvalid
 	out.Report.ErrorDetail = "autonomous final failed after " + degrade
-	base = Fallback(ev, now)
-	base.ModelName = b.modelName
-	base.PromptVersion = prompt.ReportVersion
-	base.Degraded = true
-	base.ErrorCode = ReasonOutputInvalid
-	out.Report = base
-	b.finish(&out, "autonomous", rounds, exec)
+	out.Report.ToolDegradeReason = degrade
+	b.finish(&out, rounds, exec, assemble)
 	out.Report.Sections = out.Report.RenderSections()
 	return out, nil
 }
 
-func (b *Builder) finish(out *Outcome, mode string, rounds int, exec ToolExecutor) {
-	out.ToolMode = mode
+func (b *Builder) collectEvidence(ctx context.Context, src BundleSource) (tools.Bundle, error) {
+	if src == nil {
+		return tools.Bundle{}, errors.New("report: autonomous mode requires an evidence bundle source")
+	}
+	return src.Collect(ctx)
+}
+
+func (b *Builder) baseReport(ev tools.Bundle, now time.Time) domain.Report {
+	base := Fallback(ev, now)
+	base.ModelName = b.modelName
+	base.PromptVersion = prompt.ReportVersion
+	base.ToolMode = "autonomous"
+	return base
+}
+
+func (b *Builder) noAnswers(out Outcome, ev tools.Bundle, now time.Time, rounds int, exec ToolExecutor, assemble BundleSource) (Outcome, error) {
+	out.Report = b.baseReport(ev, now)
+	out.Report.Degraded = true
+	out.Report.ErrorCode = ErrorCodeNoAnswers
+	out.Degraded = true
+	out.ErrorCode = ErrorCodeNoAnswers
+	b.finish(&out, rounds, exec, assemble)
+	out.Report.Sections = out.Report.RenderSections()
+	return out, nil
+}
+
+func traceRound(round int, resp llm.Response, act action, issue error) ToolRoundTrace {
+	trace := ToolRoundTrace{
+		Round:            round,
+		Raw:              truncateRunes(resp.Text, traceRawRunes),
+		CompletionTokens: resp.CompletionTokens,
+	}
+	if len([]rune(resp.Text)) > traceRawRunes {
+		trace.Truncated = true
+	}
+	if act.Action != "" {
+		trace.Action = act.Action
+	}
+	if issue != nil {
+		trace.Error = truncateRunes(issue.Error(), 600)
+	}
+	return trace
+}
+
+func setTraceError(traces []ToolRoundTrace, issue string) {
+	if len(traces) == 0 {
+		return
+	}
+	traces[len(traces)-1].Error = truncateRunes(issue, 600)
+}
+
+func (b *Builder) finish(out *Outcome, rounds int, exec ToolExecutor, assemble BundleSource) {
+	out.ToolMode = "autonomous"
 	out.ToolRounds = rounds
-	out.Report.ToolMode = mode
+	out.Report.ToolMode = "autonomous"
 	out.Report.ToolRounds = rounds
 	out.Report.Degraded = out.Degraded
+
+	records := make([]tools.CallRecord, 0, 32)
 	if exec != nil {
-		out.Report.ToolCalls = exec.Calls()
-		out.Report.ToolBreakdown = exec.Breakdown()
-		out.Report.ToolCallsDetail = details(exec.Records())
+		records = append(records, exec.Records()...)
 	}
+	if assemble != nil {
+		records = append(records, assemble.Records()...)
+	}
+	out.Report.ToolCallsDetail = details(records)
+	out.Report.ToolCalls = len(records)
+	byTool := map[string]int{}
+	for _, rec := range records {
+		byTool[rec.Tool]++
+	}
+	out.Report.ToolBreakdown = byTool
 }
 
 func details(records []tools.CallRecord) []domain.ToolCallDetail {
@@ -358,29 +481,25 @@ func details(records []tools.CallRecord) []domain.ToolCallDetail {
 			status = tools.StatusOK
 		}
 		rows = append(rows, domain.ToolCallDetail{
-			Tool: rec.Tool, Status: status, Args: rec.Args, DurationMS: rec.DurationMS,
-			ResultBytes: rec.ResultBytes, Truncated: rec.Truncated, Round: rec.Round,
+			Tool: rec.Tool, Status: status, Section: rec.SectionLabel, Args: rec.Args,
+			DurationMS: rec.DurationMS, ResultBytes: rec.ResultBytes, Truncated: rec.Truncated, Round: rec.Round,
 		})
 	}
 	return rows
 }
 
-func (b *Builder) budgetFallback(out Outcome, ev tools.Bundle, rounds int, exec ToolExecutor, emit func(string, map[string]any)) (Outcome, error) {
+func (b *Builder) budgetFallback(ctx context.Context, out Outcome, rounds int, exec ToolExecutor, assemble BundleSource, emit func(string, map[string]any)) (Outcome, error) {
 	emit(EventToolDegraded, map[string]any{"reason": ReasonBudget})
 	now := b.now().UTC()
-	base := Fallback(ev, now)
-	base.ModelName = b.modelName
-	base.PromptVersion = prompt.ReportVersion
+	ev, err := b.collectEvidence(ctx, assemble)
+	if err != nil {
+		return Outcome{}, err
+	}
+	base := b.baseReport(ev, now)
 	base.Degraded = true
 	base.ErrorCode = ReasonBudget
-	base.ToolMode = "autonomous"
 	base.ToolRounds = rounds
 	base.ToolDegradeReason = ReasonBudget
-	if exec != nil {
-		base.ToolCalls = exec.Calls()
-		base.ToolBreakdown = exec.Breakdown()
-		base.ToolCallsDetail = details(exec.Records())
-	}
 	out.Report = base
 	out.Degraded = true
 	out.ErrorCode = ReasonBudget
@@ -388,15 +507,14 @@ func (b *Builder) budgetFallback(out Outcome, ev tools.Bundle, rounds int, exec 
 	out.ToolMode = "autonomous"
 	out.ToolRounds = rounds
 	out.ToolDegradedReason = ReasonBudget
+	b.finish(&out, rounds, exec, assemble)
 	out.Report.Sections = out.Report.RenderSections()
 	return out, nil
 }
 
 func (b *Builder) modelFallback(out Outcome, ev tools.Bundle, err error) Outcome {
 	now := b.now().UTC()
-	base := Fallback(ev, now)
-	base.ModelName = b.modelName
-	base.PromptVersion = prompt.ReportVersion
+	base := b.baseReport(ev, now)
 	base.Degraded = true
 	base.ErrorCode = ErrorCodeModelUnavailable
 	base.ErrorDetail = "model_unavailable: " + truncateRunes(err.Error(), 300)
@@ -432,11 +550,6 @@ func parseAction(raw string) (action, error) {
 			return action{}, fmt.Errorf("action=tool 缺少 tool 字段")
 		}
 	case "final":
-		return act, nil
-	case "":
-		// Leniency: a bare report object without the wrapper is treated as final.
-		act.Action = "final"
-		act.Report = json.RawMessage(text)
 		return act, nil
 	default:
 		return action{}, fmt.Errorf("未知 action %q", act.Action)

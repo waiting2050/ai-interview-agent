@@ -70,10 +70,13 @@ type Section struct {
 }
 
 // ToolCallDetail is one tool call in the autonomous report loop. Status and
-// truncation are persisted so a degraded or truncated run is auditable.
+// truncation are persisted so a degraded or truncated run is auditable. Section
+// separates model-chosen calls ("autonomous") from code-side evidence
+// assembly ("evidence").
 type ToolCallDetail struct {
 	Tool        string `json:"tool"`
 	Status      string `json:"status"`
+	Section     string `json:"section,omitempty"`
 	Args        string `json:"args,omitempty"`
 	DurationMS  int64  `json:"duration_ms"`
 	ResultBytes int    `json:"result_bytes"`

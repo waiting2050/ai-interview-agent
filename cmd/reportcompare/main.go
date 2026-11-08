@@ -26,27 +26,32 @@ import (
 )
 
 type modeResult struct {
-	Mode             string            `json:"mode"`
-	ModelCalls       int               `json:"model_calls"`
-	PromptTokens     int               `json:"prompt_tokens"`
-	CompletionTokens int               `json:"completion_tokens"`
-	DurationMS       int64             `json:"duration_ms"`
-	ToolRounds       int               `json:"tool_rounds"`
-	ToolCalls        int               `json:"tool_calls"`
-	ToolOrder        []string          `json:"tool_order"`
-	ToolDetails      []toolDetail      `json:"tool_details"`
-	Degraded         bool              `json:"degraded"`
-	DegradeReason    string            `json:"degrade_reason,omitempty"`
-	Sections         int               `json:"sections"`
-	SectionTitles    []string          `json:"section_titles"`
-	Unauthorized     bool              `json:"unauthorized"`
-	OverBudget       bool              `json:"over_budget"`
-	Truncated        bool              `json:"truncated"`
-	Attempts         int               `json:"attempts"`
-	ValidationIssues []string          `json:"validation_issues,omitempty"`
-	Events           []eventRow        `json:"events,omitempty"`
-	SectionsText     map[string]string `json:"sections_text"`
-	Report           json.RawMessage   `json:"report"`
+	Mode             string                  `json:"mode"`
+	ModelCalls       int                     `json:"model_calls"`
+	PromptTokens     int                     `json:"prompt_tokens"`
+	CompletionTokens int                     `json:"completion_tokens"`
+	DurationMS       int64                   `json:"duration_ms"`
+	ToolRounds       int                     `json:"tool_rounds"`
+	ToolCalls        int                     `json:"tool_calls"`
+	ToolOrder        []string                `json:"tool_order"`
+	ToolDetails      []toolDetail            `json:"tool_details"`
+	Degraded         bool                    `json:"degraded"`
+	DegradeReason    string                  `json:"degrade_reason,omitempty"`
+	Sections         int                     `json:"sections"`
+	SectionTitles    []string                `json:"section_titles"`
+	Unauthorized     bool                    `json:"unauthorized"`
+	OverBudget       bool                    `json:"over_budget"`
+	Truncated        bool                    `json:"truncated"`
+	ModelToolCalls   int                     `json:"model_tool_calls"`
+	ModelToolOrder   []string                `json:"model_tool_order"`
+	CodeToolCalls    int                     `json:"code_tool_calls"`
+	CodeToolOrder    []string                `json:"code_tool_order"`
+	RoundTraces      []report.ToolRoundTrace `json:"round_traces,omitempty"`
+	Attempts         int                     `json:"attempts"`
+	ValidationIssues []string                `json:"validation_issues,omitempty"`
+	Events           []eventRow              `json:"events,omitempty"`
+	SectionsText     map[string]string       `json:"sections_text"`
+	Report           json.RawMessage         `json:"report"`
 }
 
 type eventRow struct {
@@ -162,8 +167,12 @@ func run() error {
 
 	pack := domainpack.Default().MustGet(done.Domain)
 	opts := tools.Options{}
+	var dimKeys []string
 	if pack != nil {
 		opts.Rubric = pack.EvaluationRubric()
+		for _, d := range pack.Rubric.Dimensions {
+			dimKeys = append(dimKeys, d.Key)
+		}
 	}
 	q := tools.NewQuery(done.ID, store.Repos(), opts)
 	bundle, err := q.Collect(ctx)
@@ -190,19 +199,18 @@ func run() error {
 	autoBuilder := report.NewBuilder(autoClient, info.Model).WithAutonomous(true, report.AutonomousConfig{
 		MaxRounds: 6, MaxCalls: 12, Timeout: timeout,
 	})
-	// A fresh query keeps the autonomous budget independent; the evidence
-	// bundle is exactly the same object the deterministic run used.
+	// The autonomous arm starts from the session id and the tool catalog only:
+	// the model query is never pre-populated. A separate assembly query collects
+	// the deterministic skeleton after the model phase.
 	autoQuery := tools.NewQuery(done.ID, store.Repos(), opts)
-	if _, err := autoQuery.Collect(ctx); err != nil {
-		return fmt.Errorf("autonomous collect: %w", err)
-	}
 	autoQuery.BeginSection("autonomous")
+	assemblyQuery := tools.NewQuery(done.ID, store.Repos(), opts)
 	var events []eventRow
 	sink := func(ev report.Event) {
 		events = append(events, eventRow{Type: ev.Type, Payload: ev.Payload})
 	}
 	autoStart := time.Now()
-	autoOut, autoErr := autoBuilder.GenerateWithTools(ctx, bundle, autoQuery, sink)
+	autoOut, autoErr := autoBuilder.GenerateWithTools(ctx, done.ID, dimKeys, autoQuery, assemblyQuery, sink)
 	autoDuration := time.Since(autoStart)
 	if autoErr != nil {
 		return fmt.Errorf("autonomous report: %w", autoErr)
@@ -210,7 +218,7 @@ func run() error {
 
 	det := measure("deterministic", detClient, detDuration, detOut, nil)
 	auto := measure("autonomous", autoClient, autoDuration, autoOut, events)
-	if det.ModelCalls+auto.ModelCalls > 12 {
+	if det.ModelCalls+auto.ModelCalls > 14 {
 		fmt.Fprintf(os.Stderr, "call cap exceeded: det=%d auto=%d total=%d\n", det.ModelCalls, auto.ModelCalls, det.ModelCalls+auto.ModelCalls)
 	}
 	diff := map[string]bool{}
@@ -219,38 +227,45 @@ func run() error {
 			diff[title] = true
 		}
 	}
-	extra := make([]string, 0, len(auto.ToolDetails))
-	for _, d := range auto.ToolDetails {
-		extra = append(extra, d.Tool)
-	}
 
 	summary := map[string]any{
-		"session_id":          done.ID,
-		"model":               info.Model,
-		"provider":            info.Provider,
-		"answers":             countTurns(store, done.ID),
-		"autonomous_timeout":  timeout.String(),
-		"different_sections":  diff,
-		"autonomous_tool_seq": extra,
-		"deterministic":       det,
-		"autonomous":          auto,
+		"session_id":         done.ID,
+		"model":              info.Model,
+		"provider":           info.Provider,
+		"answers":            countTurns(store, done.ID),
+		"autonomous_timeout": timeout.String(),
+		"different_sections": diff,
+		"deterministic":      det,
+		"autonomous":         auto,
 	}
 	body, err := json.MarshalIndent(summary, "", "  ")
 	if err != nil {
 		return err
 	}
-	outPath := filepath.Join("docs", "eval-results", "tool-mode-compare.json")
+	outPath := filepath.Join("docs", "eval-results", "tool-mode-compare-v2.json")
+	if raw := strings.TrimSpace(os.Getenv("REPORT_COMPARE_OUT")); raw != "" {
+		outPath = raw
+	}
 	if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
 		return err
 	}
 	if err := os.WriteFile(outPath, body, 0o644); err != nil {
 		return err
 	}
-	fmt.Printf("det calls=%d prompt=%d completion=%d ms=%d degraded=%v tools=%v\n",
-		det.ModelCalls, det.PromptTokens, det.CompletionTokens, det.DurationMS, det.Degraded, det.ToolOrder)
+	fmt.Printf("det calls=%d prompt=%d completion=%d ms=%d degraded=%v model_tools=%v code_tools=%v\n",
+		det.ModelCalls, det.PromptTokens, det.CompletionTokens, det.DurationMS, det.Degraded,
+		det.ModelToolOrder, det.CodeToolOrder)
 	fmt.Printf("auto calls=%d prompt=%d completion=%d ms=%d degraded=%v reason=%s rounds=%d\n",
 		auto.ModelCalls, auto.PromptTokens, auto.CompletionTokens, auto.DurationMS, auto.Degraded, auto.DegradeReason, auto.ToolRounds)
-	fmt.Printf("auto tool seq=%v events=%d different sections=%v\n", extra, len(auto.Events), diff)
+	fmt.Printf("auto model_tools=%v code_tools=%v events=%d different sections=%v\n",
+		auto.ModelToolOrder, auto.CodeToolOrder, len(auto.Events), diff)
+	for _, tr := range auto.RoundTraces {
+		fmt.Printf("round %d action=%q tokens=%d truncated=%v error=%q\n",
+			tr.Round, tr.Action, tr.CompletionTokens, tr.Truncated, tr.Error)
+	}
+	for _, issue := range auto.ValidationIssues {
+		fmt.Printf("validation: %s\n", issue)
+	}
 	fmt.Println("written:", outPath)
 	return nil
 }
@@ -267,6 +282,8 @@ func measure(mode string, c *countingClient, dur time.Duration, out report.Outco
 	}
 	details := make([]toolDetail, 0, len(rep.ToolCallsDetail))
 	order := make([]string, 0, len(rep.ToolCallsDetail))
+	modelOrder := make([]string, 0, len(rep.ToolCallsDetail))
+	codeOrder := make([]string, 0, len(rep.ToolCallsDetail))
 	unauthorized, overBudget, truncated := false, false, false
 	for _, d := range rep.ToolCallsDetail {
 		details = append(details, toolDetail{
@@ -274,6 +291,11 @@ func measure(mode string, c *countingClient, dur time.Duration, out report.Outco
 			Round: d.Round, ResultBytes: d.ResultBytes,
 		})
 		order = append(order, d.Tool)
+		if d.Section == "autonomous" {
+			modelOrder = append(modelOrder, d.Tool)
+		} else {
+			codeOrder = append(codeOrder, d.Tool)
+		}
 		if strings.Contains(d.Status, "denied") || d.Status == "denied" {
 			unauthorized = true
 		}
@@ -290,10 +312,13 @@ func measure(mode string, c *countingClient, dur time.Duration, out report.Outco
 		PromptTokens: c.promptTokens, CompletionTokens: c.completionTokens,
 		DurationMS: dur.Milliseconds(), ToolRounds: rep.ToolRounds,
 		ToolCalls: rep.ToolCalls, ToolOrder: order, ToolDetails: details,
+		ModelToolCalls: len(modelOrder), ModelToolOrder: modelOrder,
+		CodeToolCalls: len(codeOrder), CodeToolOrder: codeOrder,
 		Degraded: rep.Degraded, DegradeReason: rep.ToolDegradeReason,
 		Sections: len(rep.Sections), SectionTitles: titles,
 		Unauthorized: unauthorized, OverBudget: overBudget, Truncated: truncated,
-		Attempts: out.Attempts, ValidationIssues: out.ValidationIssues,
+		RoundTraces: out.ToolRoundTraces,
+		Attempts:    out.Attempts, ValidationIssues: out.ValidationIssues,
 		Events: events, SectionsText: sectionsText, Report: raw,
 	}
 }

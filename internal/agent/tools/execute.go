@@ -205,7 +205,7 @@ func (q *Query) Execute(ctx context.Context, tool string, args json.RawMessage) 
 	} else {
 		// The individual tool methods record their own calls; this envelope
 		// record is only needed when truncation changed the reported size.
-		q.patchLastRecord(tool, StatusEmpty, len(body))
+		q.patchLastRecord(tool, status, len(body))
 		if status == StatusEmpty {
 			result.Note = "无命中：这是真实的空结果，不要编造证据"
 		}
