@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/waiting2050/ai-interview-agent/internal/agent/interview"
+	"github.com/waiting2050/ai-interview-agent/internal/agent/knowledge"
 	"github.com/waiting2050/ai-interview-agent/internal/agent/llm"
 	"github.com/waiting2050/ai-interview-agent/internal/agent/report"
 	httpapi "github.com/waiting2050/ai-interview-agent/internal/api/http"
@@ -34,6 +35,20 @@ func main() {
 	if err := run(); err != nil {
 		slog.Error("server exited", "error", err)
 		os.Exit(1)
+	}
+}
+
+// retrievalMode maps the configuration switch to the retriever's configured
+// mode. "auto" and "hybrid" both try hybrid first and degrade when the
+// embedding endpoint is unavailable.
+func retrievalMode(configured string) knowledge.Mode {
+	switch configured {
+	case config.RAGModeOff:
+		return knowledge.ModeOff
+	case config.RAGModeBM25:
+		return knowledge.ModeBM25
+	default:
+		return knowledge.ModeHybrid
 	}
 }
 
@@ -95,10 +110,57 @@ func run() error {
 		llm.NewInstrumentedClient(modelClient, provider.Provider, provider.Model, "question", metrics, usage),
 		provider.Model,
 	)
-	reportGenerator := report.NewBuilder(
+	// Retrieval is wired here so /healthz can report warming honestly and the
+	// autonomous report loop can expose search_knowledge. The embedder probe
+	// runs in the background: a cold local model needs ~25s and must not delay
+	// the HTTP listener.
+	retriever := knowledge.NewRetriever(postgres.NewKnowledge(store.Pool()),
+		knowledge.NewEmbedder(knowledge.EmbeddingConfig{
+			Provider:     cfg.M20.EmbeddingProvider,
+			BaseURL:      cfg.M20.EmbeddingBaseURL,
+			APIKey:       cfg.M20.EmbeddingAPIKey,
+			Model:        cfg.M20.EmbeddingModel,
+			Dim:          cfg.M20.EmbeddingDim,
+			Batch:        cfg.M20.EmbeddingBatch,
+			Timeout:      cfg.M20.EmbeddingTimeout,
+			ProbeTimeout: cfg.M20.EmbeddingProbeTimeout,
+			PricePerMTOK: cfg.M20.EmbeddingPricePerMTOK,
+		}, logger),
+		knowledge.Options{
+			Mode:         retrievalMode(cfg.M20.RAGMode),
+			TopK:         cfg.M20.RAGTopK,
+			Candidate:    cfg.M20.RAGCandidate,
+			RRFK:         cfg.M20.RAGRRFK,
+			BM25Weight:   cfg.M20.RAGBM25Weight,
+			VectorWeight: cfg.M20.RAGVectorWeight,
+			Logger:       logger,
+		})
+	refreshCtx, cancelRefresh := context.WithTimeout(ctx, 10*time.Second)
+	if err := retriever.Refresh(refreshCtx); err != nil {
+		logger.Warn("retrieval corpus not loaded; rag will serve no chunks", "error", err)
+	}
+	cancelRefresh()
+	retriever.Init(ctx)
+	logger.Info("retrieval warm-up started", "configured_mode", cfg.M20.RAGMode)
+
+	reportBuilder := report.NewBuilder(
 		llm.NewInstrumentedClient(modelClient, provider.Provider, provider.Model, "report", metrics, usage),
 		provider.Model,
 	)
+	if cfg.M20.ReportToolMode == config.ReportToolAutonomous {
+		// Only a real provider can drive the loop; the heuristic model falls
+		// back to deterministic with an explicit WARN and event.
+		reportBuilder.WithAutonomous(!provider.Fallback, report.AutonomousConfig{
+			MaxRounds: cfg.M20.ReportToolMaxRounds,
+			MaxCalls:  cfg.M20.ReportToolMaxCalls,
+			Timeout:   cfg.M20.ReportToolTimeout,
+		})
+		logger.Info("report tool loop enabled", "mode", cfg.M20.ReportToolMode,
+			"model_available", !provider.Fallback,
+			"max_rounds", cfg.M20.ReportToolMaxRounds,
+			"max_calls", cfg.M20.ReportToolMaxCalls,
+			"timeout", cfg.M20.ReportToolTimeout)
+	}
 
 	// The session lock must be shared across instances. Without a reachable
 	// Redis the process falls back to its in-process lock, which keeps a single
@@ -135,7 +197,14 @@ func run() error {
 		Evaluator:         evaluator,
 		QuestionGenerator: generator,
 		AnswerGraph:       answerGraph,
-		ReportGenerator:   reportGenerator,
+		ReportGenerator:   reportBuilder,
+		ReportTool: app.ReportToolOptions{
+			Mode:      cfg.M20.ReportToolMode,
+			MaxRounds: cfg.M20.ReportToolMaxRounds,
+			MaxCalls:  cfg.M20.ReportToolMaxCalls,
+			Timeout:   cfg.M20.ReportToolTimeout,
+			Searcher:  retriever,
+		},
 		Locker:            locker,
 		LockRenewInterval: cfg.LockTTL / 3,
 		Metrics:           metrics,
@@ -206,6 +275,7 @@ func run() error {
 			Service:         svc,
 			Auth:            authSvc,
 			Health:          store.Ping,
+			RetrievalStatus: retriever.Status,
 			Logger:          logger,
 			Metrics:         metrics,
 			DemoLoginLimit:  cfg.DemoLoginLimit,

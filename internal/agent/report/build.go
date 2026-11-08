@@ -24,6 +24,11 @@ type Outcome struct {
 	Attempts      int
 	ModelName     string
 	PromptVersion string
+	// ToolMode is deterministic or autonomous. ToolDegradedReason is set when
+	// the autonomous loop hit a limit but still produced a complete report.
+	ToolMode           string
+	ToolRounds         int
+	ToolDegradedReason string
 	// ValidationIssues lists every field-level problem found in the last
 	// attempt. Fatal issues cause degradation; warnings only fall back to
 	// deterministic values for the affected field.
@@ -40,6 +45,11 @@ type Builder struct {
 	modelName   string
 	maxAttempts int
 	now         func() time.Time
+
+	autonomous     bool
+	modelAvailable bool
+	auton          AutonomousConfig
+	sink           EventSink
 }
 
 func NewBuilder(client llm.Client, modelName string) *Builder {
@@ -56,8 +66,10 @@ func (b *Builder) Generate(ctx context.Context, ev tools.Bundle) (Outcome, error
 	base := Fallback(ev, now)
 	base.ModelName = b.modelName
 	base.PromptVersion = prompt.ReportVersion
+	base.ToolMode = "deterministic"
+	base.ToolCallsDetail = details(ev.ToolCalls)
 
-	out := Outcome{Report: base, ModelName: b.modelName, PromptVersion: prompt.ReportVersion}
+	out := Outcome{Report: base, ModelName: b.modelName, PromptVersion: prompt.ReportVersion, ToolMode: "deterministic"}
 	if ev.Overview.AnsweredTurns == 0 {
 		out.Report.Degraded = true
 		out.Report.ErrorCode = ErrorCodeNoAnswers

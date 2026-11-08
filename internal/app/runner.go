@@ -11,6 +11,7 @@ import (
 	"github.com/waiting2050/ai-interview-agent/internal/agent/interview"
 	"github.com/waiting2050/ai-interview-agent/internal/agent/llm"
 	"github.com/waiting2050/ai-interview-agent/internal/agent/report"
+	"github.com/waiting2050/ai-interview-agent/internal/agent/tools"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/session"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/idgen"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/obs"
@@ -30,12 +31,23 @@ type Runner struct {
 	answerSteps AnswerSteps
 	answerGraph *interview.AnswerGraph
 	reports     report.Generator
+	reportTool  ReportToolOptions
 	now         func() time.Time
 	log         *slog.Logger
 	metrics     *obs.Metrics
 	usage       *obs.UsageTracker
 	tracer      *trace.Tracer
 	maxFailures int
+}
+
+// ReportToolOptions carries the autonomous-report switch and limits. The
+// default zero value keeps the deterministic evidence plan.
+type ReportToolOptions struct {
+	Mode      string
+	MaxRounds int
+	MaxCalls  int
+	Timeout   time.Duration
+	Searcher  tools.Searcher
 }
 
 func NewRunner(store ports.Store, steps StartSteps, answerSteps AnswerSteps, answerGraph *interview.AnswerGraph, reports report.Generator, now func() time.Time, log *slog.Logger, metrics *obs.Metrics, usage *obs.UsageTracker, tracer *trace.Tracer, maxFailures int) *Runner {

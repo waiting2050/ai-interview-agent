@@ -69,6 +69,18 @@ type Section struct {
 	ToolCalls int      `json:"tool_calls"`
 }
 
+// ToolCallDetail is one tool call in the autonomous report loop. Status and
+// truncation are persisted so a degraded or truncated run is auditable.
+type ToolCallDetail struct {
+	Tool        string `json:"tool"`
+	Status      string `json:"status"`
+	Args        string `json:"args,omitempty"`
+	DurationMS  int64  `json:"duration_ms"`
+	ResultBytes int    `json:"result_bytes"`
+	Truncated   bool   `json:"truncated"`
+	Round       int    `json:"round,omitempty"`
+}
+
 // Report is the full structured deliverable.
 type Report struct {
 	SchemaVersion int              `json:"schema_version"`
@@ -88,6 +100,12 @@ type Report struct {
 	Sections      []Section        `json:"sections"`
 	ToolCalls     int              `json:"tool_calls"`
 	ToolBreakdown map[string]int   `json:"tool_breakdown,omitempty"`
+	// ToolMode records which evidence path produced the report. The
+	// deterministic default keeps the pre-M20 shape.
+	ToolMode          string           `json:"tool_mode,omitempty"`
+	ToolRounds        int              `json:"tool_rounds,omitempty"`
+	ToolCallsDetail   []ToolCallDetail `json:"tool_calls_detail,omitempty"`
+	ToolDegradeReason string           `json:"tool_degraded_reason,omitempty"`
 	// Usage fields follow the tool_calls naming convention: a total plus an
 	// optional per-purpose breakdown.
 	ModelCalls         int               `json:"model_calls"`

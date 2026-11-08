@@ -1,0 +1,539 @@
+{
+  "version": "rag-eval-v2",
+  "note": "54 条固定 query。A 组 25 条沿用文档/题纲原文措辞，B 组 25 条为口语化、同义改写或跨章节意图（不得复用文档原句），另 4 条无答案单独校准拒答阈值。标签用 topic_id 或 source_path+section_prefix，避免绑定 chunk id。",
+  "queries": [
+    {
+      "id": "a01",
+      "group": "A",
+      "category": "keyword",
+      "query": "goroutine G-M-P 调度",
+      "answerable": true,
+      "expected": [{"topic_id": "go-concurrency"}]
+    },
+    {
+      "id": "a02",
+      "group": "A",
+      "category": "keyword",
+      "query": "B+ 树 最左前缀 回表",
+      "answerable": true,
+      "expected": [{"topic_id": "mysql-index"}, {"domain": "go-backend", "title": "索引"}]
+    },
+    {
+      "id": "a03",
+      "group": "A",
+      "category": "keyword",
+      "query": "Read View undo log 幻读",
+      "answerable": true,
+      "expected": [{"topic_id": "mysql-mvcc"}]
+    },
+    {
+      "id": "a04",
+      "group": "A",
+      "category": "keyword",
+      "query": "HNSW ef_construction m 参数",
+      "answerable": true,
+      "expected": [{"source_path": "docs/m20-design.md", "section_prefix": "3-4-表、索引与体积"}]
+    },
+    {
+      "id": "a05",
+      "group": "A",
+      "category": "keyword",
+      "query": "RRF 融合 BM25 向量",
+      "answerable": true,
+      "expected": [{"source_path": "docs/m20-design.md", "section_prefix": "3-5-混合检索与-rrf"}]
+    },
+    {
+      "id": "a06",
+      "group": "A",
+      "category": "keyword",
+      "query": "令牌桶 Lua 原子脚本 限流",
+      "answerable": true,
+      "expected": [{"topic_id": "redis-limit"}]
+    },
+    {
+      "id": "a07",
+      "group": "A",
+      "category": "alias",
+      "query": "golang 协程调度器原理",
+      "answerable": true,
+      "expected": [{"topic_id": "go-concurrency"}]
+    },
+    {
+      "id": "a08",
+      "group": "A",
+      "category": "alias",
+      "query": "mysql 事务隔离级别可见性实现",
+      "answerable": true,
+      "expected": [{"topic_id": "mysql-mvcc"}]
+    },
+    {
+      "id": "a09",
+      "group": "A",
+      "category": "alias",
+      "query": "缓存击穿怎么防",
+      "answerable": true,
+      "expected": [{"topic_id": "redis-cache"}]
+    },
+    {
+      "id": "a10",
+      "group": "A",
+      "category": "alias",
+      "query": "面试报告重复生成怎么防",
+      "answerable": true,
+      "expected": [
+        {"source_path": "docs/interview-qa.md", "section_prefix": "3-状态机、幂等与崩溃恢复"},
+        {"source_path": "docs/interview-qa.md", "section_prefix": "5-报告"},
+        {"topic_id": "go-arch-idempotency"}
+      ]
+    },
+    {
+      "id": "a11",
+      "group": "A",
+      "category": "keyword",
+      "query": "Redis 分布式锁 SETNX 续期 锁丢失",
+      "answerable": true,
+      "expected": [{"topic_id": "redis-lock"}]
+    },
+    {
+      "id": "a12",
+      "group": "A",
+      "category": "keyword",
+      "query": "Go channel hchan 发送接收 阻塞",
+      "answerable": true,
+      "expected": [{"topic_id": "go-concurrency"}]
+    },
+    {
+      "id": "a13",
+      "group": "A",
+      "category": "keyword",
+      "query": "MySQL 分库分表 路由 跨分片聚合",
+      "answerable": true,
+      "expected": [{"topic_id": "mysql-shard"}]
+    },
+    {
+      "id": "a14",
+      "group": "A",
+      "category": "keyword",
+      "query": "JVM G1 Region 停顿时间预测",
+      "answerable": true,
+      "expected": [{"topic_id": "jvm-gc"}]
+    },
+    {
+      "id": "a15",
+      "group": "A",
+      "category": "keyword",
+      "query": "@Transactional 事务失效 自调用",
+      "answerable": true,
+      "expected": [{"topic_id": "spring-transaction"}]
+    },
+    {
+      "id": "a16",
+      "group": "A",
+      "category": "keyword",
+      "query": "synchronized 偏向锁 轻量级锁 锁升级",
+      "answerable": true,
+      "expected": [{"topic_id": "jvm-concurrency-lock"}]
+    },
+    {
+      "id": "a17",
+      "group": "A",
+      "category": "keyword",
+      "query": "Redis RDB AOF 持久化 数据恢复",
+      "answerable": true,
+      "expected": [{"topic_id": "redis-persist"}]
+    },
+    {
+      "id": "a18",
+      "group": "A",
+      "category": "keyword",
+      "query": "MySQL 主从复制 半同步 延迟",
+      "answerable": true,
+      "expected": [{"topic_id": "mysql-replica"}]
+    },
+    {
+      "id": "a19",
+      "group": "A",
+      "category": "keyword",
+      "query": "Go 内存逃逸分析 栈上分配",
+      "answerable": true,
+      "expected": [{"topic_id": "go-memory"}]
+    },
+    {
+      "id": "a20",
+      "group": "A",
+      "category": "keyword",
+      "query": "Spring Bean 循环依赖 三级缓存",
+      "answerable": true,
+      "expected": [{"topic_id": "spring-bean-lifecycle"}]
+    },
+    {
+      "id": "a21",
+      "group": "A",
+      "category": "keyword",
+      "query": "Kafka 重复消费 幂等 去重表",
+      "answerable": true,
+      "expected": [{"topic_id": "spring-mq-idempotency"}]
+    },
+    {
+      "id": "a22",
+      "group": "A",
+      "category": "keyword",
+      "query": "服务分层 依赖倒置 ports adapters",
+      "answerable": true,
+      "expected": [{"topic_id": "go-arch-layering"}]
+    },
+    {
+      "id": "a23",
+      "group": "A",
+      "category": "keyword",
+      "query": "RAG 切块 语义边界 重叠窗口",
+      "answerable": true,
+      "expected": [{"topic_id": "rag-chunking"}]
+    },
+    {
+      "id": "a24",
+      "group": "A",
+      "category": "keyword",
+      "query": "pgvector HNSW 索引 近似最近邻",
+      "answerable": true,
+      "expected": [{"topic_id": "rag-vector-store"}]
+    },
+    {
+      "id": "a25",
+      "group": "A",
+      "category": "keyword",
+      "query": "hit@5 MRR 评测 误召回",
+      "answerable": true,
+      "expected": [
+        {"topic_id": "rag-eval"},
+        {"source_path": "docs/m20-design.md", "section_prefix": "3-9-检索质量评测"}
+      ]
+    },
+    {
+      "id": "b01",
+      "group": "B",
+      "category": "paraphrase",
+      "rewrite": "synonym",
+      "query": "高并发下共享状态怎么加锁，锁粒度如何权衡",
+      "answerable": true,
+      "expected": [{"topic_id": "go-arch-lock"}]
+    },
+    {
+      "id": "b02",
+      "group": "B",
+      "category": "paraphrase",
+      "rewrite": "synonym",
+      "query": "线上内存持续上涨，怎么用 pprof 定位",
+      "answerable": true,
+      "expected": [{"topic_id": "go-observability"}, {"topic_id": "go-memory"}]
+    },
+    {
+      "id": "b03",
+      "group": "B",
+      "category": "paraphrase",
+      "rewrite": "synonym",
+      "query": "数据库连接池和事务边界该怎么设计",
+      "answerable": true,
+      "expected": [{"topic_id": "go-db"}]
+    },
+    {
+      "id": "b04",
+      "group": "B",
+      "category": "paraphrase",
+      "rewrite": "synonym",
+      "query": "重复提交怎么保证只生效一次",
+      "answerable": true,
+      "expected": [
+        {"topic_id": "go-arch-idempotency"},
+        {"source_path": "docs/design-rationale.md", "section_prefix": "6-三重幂等：幂等键、唯一约束、状态机"}
+      ]
+    },
+    {
+      "id": "b05",
+      "group": "B",
+      "category": "paraphrase",
+      "rewrite": "synonym",
+      "query": "下游依赖挂了服务怎么降级",
+      "answerable": true,
+      "expected": [{"topic_id": "go-arch-degradation"}]
+    },
+    {
+      "id": "b06",
+      "group": "B",
+      "category": "paraphrase",
+      "rewrite": "synonym",
+      "query": "为什么要分层，领域层能不能依赖数据库",
+      "answerable": true,
+      "expected": [{"topic_id": "go-arch-layering"}]
+    },
+    {
+      "id": "b07",
+      "group": "B",
+      "category": "cross_doc",
+      "rewrite": "cross_section",
+      "query": "评测集有多少条，档位命中率是多少",
+      "answerable": true,
+      "expected": [
+        {"source_path": "docs/development-plan.md", "section_prefix": "6-5-评测方案"},
+        {"source_path": "docs/interview-qa.md", "section_prefix": "12-评测"},
+        {"source_path": "README.md", "section_prefix": "验证与评测"}
+      ]
+    },
+    {
+      "id": "b08",
+      "group": "B",
+      "category": "cross_doc",
+      "rewrite": "cross_section",
+      "query": "embedding 不可用时检索退回什么模式",
+      "answerable": true,
+      "expected": [{"source_path": "docs/m20-design.md", "section_prefix": "3-6-embedding-配置与降级矩阵"}]
+    },
+    {
+      "id": "b09",
+      "group": "B",
+      "category": "cross_doc",
+      "rewrite": "cross_section",
+      "query": "报告阶段是确定性采集还是模型自主调工具",
+      "answerable": true,
+      "expected": [
+        {"source_path": "docs/m20-design.md", "section_prefix": "4-2-协议：结构化-json"},
+        {"source_path": "docs/m20-design.md", "section_prefix": "4-5-开关与默认"}
+      ]
+    },
+    {
+      "id": "b10",
+      "group": "B",
+      "category": "cross_doc",
+      "rewrite": "cross_section",
+      "query": "分层记忆最近保留几轮原文，多久压缩一次",
+      "answerable": true,
+      "expected": [
+        {"source_path": "docs/m20-design.md", "section_prefix": "5-1-三层结构"},
+        {"source_path": "docs/m20-design.md", "section_prefix": "5-3-触发阈值"}
+      ]
+    },
+    {
+      "id": "b11",
+      "group": "B",
+      "category": "logic",
+      "rewrite": "cross_section",
+      "query": "怎么保证打分不飘",
+      "answerable": true,
+      "expected": [
+        {"source_path": "docs/design-rationale.md", "section_prefix": "5-分数由确定性评估给出，模型只写点评"},
+        {"source_path": "docs/development-plan.md", "section_prefix": "6-5-评测方案"},
+        {"source_path": "docs/project-walkthrough.md", "section_prefix": "13-评测体系"}
+      ]
+    },
+    {
+      "id": "b12",
+      "group": "B",
+      "category": "logic",
+      "rewrite": "cross_section",
+      "query": "两个服务同时处理同一场会怎样",
+      "answerable": true,
+      "expected": [
+        {"source_path": "docs/design-rationale.md", "section_prefix": "7-锁-postgresql-约束双保险"},
+        {"source_path": "docs/development-plan.md", "section_prefix": "3-4-并发控制"},
+        {"source_path": "docs/development-plan.md", "section_prefix": "3-5-崩溃恢复"},
+        {"source_path": "docs/project-walkthrough.md", "section_prefix": "9-存储、并发与会话锁"}
+      ]
+    },
+    {
+      "id": "b13",
+      "group": "B",
+      "category": "logic",
+      "rewrite": "synonym",
+      "query": "换个模型分数会不会变",
+      "answerable": true,
+      "expected": [
+        {"source_path": "docs/design-rationale.md", "section_prefix": "5-分数由确定性评估给出，模型只写点评"},
+        {"source_path": "docs/development-plan.md", "section_prefix": "4-4-假模型与真实模型"},
+        {"source_path": "docs/interview-qa.md", "section_prefix": "12-评测"}
+      ]
+    },
+    {
+      "id": "b14",
+      "group": "B",
+      "category": "logic",
+      "rewrite": "synonym",
+      "query": "同一个请求点两次会不会重复出题",
+      "answerable": true,
+      "expected": [
+        {"source_path": "docs/design-rationale.md", "section_prefix": "6-三重幂等：幂等键、唯一约束、状态机"},
+        {"source_path": "docs/interview-qa.md", "section_prefix": "3-状态机、幂等与崩溃恢复"},
+        {"source_path": "docs/development-plan.md", "section_prefix": "3-4-并发控制"}
+      ]
+    },
+    {
+      "id": "b15",
+      "group": "B",
+      "category": "logic",
+      "rewrite": "cross_section",
+      "query": "服务重启时正在跑的那次面试会怎样",
+      "answerable": true,
+      "expected": [
+        {"source_path": "docs/development-plan.md", "section_prefix": "3-5-崩溃恢复"},
+        {"source_path": "docs/development-plan.md", "section_prefix": "m18-跨实例-worker、限流与死信（已完成）"}
+      ]
+    },
+    {
+      "id": "b16",
+      "group": "B",
+      "category": "synonym",
+      "rewrite": "synonym",
+      "query": "向量库没起来还能不能用",
+      "answerable": true,
+      "expected": [{"source_path": "docs/m20-design.md", "section_prefix": "3-6-embedding-配置与降级矩阵"}]
+    },
+    {
+      "id": "b17",
+      "group": "B",
+      "category": "logic",
+      "rewrite": "cross_section",
+      "query": "回答完系统怎么决定下一题问什么",
+      "answerable": true,
+      "expected": [
+        {"source_path": "docs/development-plan.md", "section_prefix": "4-2-answerrun-节点图"},
+        {"source_path": "docs/development-plan.md", "section_prefix": "5-1-何时追问"},
+        {"source_path": "docs/project-walkthrough.md", "section_prefix": "4-一次作答链路与自适应追问"}
+      ]
+    },
+    {
+      "id": "b18",
+      "group": "B",
+      "category": "logic",
+      "rewrite": "deixis",
+      "query": "追问是根据什么生成的",
+      "answerable": true,
+      "expected": [
+        {"source_path": "docs/development-plan.md", "section_prefix": "4-3-prompt-组装原则"},
+        {"source_path": "docs/development-plan.md", "section_prefix": "5-1-何时追问"},
+        {"source_path": "docs/project-walkthrough.md", "section_prefix": "4-一次作答链路与自适应追问"}
+      ]
+    },
+    {
+      "id": "b19",
+      "group": "B",
+      "category": "logic",
+      "rewrite": "synonym",
+      "query": "报告里的分是谁算的",
+      "answerable": true,
+      "expected": [
+        {"source_path": "docs/design-rationale.md", "section_prefix": "5-分数由确定性评估给出，模型只写点评"},
+        {"source_path": "docs/development-plan.md", "section_prefix": "6-1-维度与权重"},
+        {"source_path": "docs/interview-qa.md", "section_prefix": "5-报告"}
+      ]
+    },
+    {
+      "id": "b20",
+      "group": "B",
+      "category": "logic",
+      "rewrite": "cross_section",
+      "query": "面试中断了还能接着答吗",
+      "answerable": true,
+      "expected": [
+        {"source_path": "docs/development-plan.md", "section_prefix": "3-2-状态与阶段"},
+        {"source_path": "docs/development-plan.md", "section_prefix": "3-5-崩溃恢复"},
+        {"source_path": "docs/interview-qa.md", "section_prefix": "3-状态机、幂等与崩溃恢复"}
+      ]
+    },
+    {
+      "id": "b21",
+      "group": "B",
+      "category": "logic",
+      "rewrite": "cross_section",
+      "query": "两个人同时改同一场面试的状态会互相覆盖吗",
+      "answerable": true,
+      "expected": [
+        {"source_path": "docs/design-rationale.md", "section_prefix": "7-锁-postgresql-约束双保险"},
+        {"source_path": "docs/development-plan.md", "section_prefix": "3-4-并发控制"},
+        {"source_path": "docs/interview-qa.md", "section_prefix": "9-并发、worker-与死信"},
+        {"source_path": "docs/project-walkthrough.md", "section_prefix": "9-存储、并发与会话锁"}
+      ]
+    },
+    {
+      "id": "b22",
+      "group": "B",
+      "category": "logic",
+      "rewrite": "deixis",
+      "query": "一次面试花多少 token 在哪看",
+      "answerable": true,
+      "expected": [
+        {"source_path": "docs/development-plan.md", "section_prefix": "10-3-模型调用与-token-统计"},
+        {"source_path": "docs/development-plan.md", "section_prefix": "10-4-单场成本汇总"}
+      ]
+    },
+    {
+      "id": "b23",
+      "group": "B",
+      "category": "logic",
+      "rewrite": "cross_section",
+      "query": "评测 60 条是怎么跑的",
+      "answerable": true,
+      "expected": [
+        {"source_path": "README.md", "section_prefix": "验证与评测"},
+        {"source_path": "docs/development-plan.md", "section_prefix": "6-5-评测方案"},
+        {"source_path": "docs/project-walkthrough.md", "section_prefix": "13-评测体系"}
+      ]
+    },
+    {
+      "id": "b24",
+      "group": "B",
+      "category": "logic",
+      "rewrite": "synonym",
+      "query": "重复提交答案会不会扣两次分",
+      "answerable": true,
+      "expected": [
+        {"source_path": "docs/development-plan.md", "section_prefix": "3-3-主循环状态迁移"},
+        {"source_path": "docs/design-rationale.md", "section_prefix": "6-三重幂等：幂等键、唯一约束、状态机"},
+        {"source_path": "docs/interview-qa.md", "section_prefix": "3-状态机、幂等与崩溃恢复"}
+      ]
+    },
+    {
+      "id": "b25",
+      "group": "B",
+      "category": "logic",
+      "rewrite": "cross_section",
+      "query": "答得很差会直接结束还是继续问",
+      "answerable": true,
+      "expected": [
+        {"source_path": "docs/development-plan.md", "section_prefix": "5-1-何时追问"},
+        {"source_path": "docs/development-plan.md", "section_prefix": "5-2-上限与预算"},
+        {"source_path": "docs/development-plan.md", "section_prefix": "3-3-主循环状态迁移"}
+      ]
+    },
+    {
+      "id": "n01",
+      "group": "no_answer",
+      "category": "no_answer",
+      "query": "如何用 Rust 实现零拷贝网络协议栈",
+      "answerable": false,
+      "expected": []
+    },
+    {
+      "id": "n02",
+      "group": "no_answer",
+      "category": "no_answer",
+      "query": "Kubernetes Operator 的 CRD 版本迁移",
+      "answerable": false,
+      "expected": []
+    },
+    {
+      "id": "n03",
+      "group": "no_answer",
+      "category": "no_answer",
+      "query": "iOS SwiftUI 动画性能优化",
+      "answerable": false,
+      "expected": []
+    },
+    {
+      "id": "n04",
+      "group": "no_answer",
+      "category": "no_answer",
+      "query": "量子纠错码的表面码阈值是多少",
+      "answerable": false,
+      "expected": []
+    }
+  ]
+}

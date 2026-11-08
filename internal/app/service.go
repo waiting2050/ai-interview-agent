@@ -73,6 +73,9 @@ type Options struct {
 	// ReportGenerator produces the end-of-interview report. When nil a
 	// heuristic generator is used so demos and tests need no API key.
 	ReportGenerator report.Generator
+	// ReportTool switches the report evidence path. Empty or "deterministic"
+	// keeps the fixed plan; "autonomous" lets the model choose tools.
+	ReportTool ReportToolOptions
 	// Locker serialises session commands. The server injects the Redis
 	// implementation; nil falls back to the process-local test double.
 	Locker ports.Locker
@@ -163,10 +166,13 @@ func New(store ports.Store, opts Options) *Service {
 		opts.Logger.Error("answer graph compilation failed", "error", err)
 	}
 
+	runner := NewRunner(store, opts.Steps, answerSteps, answerGraph, opts.ReportGenerator,
+		opts.Now, opts.Logger, opts.Metrics, opts.Usage, opts.Tracer, opts.MaxRunFailures)
+	runner.reportTool = opts.ReportTool
+
 	return &Service{
-		store: store,
-		runner: NewRunner(store, opts.Steps, answerSteps, answerGraph, opts.ReportGenerator,
-			opts.Now, opts.Logger, opts.Metrics, opts.Usage, opts.Tracer, opts.MaxRunFailures),
+		store:       store,
+		runner:      runner,
 		log:         opts.Logger,
 		now:         opts.Now,
 		staleAfter:  opts.RunStaleAfter,

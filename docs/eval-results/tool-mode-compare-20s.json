@@ -1,0 +1,1038 @@
+{
+  "answers": 11,
+  "autonomous": {
+    "mode": "autonomous",
+    "model_calls": 3,
+    "prompt_tokens": 9275,
+    "completion_tokens": 2400,
+    "duration_ms": 20001,
+    "tool_rounds": 3,
+    "tool_calls": 3,
+    "tool_order": [],
+    "tool_details": [],
+    "degraded": true,
+    "degrade_reason": "budget_exceeded",
+    "sections": 5,
+    "section_titles": [
+      "总评",
+      "分维度表现",
+      "逐题点评",
+      "最需要补的 3 个点",
+      "下一步练习建议"
+    ],
+    "unauthorized": false,
+    "over_budget": true,
+    "truncated": false,
+    "sections_text": {
+      "下一步练习建议": "1. 针对「补齐「缺少具体的实现细节与取舍」，并用一个真实项目案例讲清取舍」做一轮专项练习，并录音复述。\n2. 针对「补齐「GC 调优与内存泄漏排查」，并用一个真实项目案例讲清取舍」做一轮专项练习，并录音复述。\n3. 把本次报告的逐题点评整理成自查清单，下一次面试前逐条核对。\n",
+      "分维度表现": "| 维度 | 得分 | 说明 |\n| --- | --- | --- |\n| 正确性 | 56.4 | 该维度明显偏弱，建议针对性练习。 |\n| 深度 | 56.4 | 该维度明显偏弱，建议针对性练习。 |\n| 工程判断 | 56.4 | 该维度明显偏弱，建议针对性练习。 |\n| 表达结构 | 56.4 | 该维度明显偏弱，建议针对性练习。 |\n| 证据可信度 | 56.4 | 该维度明显偏弱，建议针对性练习。 |\n",
+      "总评": "**总评：待提升（待提升，56.4 分）**\n\n本次面试共完成 11 道题，综合得分 56.4 分（待提升）。表现相对最好的是正确性（56.4 分），最薄弱的是正确性（56.4 分）。从题目维度看，幂等与状态机设计、服务分层与依赖边界、Go 并发模型相关内容需要优先补强。建议先解决报告中列出的三个短板，再进行下一轮模拟面试。\n",
+      "最需要补的 3 个点": "1. 补齐「缺少具体的实现细节与取舍」，并用一个真实项目案例讲清取舍\n2. 补齐「GC 调优与内存泄漏排查」，并用一个真实项目案例讲清取舍\n3. 补齐「channel 阻塞与缓冲区设计」，并用一个真实项目案例讲清取舍\n",
+      "逐题点评": "### 1. Go 并发模型（主问题，60.0 分）\n\n\u003e 请结合一个真实项目，说明「Go 并发模型」的实现原理、关键取舍以及你会如何验证。重点讲讲「goroutine 调度与 G-M-P 模型」。\n\n基本正确，但深度与取舍说明不足，容易停留在结论层。\n\n- 待补：goroutine 调度与 G-M-P 模型；channel 阻塞与缓冲区设计；context 取消与超时传递\n### 2. Go 并发模型（追问，60.0 分）\n\n\u003e 针对你刚才的回答，请继续展开「请补充：goroutine 调度与 G-M-P 模型」：它在高并发或故障场景下会怎样表现？请给出具体的实现细节和验证方式。\n\n基本正确，但深度与取舍说明不足，容易停留在结论层。\n\n- 待补：goroutine 调度与 G-M-P 模型；channel 阻塞与缓冲区设计；context 取消与超时传递\n### 3. 服务分层与依赖边界（主问题，40.0 分）\n\n\u003e 围绕「服务分层与依赖边界」，请讲一个你实际遇到过的问题：现象是什么、如何定位、最终怎么解决。请覆盖「端口与适配器隔离」。\n\n关键点覆盖不足，建议按「结论-原理-取舍-数据」四段式重答。\n\n- 待补：缺少具体的实现细节与取舍\n### 4. 服务分层与依赖边界（追问，60.0 分）\n\n\u003e 针对你刚才的回答，请继续展开「请补充：分层职责与依赖方向」：它在高并发或故障场景下会怎样表现？请给出具体的实现细节和验证方式。\n\n基本正确，但深度与取舍说明不足，容易停留在结论层。\n\n- 待补：缺少具体的实现细节与取舍\n### 5. 内存管理与 GC（主问题，60.0 分）\n\n\u003e 如果要在生产环境落地「内存管理与 GC」，你会如何设计它的边界条件和失败处理？请重点说明「三色标记与写屏障」。\n\n基本正确，但深度与取舍说明不足，容易停留在结论层。\n\n- 待补：逃逸分析；三色标记与写屏障；GC 调优与内存泄漏排查\n### 6. 内存管理与 GC（追问，60.0 分）\n\n\u003e 针对你刚才的回答，请继续展开「请补充：逃逸分析」：它在高并发或故障场景下会怎样表现？请给出具体的实现细节和验证方式。\n\n基本正确，但深度与取舍说明不足，容易停留在结论层。\n\n- 待补：逃逸分析；三色标记与写屏障；GC 调优与内存泄漏排查\n### 7. 错误处理与稳定性（主问题，60.0 分）\n\n\u003e 请结合一个真实项目，说明「错误处理与稳定性」的实现原理、关键取舍以及你会如何验证。重点讲讲「错误包装与 errors.Is/As」。\n\n基本正确，但深度与取舍说明不足，容易停留在结论层。\n\n- 待补：错误包装与 errors.Is/As；panic/recover 的边界；超时、重试与幂等\n### 8. 错误处理与稳定性（追问，60.0 分）\n\n\u003e 针对你刚才的回答，请继续展开「请补充：错误包装与 errors.Is/As」：它在高并发或故障场景下会怎样表现？请给出具体的实现细节和验证方式。\n\n基本正确，但深度与取舍说明不足，容易停留在结论层。\n\n- 待补：错误包装与 errors.Is/As；panic/recover 的边界；超时、重试与幂等\n### 9. 幂等与状态机设计（主问题，40.0 分）\n\n\u003e 围绕「幂等与状态机设计」，请讲一个你实际遇到过的问题：现象是什么、如何定位、最终怎么解决。请覆盖「重复请求与重试语义」。\n\n关键点覆盖不足，建议按「结论-原理-取舍-数据」四段式重答。\n\n- 待补：缺少具体的实现细节与取舍\n### 10. 幂等与状态机设计（追问，60.0 分）\n\n\u003e 针对你刚才的回答，请继续展开「请补充：幂等键与去重存储」：它在高并发或故障场景下会怎样表现？请给出具体的实现细节和验证方式。\n\n基本正确，但深度与取舍说明不足，容易停留在结论层。\n\n- 待补：缺少具体的实现细节与取舍\n### 11. 网络编程与连接治理（主问题，60.0 分）\n\n\u003e 如果要在生产环境落地「网络编程与连接治理」，你会如何设计它的边界条件和失败处理？请重点说明「连接池与复用」。\n\n基本正确，但深度与取舍说明不足，容易停留在结论层。\n\n- 待补：net/http 超时链路；连接池与复用；优雅停机\n"
+    },
+    "report": {
+      "schema_version": 1,
+      "session_id": "01M6X6F0AK7RB3J8ZBH0YW8ETF",
+      "generated_at": "2026-11-08T09:05:37.3253605Z",
+      "degraded": true,
+      "error_code": "budget_exceeded",
+      "overall_score": 56.4,
+      "plan_items": 6,
+      "score_band": "待提升",
+      "verdict": "本次面试共完成 11 道题，综合得分 56.4 分（待提升）。表现相对最好的是正确性（56.4 分），最薄弱的是正确性（56.4 分）。从题目维度看，幂等与状态机设计、服务分层与依赖边界、Go 并发模型相关内容需要优先补强。建议先解决报告中列出的三个短板，再进行下一轮模拟面试。",
+      "dimensions": [
+        {
+          "dimension": "correctness",
+          "score": 56.4,
+          "weight": 0.3,
+          "comment": "该维度明显偏弱，建议针对性练习。"
+        },
+        {
+          "dimension": "depth",
+          "score": 56.4,
+          "weight": 0.25,
+          "comment": "该维度明显偏弱，建议针对性练习。"
+        },
+        {
+          "dimension": "engineering_judgment",
+          "score": 56.4,
+          "weight": 0.2,
+          "comment": "该维度明显偏弱，建议针对性练习。"
+        },
+        {
+          "dimension": "structure",
+          "score": 56.4,
+          "weight": 0.15,
+          "comment": "该维度明显偏弱，建议针对性练习。"
+        },
+        {
+          "dimension": "evidence_credibility",
+          "score": 56.4,
+          "weight": 0.1,
+          "comment": "该维度明显偏弱，建议针对性练习。"
+        }
+      ],
+      "questions": [
+        {
+          "turn_id": "01M6X6F0B9GGYKP2K3W2QHGC71",
+          "seq": 1,
+          "topic": "Go 并发模型",
+          "kind": "primary",
+          "depth": 1,
+          "question": "请结合一个真实项目，说明「Go 并发模型」的实现原理、关键取舍以及你会如何验证。重点讲讲「goroutine 调度与 G-M-P 模型」。",
+          "score": 60,
+          "scores": {
+            "correctness": 3,
+            "depth": 3,
+            "engineering_judgment": 3,
+            "evidence_credibility": 3,
+            "structure": 3
+          },
+          "base_score": 60,
+          "comment": "基本正确，但深度与取舍说明不足，容易停留在结论层。",
+          "missing_points": [
+            "goroutine 调度与 G-M-P 模型",
+            "channel 阻塞与缓冲区设计",
+            "context 取消与超时传递"
+          ],
+          "evidence": [
+            {
+              "turn_id": "01M6X6F0B9GGYKP2K3W2QHGC71",
+              "dimension": "correctness",
+              "quote": "我用消息表加定时对账保证最终一致性，重试是指数退避，压测验证过重复消费不产生脏数",
+              "reason": "回答原文片段"
+            }
+          ]
+        },
+        {
+          "turn_id": "01M6X6F0B9GGYKP2K3WJDHXQ4T",
+          "seq": 2,
+          "topic": "Go 并发模型",
+          "kind": "followup",
+          "depth": 2,
+          "question": "针对你刚才的回答，请继续展开「请补充：goroutine 调度与 G-M-P 模型」：它在高并发或故障场景下会怎样表现？请给出具体的实现细节和验证方式。",
+          "score": 60,
+          "scores": {
+            "correctness": 3,
+            "depth": 3,
+            "engineering_judgment": 3,
+            "evidence_credibility": 3,
+            "structure": 3
+          },
+          "base_score": 60,
+          "comment": "基本正确，但深度与取舍说明不足，容易停留在结论层。",
+          "missing_points": [
+            "goroutine 调度与 G-M-P 模型",
+            "channel 阻塞与缓冲区设计",
+            "context 取消与超时传递"
+          ],
+          "evidence": [
+            {
+              "turn_id": "01M6X6F0B9GGYKP2K3WJDHXQ4T",
+              "dimension": "correctness",
+              "quote": "检索这块我做了 BM25 和向量的融合，中文用 bigram，评测集分原文型和口",
+              "reason": "回答原文片段"
+            }
+          ]
+        },
+        {
+          "turn_id": "01M6X6F0BAP8KM7WNEMDZW4T3R",
+          "seq": 3,
+          "topic": "服务分层与依赖边界",
+          "kind": "primary",
+          "depth": 1,
+          "question": "围绕「服务分层与依赖边界」，请讲一个你实际遇到过的问题：现象是什么、如何定位、最终怎么解决。请覆盖「端口与适配器隔离」。",
+          "score": 40,
+          "scores": {
+            "correctness": 2,
+            "depth": 2,
+            "engineering_judgment": 2,
+            "evidence_credibility": 2,
+            "structure": 2
+          },
+          "base_score": 40,
+          "comment": "关键点覆盖不足，建议按「结论-原理-取舍-数据」四段式重答。",
+          "missing_points": [
+            "缺少具体的实现细节与取舍"
+          ],
+          "evidence": [
+            {
+              "turn_id": "01M6X6F0BAP8KM7WNEMDZW4T3R",
+              "dimension": "correctness",
+              "quote": "限流用的是令牌桶，按用户和接口两个维度，超限返回 429，并记录指标。",
+              "reason": "回答原文片段"
+            }
+          ]
+        },
+        {
+          "turn_id": "01M6X6F0BAP8KM7WNEMJHKM9XV",
+          "seq": 4,
+          "topic": "服务分层与依赖边界",
+          "kind": "followup",
+          "depth": 2,
+          "question": "针对你刚才的回答，请继续展开「请补充：分层职责与依赖方向」：它在高并发或故障场景下会怎样表现？请给出具体的实现细节和验证方式。",
+          "score": 60,
+          "scores": {
+            "correctness": 3,
+            "depth": 3,
+            "engineering_judgment": 3,
+            "evidence_credibility": 3,
+            "structure": 3
+          },
+          "base_score": 60,
+          "comment": "基本正确，但深度与取舍说明不足，容易停留在结论层。",
+          "missing_points": [
+            "缺少具体的实现细节与取舍"
+          ],
+          "evidence": [
+            {
+              "turn_id": "01M6X6F0BAP8KM7WNEMJHKM9XV",
+              "dimension": "correctness",
+              "quote": "幂等是请求里带 idempotency key，落库唯一约束，冲突时返回第一次的",
+              "reason": "回答原文片段"
+            }
+          ]
+        },
+        {
+          "turn_id": "01M6X6F0BAP8KM7WNEMTW9Q9ZM",
+          "seq": 5,
+          "topic": "内存管理与 GC",
+          "kind": "primary",
+          "depth": 1,
+          "question": "如果要在生产环境落地「内存管理与 GC」，你会如何设计它的边界条件和失败处理？请重点说明「三色标记与写屏障」。",
+          "score": 60,
+          "scores": {
+            "correctness": 3,
+            "depth": 3,
+            "engineering_judgment": 3,
+            "evidence_credibility": 3,
+            "structure": 3
+          },
+          "base_score": 60,
+          "comment": "基本正确，但深度与取舍说明不足，容易停留在结论层。",
+          "missing_points": [
+            "逃逸分析",
+            "三色标记与写屏障",
+            "GC 调优与内存泄漏排查"
+          ],
+          "evidence": [
+            {
+              "turn_id": "01M6X6F0BAP8KM7WNEMTW9Q9ZM",
+              "dimension": "correctness",
+              "quote": "可观测性上我埋了耗时和错误码，P95 超过阈值会告警，日志带 trace id。",
+              "reason": "回答原文片段"
+            }
+          ]
+        },
+        {
+          "turn_id": "01M6X6F0BAP8KM7WNEMXTK2N60",
+          "seq": 6,
+          "topic": "内存管理与 GC",
+          "kind": "followup",
+          "depth": 2,
+          "question": "针对你刚才的回答，请继续展开「请补充：逃逸分析」：它在高并发或故障场景下会怎样表现？请给出具体的实现细节和验证方式。",
+          "score": 60,
+          "scores": {
+            "correctness": 3,
+            "depth": 3,
+            "engineering_judgment": 3,
+            "evidence_credibility": 3,
+            "structure": 3
+          },
+          "base_score": 60,
+          "comment": "基本正确，但深度与取舍说明不足，容易停留在结论层。",
+          "missing_points": [
+            "逃逸分析",
+            "三色标记与写屏障",
+            "GC 调优与内存泄漏排查"
+          ],
+          "evidence": [
+            {
+              "turn_id": "01M6X6F0BAP8KM7WNEMXTK2N60",
+              "dimension": "correctness",
+              "quote": "缓存用 Redis，热点 key 加逻辑过期，避免击穿；缓存和库的一致性用延迟双",
+              "reason": "回答原文片段"
+            }
+          ]
+        },
+        {
+          "turn_id": "01M6X6F0BBFP5JCET6CQ34GC06",
+          "seq": 7,
+          "topic": "错误处理与稳定性",
+          "kind": "primary",
+          "depth": 1,
+          "question": "请结合一个真实项目，说明「错误处理与稳定性」的实现原理、关键取舍以及你会如何验证。重点讲讲「错误包装与 errors.Is/As」。",
+          "score": 60,
+          "scores": {
+            "correctness": 3,
+            "depth": 3,
+            "engineering_judgment": 3,
+            "evidence_credibility": 3,
+            "structure": 3
+          },
+          "base_score": 60,
+          "comment": "基本正确，但深度与取舍说明不足，容易停留在结论层。",
+          "missing_points": [
+            "错误包装与 errors.Is/As",
+            "panic/recover 的边界",
+            "超时、重试与幂等"
+          ],
+          "evidence": [
+            {
+              "turn_id": "01M6X6F0BBFP5JCET6CQ34GC06",
+              "dimension": "correctness",
+              "quote": "我用消息表加定时对账保证最终一致性，重试是指数退避，压测验证过重复消费不产生脏数",
+              "reason": "回答原文片段"
+            }
+          ]
+        },
+        {
+          "turn_id": "01M6X6F0BBFP5JCET6CY4ZE8SY",
+          "seq": 8,
+          "topic": "错误处理与稳定性",
+          "kind": "followup",
+          "depth": 2,
+          "question": "针对你刚才的回答，请继续展开「请补充：错误包装与 errors.Is/As」：它在高并发或故障场景下会怎样表现？请给出具体的实现细节和验证方式。",
+          "score": 60,
+          "scores": {
+            "correctness": 3,
+            "depth": 3,
+            "engineering_judgment": 3,
+            "evidence_credibility": 3,
+            "structure": 3
+          },
+          "base_score": 60,
+          "comment": "基本正确，但深度与取舍说明不足，容易停留在结论层。",
+          "missing_points": [
+            "错误包装与 errors.Is/As",
+            "panic/recover 的边界",
+            "超时、重试与幂等"
+          ],
+          "evidence": [
+            {
+              "turn_id": "01M6X6F0BBFP5JCET6CY4ZE8SY",
+              "dimension": "correctness",
+              "quote": "检索这块我做了 BM25 和向量的融合，中文用 bigram，评测集分原文型和口",
+              "reason": "回答原文片段"
+            }
+          ]
+        },
+        {
+          "turn_id": "01M6X6F0BBFP5JCET6D461A3S6",
+          "seq": 9,
+          "topic": "幂等与状态机设计",
+          "kind": "primary",
+          "depth": 1,
+          "question": "围绕「幂等与状态机设计」，请讲一个你实际遇到过的问题：现象是什么、如何定位、最终怎么解决。请覆盖「重复请求与重试语义」。",
+          "score": 40,
+          "scores": {
+            "correctness": 2,
+            "depth": 2,
+            "engineering_judgment": 2,
+            "evidence_credibility": 2,
+            "structure": 2
+          },
+          "base_score": 40,
+          "comment": "关键点覆盖不足，建议按「结论-原理-取舍-数据」四段式重答。",
+          "missing_points": [
+            "缺少具体的实现细节与取舍"
+          ],
+          "evidence": [
+            {
+              "turn_id": "01M6X6F0BBFP5JCET6D461A3S6",
+              "dimension": "correctness",
+              "quote": "限流用的是令牌桶，按用户和接口两个维度，超限返回 429，并记录指标。",
+              "reason": "回答原文片段"
+            }
+          ]
+        },
+        {
+          "turn_id": "01M6X6F0BCN605V6JKQ250QCWZ",
+          "seq": 10,
+          "topic": "幂等与状态机设计",
+          "kind": "followup",
+          "depth": 2,
+          "question": "针对你刚才的回答，请继续展开「请补充：幂等键与去重存储」：它在高并发或故障场景下会怎样表现？请给出具体的实现细节和验证方式。",
+          "score": 60,
+          "scores": {
+            "correctness": 3,
+            "depth": 3,
+            "engineering_judgment": 3,
+            "evidence_credibility": 3,
+            "structure": 3
+          },
+          "base_score": 60,
+          "comment": "基本正确，但深度与取舍说明不足，容易停留在结论层。",
+          "missing_points": [
+            "缺少具体的实现细节与取舍"
+          ],
+          "evidence": [
+            {
+              "turn_id": "01M6X6F0BCN605V6JKQ250QCWZ",
+              "dimension": "correctness",
+              "quote": "幂等是请求里带 idempotency key，落库唯一约束，冲突时返回第一次的",
+              "reason": "回答原文片段"
+            }
+          ]
+        },
+        {
+          "turn_id": "01M6X6F0BCN605V6JKQ8Y931EN",
+          "seq": 11,
+          "topic": "网络编程与连接治理",
+          "kind": "primary",
+          "depth": 1,
+          "question": "如果要在生产环境落地「网络编程与连接治理」，你会如何设计它的边界条件和失败处理？请重点说明「连接池与复用」。",
+          "score": 60,
+          "scores": {
+            "correctness": 3,
+            "depth": 3,
+            "engineering_judgment": 3,
+            "evidence_credibility": 3,
+            "structure": 3
+          },
+          "base_score": 60,
+          "comment": "基本正确，但深度与取舍说明不足，容易停留在结论层。",
+          "missing_points": [
+            "net/http 超时链路",
+            "连接池与复用",
+            "优雅停机"
+          ],
+          "evidence": [
+            {
+              "turn_id": "01M6X6F0BCN605V6JKQ8Y931EN",
+              "dimension": "correctness",
+              "quote": "可观测性上我埋了耗时和错误码，P95 超过阈值会告警，日志带 trace id。",
+              "reason": "回答原文片段"
+            }
+          ]
+        }
+      ],
+      "improvements": [
+        "补齐「缺少具体的实现细节与取舍」，并用一个真实项目案例讲清取舍",
+        "补齐「GC 调优与内存泄漏排查」，并用一个真实项目案例讲清取舍",
+        "补齐「channel 阻塞与缓冲区设计」，并用一个真实项目案例讲清取舍"
+      ],
+      "next_steps": [
+        "针对「补齐「缺少具体的实现细节与取舍」，并用一个真实项目案例讲清取舍」做一轮专项练习，并录音复述。",
+        "针对「补齐「GC 调优与内存泄漏排查」，并用一个真实项目案例讲清取舍」做一轮专项练习，并录音复述。",
+        "把本次报告的逐题点评整理成自查清单，下一次面试前逐条核对。"
+      ],
+      "sections": [
+        {
+          "index": 0,
+          "title": "总评",
+          "markdown": "**总评：待提升（待提升，56.4 分）**\n\n本次面试共完成 11 道题，综合得分 56.4 分（待提升）。表现相对最好的是正确性（56.4 分），最薄弱的是正确性（56.4 分）。从题目维度看，幂等与状态机设计、服务分层与依赖边界、Go 并发模型相关内容需要优先补强。建议先解决报告中列出的三个短板，再进行下一轮模拟面试。\n",
+          "tool_calls": 3
+        },
+        {
+          "index": 1,
+          "title": "分维度表现",
+          "markdown": "| 维度 | 得分 | 说明 |\n| --- | --- | --- |\n| 正确性 | 56.4 | 该维度明显偏弱，建议针对性练习。 |\n| 深度 | 56.4 | 该维度明显偏弱，建议针对性练习。 |\n| 工程判断 | 56.4 | 该维度明显偏弱，建议针对性练习。 |\n| 表达结构 | 56.4 | 该维度明显偏弱，建议针对性练习。 |\n| 证据可信度 | 56.4 | 该维度明显偏弱，建议针对性练习。 |\n",
+          "tool_calls": 3
+        },
+        {
+          "index": 2,
+          "title": "逐题点评",
+          "markdown": "### 1. Go 并发模型（主问题，60.0 分）\n\n\u003e 请结合一个真实项目，说明「Go 并发模型」的实现原理、关键取舍以及你会如何验证。重点讲讲「goroutine 调度与 G-M-P 模型」。\n\n基本正确，但深度与取舍说明不足，容易停留在结论层。\n\n- 待补：goroutine 调度与 G-M-P 模型；channel 阻塞与缓冲区设计；context 取消与超时传递\n### 2. Go 并发模型（追问，60.0 分）\n\n\u003e 针对你刚才的回答，请继续展开「请补充：goroutine 调度与 G-M-P 模型」：它在高并发或故障场景下会怎样表现？请给出具体的实现细节和验证方式。\n\n基本正确，但深度与取舍说明不足，容易停留在结论层。\n\n- 待补：goroutine 调度与 G-M-P 模型；channel 阻塞与缓冲区设计；context 取消与超时传递\n### 3. 服务分层与依赖边界（主问题，40.0 分）\n\n\u003e 围绕「服务分层与依赖边界」，请讲一个你实际遇到过的问题：现象是什么、如何定位、最终怎么解决。请覆盖「端口与适配器隔离」。\n\n关键点覆盖不足，建议按「结论-原理-取舍-数据」四段式重答。\n\n- 待补：缺少具体的实现细节与取舍\n### 4. 服务分层与依赖边界（追问，60.0 分）\n\n\u003e 针对你刚才的回答，请继续展开「请补充：分层职责与依赖方向」：它在高并发或故障场景下会怎样表现？请给出具体的实现细节和验证方式。\n\n基本正确，但深度与取舍说明不足，容易停留在结论层。\n\n- 待补：缺少具体的实现细节与取舍\n### 5. 内存管理与 GC（主问题，60.0 分）\n\n\u003e 如果要在生产环境落地「内存管理与 GC」，你会如何设计它的边界条件和失败处理？请重点说明「三色标记与写屏障」。\n\n基本正确，但深度与取舍说明不足，容易停留在结论层。\n\n- 待补：逃逸分析；三色标记与写屏障；GC 调优与内存泄漏排查\n### 6. 内存管理与 GC（追问，60.0 分）\n\n\u003e 针对你刚才的回答，请继续展开「请补充：逃逸分析」：它在高并发或故障场景下会怎样表现？请给出具体的实现细节和验证方式。\n\n基本正确，但深度与取舍说明不足，容易停留在结论层。\n\n- 待补：逃逸分析；三色标记与写屏障；GC 调优与内存泄漏排查\n### 7. 错误处理与稳定性（主问题，60.0 分）\n\n\u003e 请结合一个真实项目，说明「错误处理与稳定性」的实现原理、关键取舍以及你会如何验证。重点讲讲「错误包装与 errors.Is/As」。\n\n基本正确，但深度与取舍说明不足，容易停留在结论层。\n\n- 待补：错误包装与 errors.Is/As；panic/recover 的边界；超时、重试与幂等\n### 8. 错误处理与稳定性（追问，60.0 分）\n\n\u003e 针对你刚才的回答，请继续展开「请补充：错误包装与 errors.Is/As」：它在高并发或故障场景下会怎样表现？请给出具体的实现细节和验证方式。\n\n基本正确，但深度与取舍说明不足，容易停留在结论层。\n\n- 待补：错误包装与 errors.Is/As；panic/recover 的边界；超时、重试与幂等\n### 9. 幂等与状态机设计（主问题，40.0 分）\n\n\u003e 围绕「幂等与状态机设计」，请讲一个你实际遇到过的问题：现象是什么、如何定位、最终怎么解决。请覆盖「重复请求与重试语义」。\n\n关键点覆盖不足，建议按「结论-原理-取舍-数据」四段式重答。\n\n- 待补：缺少具体的实现细节与取舍\n### 10. 幂等与状态机设计（追问，60.0 分）\n\n\u003e 针对你刚才的回答，请继续展开「请补充：幂等键与去重存储」：它在高并发或故障场景下会怎样表现？请给出具体的实现细节和验证方式。\n\n基本正确，但深度与取舍说明不足，容易停留在结论层。\n\n- 待补：缺少具体的实现细节与取舍\n### 11. 网络编程与连接治理（主问题，60.0 分）\n\n\u003e 如果要在生产环境落地「网络编程与连接治理」，你会如何设计它的边界条件和失败处理？请重点说明「连接池与复用」。\n\n基本正确，但深度与取舍说明不足，容易停留在结论层。\n\n- 待补：net/http 超时链路；连接池与复用；优雅停机\n",
+          "turn_refs": [
+            "01M6X6F0B9GGYKP2K3W2QHGC71",
+            "01M6X6F0B9GGYKP2K3WJDHXQ4T",
+            "01M6X6F0BAP8KM7WNEMDZW4T3R",
+            "01M6X6F0BAP8KM7WNEMJHKM9XV",
+            "01M6X6F0BAP8KM7WNEMTW9Q9ZM",
+            "01M6X6F0BAP8KM7WNEMXTK2N60",
+            "01M6X6F0BBFP5JCET6CQ34GC06",
+            "01M6X6F0BBFP5JCET6CY4ZE8SY",
+            "01M6X6F0BBFP5JCET6D461A3S6",
+            "01M6X6F0BCN605V6JKQ250QCWZ",
+            "01M6X6F0BCN605V6JKQ8Y931EN"
+          ],
+          "tool_calls": 3
+        },
+        {
+          "index": 3,
+          "title": "最需要补的 3 个点",
+          "markdown": "1. 补齐「缺少具体的实现细节与取舍」，并用一个真实项目案例讲清取舍\n2. 补齐「GC 调优与内存泄漏排查」，并用一个真实项目案例讲清取舍\n3. 补齐「channel 阻塞与缓冲区设计」，并用一个真实项目案例讲清取舍\n",
+          "tool_calls": 3
+        },
+        {
+          "index": 4,
+          "title": "下一步练习建议",
+          "markdown": "1. 针对「补齐「缺少具体的实现细节与取舍」，并用一个真实项目案例讲清取舍」做一轮专项练习，并录音复述。\n2. 针对「补齐「GC 调优与内存泄漏排查」，并用一个真实项目案例讲清取舍」做一轮专项练习，并录音复述。\n3. 把本次报告的逐题点评整理成自查清单，下一次面试前逐条核对。\n",
+          "tool_calls": 3
+        }
+      ],
+      "tool_calls": 3,
+      "tool_breakdown": {
+        "get_session_overview": 1,
+        "list_weak_turns": 1,
+        "search_turns": 1
+      },
+      "tool_mode": "autonomous",
+      "tool_rounds": 3,
+      "tool_degraded_reason": "budget_exceeded",
+      "model_calls": 0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "model_name": "deepseek-chat",
+      "prompt_version": "report-v2"
+    }
+  },
+  "deterministic": {
+    "mode": "deterministic",
+    "model_calls": 1,
+    "prompt_tokens": 2021,
+    "completion_tokens": 1303,
+    "duration_ms": 9373,
+    "tool_rounds": 0,
+    "tool_calls": 3,
+    "tool_order": [
+      "get_session_overview",
+      "list_weak_turns",
+      "search_turns"
+    ],
+    "tool_details": [
+      {
+        "tool": "get_session_overview",
+        "status": "ok",
+        "truncated": false,
+        "result_bytes": 0
+      },
+      {
+        "tool": "list_weak_turns",
+        "status": "ok",
+        "truncated": true,
+        "result_bytes": 0
+      },
+      {
+        "tool": "search_turns",
+        "status": "ok",
+        "truncated": true,
+        "result_bytes": 0
+      }
+    ],
+    "degraded": false,
+    "sections": 5,
+    "section_titles": [
+      "总评",
+      "分维度表现",
+      "逐题点评",
+      "最需要补的 3 个点",
+      "下一步练习建议"
+    ],
+    "unauthorized": false,
+    "over_budget": false,
+    "truncated": true,
+    "sections_text": {
+      "下一步练习建议": "1. 每天精读一篇 Go 调度器或 GC 源码解析，并用自己的话复述 G-M-P 与写屏障流程。\n2. 练习用端口与适配器模式重构一个分层模糊的小项目，画出依赖方向图。\n3. 针对错误处理编写包含 errors.Is/As 与 panic/recover 边界的单元测试。\n4. 模拟面试录音，回听检查回答是否偏离题目，并强制使用现象-定位-解决结构。\n",
+      "分维度表现": "| 维度 | 得分 | 说明 |\n| --- | --- | --- |\n| 正确性 | 56.4 | 回答内容与题目要求不匹配，如并发模型题答成消息表对账，正确性明显不足。 |\n| 深度 | 56.4 | 对 G-M-P 调度、写屏障等机制仅停留在名词层面，缺少实现细节与取舍分析。 |\n| 工程判断 | 56.4 | 能提及限流、幂等等实践，但未结合具体场景说明边界条件与失败处理。 |\n| 表达结构 | 56.4 | 回答结构松散，未按现象、定位、解决等逻辑展开，信息组织能力较弱。 |\n| 证据可信度 | 56.4 | 声称压测验证但未给出数据或方法，证据可信度不足，难以支撑结论。 |\n",
+      "总评": "**总评：待提升（待提升，56.4 分）**\n\n候选人张三在 Go 后端开发（mid 难度）面试中完成 11 题，综合得分 56.4，整体表现低于预期。优势在于能提及限流、幂等、消息表对账等工程实践关键词，但回答与题目严重脱节，例如在「Go 并发模型」题中描述消息表对账，在「服务分层与依赖边界」题中回答限流令牌桶，暴露出审题与知识组织能力的不足。所有维度得分均为 56.4，说明基础概念掌握不牢，缺乏对 G-M-P 调度、端口与适配器隔离、三色标记等核心机制的深入理解。建议优先强化审题与结构化表达，再针对薄弱主题进行专项训练。\n",
+      "最需要补的 3 个点": "1. 先审题再作答，确保回答紧扣题目关键词，避免答非所问。\n2. 针对 G-M-P 调度、端口与适配器隔离等薄弱主题做专项原理梳理。\n3. 用 STAR 结构组织项目案例，补充现象、定位、解决与验证数据。\n",
+      "逐题点评": "### 1. Go 并发模型（主问题，60.0 分）\n\n\u003e 请结合一个真实项目，说明「Go 并发模型」的实现原理、关键取舍以及你会如何验证。重点讲讲「goroutine 调度与 G-M-P 模型」。\n\n回答偏离并发模型主题，未涉及 G-M-P 调度原理，仅泛泛提及消息表对账。\n\n- 亮点：提及最终一致性与指数退避重试；有压测验证意识\n- 待补：goroutine 调度与 G-M-P 模型；channel 阻塞与缓冲区设计\n### 2. Go 并发模型（追问，60.0 分）\n\n\u003e 针对你刚才的回答，请继续展开「请补充：goroutine 调度与 G-M-P 模型」：它在高并发或故障场景下会怎样表现？请给出具体的实现细节和验证方式。\n\n追问下仍未展开 G-M-P 细节，转而描述检索融合，答非所问。\n\n- 亮点：提到评测集分类与指标；有量化评估思路\n- 待补：高并发下调度器表现；context 取消与超时传递\n### 3. 服务分层与依赖边界（主问题，40.0 分）\n\n\u003e 围绕「服务分层与依赖边界」，请讲一个你实际遇到过的问题：现象是什么、如何定位、最终怎么解决。请覆盖「端口与适配器隔离」。\n\n服务分层题回答限流令牌桶，完全未触及端口与适配器隔离，得分低。\n\n- 亮点：限流维度设计较清晰；有指标记录意识\n- 待补：端口与适配器隔离的具体实现；分层职责与依赖方向\n### 4. 服务分层与依赖边界（追问，60.0 分）\n\n\u003e 针对你刚才的回答，请继续展开「请补充：分层职责与依赖方向」：它在高并发或故障场景下会怎样表现？请给出具体的实现细节和验证方式。\n\n追问分层职责却回答幂等键，未说明依赖方向与故障场景表现。\n\n- 亮点：幂等键与唯一约束方案可行；冲突返回首次结果合理\n- 待补：分层职责与依赖方向；高并发或故障场景下的验证方式\n### 5. 内存管理与 GC（主问题，60.0 分）\n\n\u003e 如果要在生产环境落地「内存管理与 GC」，你会如何设计它的边界条件和失败处理？请重点说明「三色标记与写屏障」。\n\n内存管理题未深入三色标记与写屏障，边界条件设计缺失。\n\n- 亮点：有生产环境落地意识；提及失败处理\n- 待补：三色标记与写屏障原理；GC 调优与内存泄漏排查\n### 6. 内存管理与 GC（追问，60.0 分）\n\n\u003e 针对你刚才的回答，请继续展开「请补充：逃逸分析」：它在高并发或故障场景下会怎样表现？请给出具体的实现细节和验证方式。\n\n追问逃逸分析未给出具体判断方法与验证手段，内容空泛。\n\n- 亮点：关注高并发场景；有验证意识\n- 待补：逃逸分析的具体规则；故障场景下的表现与验证\n### 7. 错误处理与稳定性（主问题，60.0 分）\n\n\u003e 请结合一个真实项目，说明「错误处理与稳定性」的实现原理、关键取舍以及你会如何验证。重点讲讲「错误包装与 errors.Is/As」。\n\n错误处理题未讲清 errors.Is/As 的包装链，panic/recover 边界模糊。\n\n- 亮点：提及错误包装概念；有稳定性验证思路\n- 待补：错误包装与 errors.Is/As 用法；panic/recover 的边界\n### 8. 错误处理与稳定性（追问，60.0 分）\n\n\u003e 针对你刚才的回答，请继续展开「请补充：错误包装与 errors.Is/As」：它在高并发或故障场景下会怎样表现？请给出具体的实现细节和验证方式。\n\n追问下仍未展开错误包装细节，超时重试与幂等未结合场景说明。\n\n- 亮点：提到超时与重试；有幂等意识\n- 待补：errors.Is/As 的具体示例；超时、重试与幂等的配合\n### 9. 幂等与状态机设计（主问题，40.0 分）\n\n\u003e 围绕「幂等与状态机设计」，请讲一个你实际遇到过的问题：现象是什么、如何定位、最终怎么解决。请覆盖「重复请求与重试语义」。\n\n关键点覆盖不足，建议按「结论-原理-取舍-数据」四段式重答。\n\n- 待补：缺少具体的实现细节与取舍\n### 10. 幂等与状态机设计（追问，60.0 分）\n\n\u003e 针对你刚才的回答，请继续展开「请补充：幂等键与去重存储」：它在高并发或故障场景下会怎样表现？请给出具体的实现细节和验证方式。\n\n基本正确，但深度与取舍说明不足，容易停留在结论层。\n\n- 待补：缺少具体的实现细节与取舍\n### 11. 网络编程与连接治理（主问题，60.0 分）\n\n\u003e 如果要在生产环境落地「网络编程与连接治理」，你会如何设计它的边界条件和失败处理？请重点说明「连接池与复用」。\n\n基本正确，但深度与取舍说明不足，容易停留在结论层。\n\n- 待补：net/http 超时链路；连接池与复用；优雅停机\n"
+    },
+    "report": {
+      "schema_version": 1,
+      "session_id": "01M6X6F0AK7RB3J8ZBH0YW8ETF",
+      "generated_at": "2026-11-08T09:05:07.9499653Z",
+      "degraded": false,
+      "overall_score": 56.4,
+      "plan_items": 6,
+      "score_band": "待提升",
+      "verdict": "候选人张三在 Go 后端开发（mid 难度）面试中完成 11 题，综合得分 56.4，整体表现低于预期。优势在于能提及限流、幂等、消息表对账等工程实践关键词，但回答与题目严重脱节，例如在「Go 并发模型」题中描述消息表对账，在「服务分层与依赖边界」题中回答限流令牌桶，暴露出审题与知识组织能力的不足。所有维度得分均为 56.4，说明基础概念掌握不牢，缺乏对 G-M-P 调度、端口与适配器隔离、三色标记等核心机制的深入理解。建议优先强化审题与结构化表达，再针对薄弱主题进行专项训练。",
+      "dimensions": [
+        {
+          "dimension": "correctness",
+          "score": 56.4,
+          "weight": 0.3,
+          "comment": "回答内容与题目要求不匹配，如并发模型题答成消息表对账，正确性明显不足。"
+        },
+        {
+          "dimension": "depth",
+          "score": 56.4,
+          "weight": 0.25,
+          "comment": "对 G-M-P 调度、写屏障等机制仅停留在名词层面，缺少实现细节与取舍分析。"
+        },
+        {
+          "dimension": "engineering_judgment",
+          "score": 56.4,
+          "weight": 0.2,
+          "comment": "能提及限流、幂等等实践，但未结合具体场景说明边界条件与失败处理。"
+        },
+        {
+          "dimension": "structure",
+          "score": 56.4,
+          "weight": 0.15,
+          "comment": "回答结构松散，未按现象、定位、解决等逻辑展开，信息组织能力较弱。"
+        },
+        {
+          "dimension": "evidence_credibility",
+          "score": 56.4,
+          "weight": 0.1,
+          "comment": "声称压测验证但未给出数据或方法，证据可信度不足，难以支撑结论。"
+        }
+      ],
+      "questions": [
+        {
+          "turn_id": "01M6X6F0B9GGYKP2K3W2QHGC71",
+          "seq": 1,
+          "topic": "Go 并发模型",
+          "kind": "primary",
+          "depth": 1,
+          "question": "请结合一个真实项目，说明「Go 并发模型」的实现原理、关键取舍以及你会如何验证。重点讲讲「goroutine 调度与 G-M-P 模型」。",
+          "score": 60,
+          "scores": {
+            "correctness": 3,
+            "depth": 3,
+            "engineering_judgment": 3,
+            "evidence_credibility": 3,
+            "structure": 3
+          },
+          "base_score": 60,
+          "comment": "回答偏离并发模型主题，未涉及 G-M-P 调度原理，仅泛泛提及消息表对账。",
+          "strong_points": [
+            "提及最终一致性与指数退避重试",
+            "有压测验证意识"
+          ],
+          "missing_points": [
+            "goroutine 调度与 G-M-P 模型",
+            "channel 阻塞与缓冲区设计"
+          ],
+          "evidence": [
+            {
+              "turn_id": "01M6X6F0B9GGYKP2K3W2QHGC71",
+              "dimension": "correctness",
+              "quote": "我用消息表加定时对账保证最终一致性，重试是指数退避，压测验证过重复消费不产生脏数",
+              "reason": "回答原文片段"
+            }
+          ]
+        },
+        {
+          "turn_id": "01M6X6F0B9GGYKP2K3WJDHXQ4T",
+          "seq": 2,
+          "topic": "Go 并发模型",
+          "kind": "followup",
+          "depth": 2,
+          "question": "针对你刚才的回答，请继续展开「请补充：goroutine 调度与 G-M-P 模型」：它在高并发或故障场景下会怎样表现？请给出具体的实现细节和验证方式。",
+          "score": 60,
+          "scores": {
+            "correctness": 3,
+            "depth": 3,
+            "engineering_judgment": 3,
+            "evidence_credibility": 3,
+            "structure": 3
+          },
+          "base_score": 60,
+          "comment": "追问下仍未展开 G-M-P 细节，转而描述检索融合，答非所问。",
+          "strong_points": [
+            "提到评测集分类与指标",
+            "有量化评估思路"
+          ],
+          "missing_points": [
+            "高并发下调度器表现",
+            "context 取消与超时传递"
+          ],
+          "evidence": [
+            {
+              "turn_id": "01M6X6F0B9GGYKP2K3WJDHXQ4T",
+              "dimension": "correctness",
+              "quote": "检索这块我做了 BM25 和向量的融合，中文用 bigram，评测集分原文型和口",
+              "reason": "回答原文片段"
+            }
+          ]
+        },
+        {
+          "turn_id": "01M6X6F0BAP8KM7WNEMDZW4T3R",
+          "seq": 3,
+          "topic": "服务分层与依赖边界",
+          "kind": "primary",
+          "depth": 1,
+          "question": "围绕「服务分层与依赖边界」，请讲一个你实际遇到过的问题：现象是什么、如何定位、最终怎么解决。请覆盖「端口与适配器隔离」。",
+          "score": 40,
+          "scores": {
+            "correctness": 2,
+            "depth": 2,
+            "engineering_judgment": 2,
+            "evidence_credibility": 2,
+            "structure": 2
+          },
+          "base_score": 40,
+          "comment": "服务分层题回答限流令牌桶，完全未触及端口与适配器隔离，得分低。",
+          "strong_points": [
+            "限流维度设计较清晰",
+            "有指标记录意识"
+          ],
+          "missing_points": [
+            "端口与适配器隔离的具体实现",
+            "分层职责与依赖方向"
+          ],
+          "evidence": [
+            {
+              "turn_id": "01M6X6F0BAP8KM7WNEMDZW4T3R",
+              "dimension": "correctness",
+              "quote": "限流用的是令牌桶，按用户和接口两个维度，超限返回 429，并记录指标。",
+              "reason": "回答原文片段"
+            }
+          ]
+        },
+        {
+          "turn_id": "01M6X6F0BAP8KM7WNEMJHKM9XV",
+          "seq": 4,
+          "topic": "服务分层与依赖边界",
+          "kind": "followup",
+          "depth": 2,
+          "question": "针对你刚才的回答，请继续展开「请补充：分层职责与依赖方向」：它在高并发或故障场景下会怎样表现？请给出具体的实现细节和验证方式。",
+          "score": 60,
+          "scores": {
+            "correctness": 3,
+            "depth": 3,
+            "engineering_judgment": 3,
+            "evidence_credibility": 3,
+            "structure": 3
+          },
+          "base_score": 60,
+          "comment": "追问分层职责却回答幂等键，未说明依赖方向与故障场景表现。",
+          "strong_points": [
+            "幂等键与唯一约束方案可行",
+            "冲突返回首次结果合理"
+          ],
+          "missing_points": [
+            "分层职责与依赖方向",
+            "高并发或故障场景下的验证方式"
+          ],
+          "evidence": [
+            {
+              "turn_id": "01M6X6F0BAP8KM7WNEMJHKM9XV",
+              "dimension": "correctness",
+              "quote": "幂等是请求里带 idempotency key，落库唯一约束，冲突时返回第一次的",
+              "reason": "回答原文片段"
+            }
+          ]
+        },
+        {
+          "turn_id": "01M6X6F0BAP8KM7WNEMTW9Q9ZM",
+          "seq": 5,
+          "topic": "内存管理与 GC",
+          "kind": "primary",
+          "depth": 1,
+          "question": "如果要在生产环境落地「内存管理与 GC」，你会如何设计它的边界条件和失败处理？请重点说明「三色标记与写屏障」。",
+          "score": 60,
+          "scores": {
+            "correctness": 3,
+            "depth": 3,
+            "engineering_judgment": 3,
+            "evidence_credibility": 3,
+            "structure": 3
+          },
+          "base_score": 60,
+          "comment": "内存管理题未深入三色标记与写屏障，边界条件设计缺失。",
+          "strong_points": [
+            "有生产环境落地意识",
+            "提及失败处理"
+          ],
+          "missing_points": [
+            "三色标记与写屏障原理",
+            "GC 调优与内存泄漏排查"
+          ],
+          "evidence": [
+            {
+              "turn_id": "01M6X6F0BAP8KM7WNEMTW9Q9ZM",
+              "dimension": "correctness",
+              "quote": "可观测性上我埋了耗时和错误码，P95 超过阈值会告警，日志带 trace id。",
+              "reason": "回答原文片段"
+            }
+          ]
+        },
+        {
+          "turn_id": "01M6X6F0BAP8KM7WNEMXTK2N60",
+          "seq": 6,
+          "topic": "内存管理与 GC",
+          "kind": "followup",
+          "depth": 2,
+          "question": "针对你刚才的回答，请继续展开「请补充：逃逸分析」：它在高并发或故障场景下会怎样表现？请给出具体的实现细节和验证方式。",
+          "score": 60,
+          "scores": {
+            "correctness": 3,
+            "depth": 3,
+            "engineering_judgment": 3,
+            "evidence_credibility": 3,
+            "structure": 3
+          },
+          "base_score": 60,
+          "comment": "追问逃逸分析未给出具体判断方法与验证手段，内容空泛。",
+          "strong_points": [
+            "关注高并发场景",
+            "有验证意识"
+          ],
+          "missing_points": [
+            "逃逸分析的具体规则",
+            "故障场景下的表现与验证"
+          ],
+          "evidence": [
+            {
+              "turn_id": "01M6X6F0BAP8KM7WNEMXTK2N60",
+              "dimension": "correctness",
+              "quote": "缓存用 Redis，热点 key 加逻辑过期，避免击穿；缓存和库的一致性用延迟双",
+              "reason": "回答原文片段"
+            }
+          ]
+        },
+        {
+          "turn_id": "01M6X6F0BBFP5JCET6CQ34GC06",
+          "seq": 7,
+          "topic": "错误处理与稳定性",
+          "kind": "primary",
+          "depth": 1,
+          "question": "请结合一个真实项目，说明「错误处理与稳定性」的实现原理、关键取舍以及你会如何验证。重点讲讲「错误包装与 errors.Is/As」。",
+          "score": 60,
+          "scores": {
+            "correctness": 3,
+            "depth": 3,
+            "engineering_judgment": 3,
+            "evidence_credibility": 3,
+            "structure": 3
+          },
+          "base_score": 60,
+          "comment": "错误处理题未讲清 errors.Is/As 的包装链，panic/recover 边界模糊。",
+          "strong_points": [
+            "提及错误包装概念",
+            "有稳定性验证思路"
+          ],
+          "missing_points": [
+            "错误包装与 errors.Is/As 用法",
+            "panic/recover 的边界"
+          ],
+          "evidence": [
+            {
+              "turn_id": "01M6X6F0BBFP5JCET6CQ34GC06",
+              "dimension": "correctness",
+              "quote": "我用消息表加定时对账保证最终一致性，重试是指数退避，压测验证过重复消费不产生脏数",
+              "reason": "回答原文片段"
+            }
+          ]
+        },
+        {
+          "turn_id": "01M6X6F0BBFP5JCET6CY4ZE8SY",
+          "seq": 8,
+          "topic": "错误处理与稳定性",
+          "kind": "followup",
+          "depth": 2,
+          "question": "针对你刚才的回答，请继续展开「请补充：错误包装与 errors.Is/As」：它在高并发或故障场景下会怎样表现？请给出具体的实现细节和验证方式。",
+          "score": 60,
+          "scores": {
+            "correctness": 3,
+            "depth": 3,
+            "engineering_judgment": 3,
+            "evidence_credibility": 3,
+            "structure": 3
+          },
+          "base_score": 60,
+          "comment": "追问下仍未展开错误包装细节，超时重试与幂等未结合场景说明。",
+          "strong_points": [
+            "提到超时与重试",
+            "有幂等意识"
+          ],
+          "missing_points": [
+            "errors.Is/As 的具体示例",
+            "超时、重试与幂等的配合"
+          ],
+          "evidence": [
+            {
+              "turn_id": "01M6X6F0BBFP5JCET6CY4ZE8SY",
+              "dimension": "correctness",
+              "quote": "检索这块我做了 BM25 和向量的融合，中文用 bigram，评测集分原文型和口",
+              "reason": "回答原文片段"
+            }
+          ]
+        },
+        {
+          "turn_id": "01M6X6F0BBFP5JCET6D461A3S6",
+          "seq": 9,
+          "topic": "幂等与状态机设计",
+          "kind": "primary",
+          "depth": 1,
+          "question": "围绕「幂等与状态机设计」，请讲一个你实际遇到过的问题：现象是什么、如何定位、最终怎么解决。请覆盖「重复请求与重试语义」。",
+          "score": 40,
+          "scores": {
+            "correctness": 2,
+            "depth": 2,
+            "engineering_judgment": 2,
+            "evidence_credibility": 2,
+            "structure": 2
+          },
+          "base_score": 40,
+          "comment": "关键点覆盖不足，建议按「结论-原理-取舍-数据」四段式重答。",
+          "missing_points": [
+            "缺少具体的实现细节与取舍"
+          ],
+          "evidence": [
+            {
+              "turn_id": "01M6X6F0BBFP5JCET6D461A3S6",
+              "dimension": "correctness",
+              "quote": "限流用的是令牌桶，按用户和接口两个维度，超限返回 429，并记录指标。",
+              "reason": "回答原文片段"
+            }
+          ]
+        },
+        {
+          "turn_id": "01M6X6F0BCN605V6JKQ250QCWZ",
+          "seq": 10,
+          "topic": "幂等与状态机设计",
+          "kind": "followup",
+          "depth": 2,
+          "question": "针对你刚才的回答，请继续展开「请补充：幂等键与去重存储」：它在高并发或故障场景下会怎样表现？请给出具体的实现细节和验证方式。",
+          "score": 60,
+          "scores": {
+            "correctness": 3,
+            "depth": 3,
+            "engineering_judgment": 3,
+            "evidence_credibility": 3,
+            "structure": 3
+          },
+          "base_score": 60,
+          "comment": "基本正确，但深度与取舍说明不足，容易停留在结论层。",
+          "missing_points": [
+            "缺少具体的实现细节与取舍"
+          ],
+          "evidence": [
+            {
+              "turn_id": "01M6X6F0BCN605V6JKQ250QCWZ",
+              "dimension": "correctness",
+              "quote": "幂等是请求里带 idempotency key，落库唯一约束，冲突时返回第一次的",
+              "reason": "回答原文片段"
+            }
+          ]
+        },
+        {
+          "turn_id": "01M6X6F0BCN605V6JKQ8Y931EN",
+          "seq": 11,
+          "topic": "网络编程与连接治理",
+          "kind": "primary",
+          "depth": 1,
+          "question": "如果要在生产环境落地「网络编程与连接治理」，你会如何设计它的边界条件和失败处理？请重点说明「连接池与复用」。",
+          "score": 60,
+          "scores": {
+            "correctness": 3,
+            "depth": 3,
+            "engineering_judgment": 3,
+            "evidence_credibility": 3,
+            "structure": 3
+          },
+          "base_score": 60,
+          "comment": "基本正确，但深度与取舍说明不足，容易停留在结论层。",
+          "missing_points": [
+            "net/http 超时链路",
+            "连接池与复用",
+            "优雅停机"
+          ],
+          "evidence": [
+            {
+              "turn_id": "01M6X6F0BCN605V6JKQ8Y931EN",
+              "dimension": "correctness",
+              "quote": "可观测性上我埋了耗时和错误码，P95 超过阈值会告警，日志带 trace id。",
+              "reason": "回答原文片段"
+            }
+          ]
+        }
+      ],
+      "improvements": [
+        "先审题再作答，确保回答紧扣题目关键词，避免答非所问。",
+        "针对 G-M-P 调度、端口与适配器隔离等薄弱主题做专项原理梳理。",
+        "用 STAR 结构组织项目案例，补充现象、定位、解决与验证数据。"
+      ],
+      "next_steps": [
+        "每天精读一篇 Go 调度器或 GC 源码解析，并用自己的话复述 G-M-P 与写屏障流程。",
+        "练习用端口与适配器模式重构一个分层模糊的小项目，画出依赖方向图。",
+        "针对错误处理编写包含 errors.Is/As 与 panic/recover 边界的单元测试。",
+        "模拟面试录音，回听检查回答是否偏离题目，并强制使用现象-定位-解决结构。"
+      ],
+      "sections": [
+        {
+          "index": 0,
+          "title": "总评",
+          "markdown": "**总评：待提升（待提升，56.4 分）**\n\n候选人张三在 Go 后端开发（mid 难度）面试中完成 11 题，综合得分 56.4，整体表现低于预期。优势在于能提及限流、幂等、消息表对账等工程实践关键词，但回答与题目严重脱节，例如在「Go 并发模型」题中描述消息表对账，在「服务分层与依赖边界」题中回答限流令牌桶，暴露出审题与知识组织能力的不足。所有维度得分均为 56.4，说明基础概念掌握不牢，缺乏对 G-M-P 调度、端口与适配器隔离、三色标记等核心机制的深入理解。建议优先强化审题与结构化表达，再针对薄弱主题进行专项训练。\n",
+          "tool_calls": 3
+        },
+        {
+          "index": 1,
+          "title": "分维度表现",
+          "markdown": "| 维度 | 得分 | 说明 |\n| --- | --- | --- |\n| 正确性 | 56.4 | 回答内容与题目要求不匹配，如并发模型题答成消息表对账，正确性明显不足。 |\n| 深度 | 56.4 | 对 G-M-P 调度、写屏障等机制仅停留在名词层面，缺少实现细节与取舍分析。 |\n| 工程判断 | 56.4 | 能提及限流、幂等等实践，但未结合具体场景说明边界条件与失败处理。 |\n| 表达结构 | 56.4 | 回答结构松散，未按现象、定位、解决等逻辑展开，信息组织能力较弱。 |\n| 证据可信度 | 56.4 | 声称压测验证但未给出数据或方法，证据可信度不足，难以支撑结论。 |\n",
+          "tool_calls": 3
+        },
+        {
+          "index": 2,
+          "title": "逐题点评",
+          "markdown": "### 1. Go 并发模型（主问题，60.0 分）\n\n\u003e 请结合一个真实项目，说明「Go 并发模型」的实现原理、关键取舍以及你会如何验证。重点讲讲「goroutine 调度与 G-M-P 模型」。\n\n回答偏离并发模型主题，未涉及 G-M-P 调度原理，仅泛泛提及消息表对账。\n\n- 亮点：提及最终一致性与指数退避重试；有压测验证意识\n- 待补：goroutine 调度与 G-M-P 模型；channel 阻塞与缓冲区设计\n### 2. Go 并发模型（追问，60.0 分）\n\n\u003e 针对你刚才的回答，请继续展开「请补充：goroutine 调度与 G-M-P 模型」：它在高并发或故障场景下会怎样表现？请给出具体的实现细节和验证方式。\n\n追问下仍未展开 G-M-P 细节，转而描述检索融合，答非所问。\n\n- 亮点：提到评测集分类与指标；有量化评估思路\n- 待补：高并发下调度器表现；context 取消与超时传递\n### 3. 服务分层与依赖边界（主问题，40.0 分）\n\n\u003e 围绕「服务分层与依赖边界」，请讲一个你实际遇到过的问题：现象是什么、如何定位、最终怎么解决。请覆盖「端口与适配器隔离」。\n\n服务分层题回答限流令牌桶，完全未触及端口与适配器隔离，得分低。\n\n- 亮点：限流维度设计较清晰；有指标记录意识\n- 待补：端口与适配器隔离的具体实现；分层职责与依赖方向\n### 4. 服务分层与依赖边界（追问，60.0 分）\n\n\u003e 针对你刚才的回答，请继续展开「请补充：分层职责与依赖方向」：它在高并发或故障场景下会怎样表现？请给出具体的实现细节和验证方式。\n\n追问分层职责却回答幂等键，未说明依赖方向与故障场景表现。\n\n- 亮点：幂等键与唯一约束方案可行；冲突返回首次结果合理\n- 待补：分层职责与依赖方向；高并发或故障场景下的验证方式\n### 5. 内存管理与 GC（主问题，60.0 分）\n\n\u003e 如果要在生产环境落地「内存管理与 GC」，你会如何设计它的边界条件和失败处理？请重点说明「三色标记与写屏障」。\n\n内存管理题未深入三色标记与写屏障，边界条件设计缺失。\n\n- 亮点：有生产环境落地意识；提及失败处理\n- 待补：三色标记与写屏障原理；GC 调优与内存泄漏排查\n### 6. 内存管理与 GC（追问，60.0 分）\n\n\u003e 针对你刚才的回答，请继续展开「请补充：逃逸分析」：它在高并发或故障场景下会怎样表现？请给出具体的实现细节和验证方式。\n\n追问逃逸分析未给出具体判断方法与验证手段，内容空泛。\n\n- 亮点：关注高并发场景；有验证意识\n- 待补：逃逸分析的具体规则；故障场景下的表现与验证\n### 7. 错误处理与稳定性（主问题，60.0 分）\n\n\u003e 请结合一个真实项目，说明「错误处理与稳定性」的实现原理、关键取舍以及你会如何验证。重点讲讲「错误包装与 errors.Is/As」。\n\n错误处理题未讲清 errors.Is/As 的包装链，panic/recover 边界模糊。\n\n- 亮点：提及错误包装概念；有稳定性验证思路\n- 待补：错误包装与 errors.Is/As 用法；panic/recover 的边界\n### 8. 错误处理与稳定性（追问，60.0 分）\n\n\u003e 针对你刚才的回答，请继续展开「请补充：错误包装与 errors.Is/As」：它在高并发或故障场景下会怎样表现？请给出具体的实现细节和验证方式。\n\n追问下仍未展开错误包装细节，超时重试与幂等未结合场景说明。\n\n- 亮点：提到超时与重试；有幂等意识\n- 待补：errors.Is/As 的具体示例；超时、重试与幂等的配合\n### 9. 幂等与状态机设计（主问题，40.0 分）\n\n\u003e 围绕「幂等与状态机设计」，请讲一个你实际遇到过的问题：现象是什么、如何定位、最终怎么解决。请覆盖「重复请求与重试语义」。\n\n关键点覆盖不足，建议按「结论-原理-取舍-数据」四段式重答。\n\n- 待补：缺少具体的实现细节与取舍\n### 10. 幂等与状态机设计（追问，60.0 分）\n\n\u003e 针对你刚才的回答，请继续展开「请补充：幂等键与去重存储」：它在高并发或故障场景下会怎样表现？请给出具体的实现细节和验证方式。\n\n基本正确，但深度与取舍说明不足，容易停留在结论层。\n\n- 待补：缺少具体的实现细节与取舍\n### 11. 网络编程与连接治理（主问题，60.0 分）\n\n\u003e 如果要在生产环境落地「网络编程与连接治理」，你会如何设计它的边界条件和失败处理？请重点说明「连接池与复用」。\n\n基本正确，但深度与取舍说明不足，容易停留在结论层。\n\n- 待补：net/http 超时链路；连接池与复用；优雅停机\n",
+          "turn_refs": [
+            "01M6X6F0B9GGYKP2K3W2QHGC71",
+            "01M6X6F0B9GGYKP2K3WJDHXQ4T",
+            "01M6X6F0BAP8KM7WNEMDZW4T3R",
+            "01M6X6F0BAP8KM7WNEMJHKM9XV",
+            "01M6X6F0BAP8KM7WNEMTW9Q9ZM",
+            "01M6X6F0BAP8KM7WNEMXTK2N60",
+            "01M6X6F0BBFP5JCET6CQ34GC06",
+            "01M6X6F0BBFP5JCET6CY4ZE8SY",
+            "01M6X6F0BBFP5JCET6D461A3S6",
+            "01M6X6F0BCN605V6JKQ250QCWZ",
+            "01M6X6F0BCN605V6JKQ8Y931EN"
+          ],
+          "tool_calls": 3
+        },
+        {
+          "index": 3,
+          "title": "最需要补的 3 个点",
+          "markdown": "1. 先审题再作答，确保回答紧扣题目关键词，避免答非所问。\n2. 针对 G-M-P 调度、端口与适配器隔离等薄弱主题做专项原理梳理。\n3. 用 STAR 结构组织项目案例，补充现象、定位、解决与验证数据。\n",
+          "tool_calls": 3
+        },
+        {
+          "index": 4,
+          "title": "下一步练习建议",
+          "markdown": "1. 每天精读一篇 Go 调度器或 GC 源码解析，并用自己的话复述 G-M-P 与写屏障流程。\n2. 练习用端口与适配器模式重构一个分层模糊的小项目，画出依赖方向图。\n3. 针对错误处理编写包含 errors.Is/As 与 panic/recover 边界的单元测试。\n4. 模拟面试录音，回听检查回答是否偏离题目，并强制使用现象-定位-解决结构。\n",
+          "tool_calls": 3
+        }
+      ],
+      "tool_calls": 3,
+      "tool_breakdown": {
+        "get_session_overview": 1,
+        "list_weak_turns": 1,
+        "search_turns": 1
+      },
+      "tool_mode": "deterministic",
+      "tool_calls_detail": [
+        {
+          "tool": "get_session_overview",
+          "status": "ok",
+          "args": "01M6X6F0AK7RB3J8ZBH0YW8ETF",
+          "duration_ms": 0,
+          "result_bytes": 0,
+          "truncated": false
+        },
+        {
+          "tool": "list_weak_turns",
+          "status": "ok",
+          "args": "limit=5",
+          "duration_ms": 0,
+          "result_bytes": 0,
+          "truncated": true
+        },
+        {
+          "tool": "search_turns",
+          "status": "ok",
+          "args": "topic= query= limit=8",
+          "duration_ms": 0,
+          "result_bytes": 0,
+          "truncated": true
+        }
+      ],
+      "model_calls": 0,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0,
+      "model_name": "deepseek-chat",
+      "prompt_version": "report-v2"
+    }
+  },
+  "model": "deepseek-chat",
+  "provider": "openai",
+  "session_id": "01M6X6F0AK7RB3J8ZBH0YW8ETF"
+}

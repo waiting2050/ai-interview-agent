@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/waiting2050/ai-interview-agent/internal/agent/knowledge"
 	"github.com/waiting2050/ai-interview-agent/internal/app"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/domainpack"
 	domainreport "github.com/waiting2050/ai-interview-agent/internal/domain/report"
@@ -42,6 +43,15 @@ func (h *handlers) health(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		body["database"] = "ok"
+	}
+	if h.deps.RetrievalStatus != nil {
+		rag := h.deps.RetrievalStatus()
+		body["rag"] = rag
+		// A warming model is not an outage: the service still answers with
+		// BM25, but /healthz must not claim to be fully ok.
+		if rag.Mode == string(knowledge.ModeWarming) {
+			body["status"] = "warming"
+		}
 	}
 	writeJSON(w, http.StatusOK, body)
 }

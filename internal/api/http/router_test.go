@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/waiting2050/ai-interview-agent/internal/agent/interview"
+	"github.com/waiting2050/ai-interview-agent/internal/agent/knowledge"
 	"github.com/waiting2050/ai-interview-agent/internal/app"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/evaluation"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/jd"
@@ -706,6 +707,37 @@ func eventTypesOf(events []session.Event) []string {
 		types = append(types, e.Type)
 	}
 	return types
+}
+
+func TestHealthzReportsRAGWarming(t *testing.T) {
+	srv := httptest.NewServer(NewRouter(Deps{
+		Health: func(context.Context) error { return nil },
+		RetrievalStatus: func() knowledge.Status {
+			return knowledge.Status{ConfiguredMode: "hybrid", Mode: "warming", Reason: "embedding model warming up"}
+		},
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["status"] != "warming" {
+		t.Fatalf("health status = %v, want warming", body["status"])
+	}
+	rag, ok := body["rag"].(map[string]any)
+	if !ok || rag["mode"] != "warming" {
+		t.Fatalf("rag block missing or not warming: %+v", body["rag"])
+	}
 }
 
 func TestTraceIDHeaderDefaultsToRequestID(t *testing.T) {

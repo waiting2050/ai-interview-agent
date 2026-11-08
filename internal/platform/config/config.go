@@ -77,6 +77,9 @@ type Config struct {
 	// ReviewDailyLimit caps how many due cards the daily review queue shows.
 	// It never changes the persisted SM-2 due dates.
 	ReviewDailyLimit int
+
+	// M20 groups retrieval, autonomous-tool and layered-memory settings.
+	M20 M20Config
 }
 
 func Load() (Config, error) {
@@ -196,6 +199,10 @@ func Load() (Config, error) {
 
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("DATABASE_URL must not be empty")
+	}
+
+	if cfg.M20, err = loadM20(); err != nil {
+		return Config{}, err
 	}
 
 	return cfg, nil

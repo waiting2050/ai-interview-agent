@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/waiting2050/ai-interview-agent/internal/agent/knowledge"
 	"github.com/waiting2050/ai-interview-agent/internal/app"
 	"github.com/waiting2050/ai-interview-agent/internal/auth"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/obs"
@@ -19,7 +20,10 @@ type Deps struct {
 	// route. Nil makes protected routes answer 503 rather than run unauthenticated.
 	Auth   *auth.Service
 	Health func(ctx context.Context) error
-	Logger *slog.Logger
+	// RetrievalStatus exposes the RAG readiness block on /healthz. Nil omits
+	// the block; attention state is reported as status=warming, never as ok.
+	RetrievalStatus func() knowledge.Status
+	Logger          *slog.Logger
 	// DemoLoginLimit caps anonymous demo logins per source IP inside
 	// DemoLoginWindow. Zero falls back to five per hour.
 	DemoLoginLimit  int

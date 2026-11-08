@@ -2,7 +2,9 @@ name: ai-interview-agent
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # pgvector image ships the extension; the data volume is the same PG16
+    # layout, so an existing volume keeps working after a container recreate.
+    image: pgvector/pgvector:pg16
     container_name: ai-interview-postgres
     environment:
       POSTGRES_USER: interview

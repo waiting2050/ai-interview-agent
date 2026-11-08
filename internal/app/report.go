@@ -251,27 +251,61 @@ func (r *Runner) executeReport(ctx context.Context, run *session.Run) error {
 		return nil
 	}
 
+	var toolQuery *tools.Query
 	evidence, err := recordStep(ctx, r.store, r.log, r.now, run.ID, stepCollect, func(ctx context.Context) (tools.Bundle, error) {
 		pack := domainpack.Default().MustGet(sess.Domain)
-		opts := tools.Options{}
+		opts := tools.Options{Searcher: r.reportTool.Searcher}
 		if pack != nil {
 			opts.Rubric = pack.EvaluationRubric()
 		}
-		q := tools.NewQuery(run.SessionID, r.store.Repos(), opts)
-		return q.Collect(ctx)
+		toolQuery = tools.NewQuery(run.SessionID, r.store.Repos(), opts)
+		return toolQuery.Collect(ctx)
 	})
 	if err != nil {
 		r.failRun(ctx, run, stepCollect, err)
 		return err
 	}
 
-	outcome, err := recordStep(ctx, r.store, r.log, r.now, run.ID, stepGenerate, func(ctx context.Context) (report.Outcome, error) {
-		out, err := r.reports.Generate(ctx, evidence)
-		if err == nil && out.Degraded {
-			r.metrics.IncReportDegraded(out.ErrorCode)
+	var outcome report.Outcome
+	autonomous := r.reportTool.Mode == "autonomous"
+	if autonomous {
+		ag, ok := r.reports.(report.AutonomousGenerator)
+		if ok && toolQuery != nil {
+			// A fresh section resets the per-section window; the total call and
+			// per-tool caps still include the three collect calls.
+			toolQuery.BeginSection("autonomous")
+			sink := func(ev report.Event) {
+				if err := appendEvent(ctx, r.logger(ctx), r.store.Repos().Events,
+					run.SessionID, run.ID, ev.Type, ev.Payload); err != nil {
+					r.logger(ctx).Warn("report tool event failed", "event", ev.Type, "error", err)
+				}
+			}
+			outcome, err = recordStep(ctx, r.store, r.log, r.now, run.ID, stepGenerate, func(ctx context.Context) (report.Outcome, error) {
+				out, genErr := ag.GenerateWithTools(ctx, evidence, toolQuery, sink)
+				if genErr == nil && out.Degraded {
+					r.metrics.IncReportDegraded(out.ErrorCode)
+				}
+				return out, genErr
+			})
+		} else {
+			r.logger(ctx).Warn("report tool mode autonomous requested but the generator has no tool loop; using deterministic")
+			outcome, err = recordStep(ctx, r.store, r.log, r.now, run.ID, stepGenerate, func(ctx context.Context) (report.Outcome, error) {
+				out, genErr := r.reports.Generate(ctx, evidence)
+				if genErr == nil && out.Degraded {
+					r.metrics.IncReportDegraded(out.ErrorCode)
+				}
+				return out, genErr
+			})
 		}
-		return out, err
-	})
+	} else {
+		outcome, err = recordStep(ctx, r.store, r.log, r.now, run.ID, stepGenerate, func(ctx context.Context) (report.Outcome, error) {
+			out, genErr := r.reports.Generate(ctx, evidence)
+			if genErr == nil && out.Degraded {
+				r.metrics.IncReportDegraded(out.ErrorCode)
+			}
+			return out, genErr
+		})
+	}
 	if err != nil {
 		r.failRun(ctx, run, stepGenerate, err)
 		return err
@@ -389,8 +423,11 @@ func (r *Runner) commitReport(ctx context.Context, run *session.Run, outcome rep
 			}
 		}
 		if err := appendEvent(ctx, r.logger(ctx), repos.Events, sess.ID, run.ID, session.EventReportToolCalls, map[string]any{
-			"count":     doc.ToolCalls,
-			"breakdown": doc.ToolBreakdown,
+			"count":           doc.ToolCalls,
+			"breakdown":       doc.ToolBreakdown,
+			"tool_mode":       doc.ToolMode,
+			"tool_rounds":     doc.ToolRounds,
+			"degraded_reason": doc.ToolDegradeReason,
 		}); err != nil {
 			return err
 		}
@@ -400,6 +437,9 @@ func (r *Runner) commitReport(ctx context.Context, run *session.Run, outcome rep
 			"degraded":             doc.Degraded,
 			"error_code":           doc.ErrorCode,
 			"tool_calls":           doc.ToolCalls,
+			"tool_mode":            doc.ToolMode,
+			"tool_rounds":          doc.ToolRounds,
+			"tool_degraded_reason": doc.ToolDegradeReason,
 			"model_name":           doc.ModelName,
 			"model_calls":          doc.ModelCalls,
 			"model_call_breakdown": doc.ModelCallBreakdown,

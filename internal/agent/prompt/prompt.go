@@ -384,3 +384,58 @@ func ReportRepairMessage(issues []string) string {
 	return "上一次输出未通过校验：" + strings.Join(issues, "；") +
 		"。请修正后重新只输出一个合法 JSON 对象，turn_id 必须来自给定的 turn_summaries。"
 }
+
+// ReportToolSystem extends the report system message with the JSON action
+// protocol and the read-only tool catalog available during the autonomous
+// loop.
+func ReportToolSystem(dims ...DimensionSpec) string {
+	return ReportSystem(dims...) + "\n\n" + reportToolProtocol
+}
+
+const reportToolProtocol = `## 工具动作协议（本轮允许）
+
+你每轮只能输出一个 JSON 对象，二选一：
+1) {"action":"tool","tool":"<工具名>","args":{...}} 表示调用一个只读工具；
+2) {"action":"final","report":{ ...上一节的报告 JSON... }} 表示提交最终报告。
+
+只读工具目录（所有工具都只能访问当前会话）：
+- get_session_overview：无参数。会话概览默认已内联在 user 消息中，通常无需再调用。
+- list_weak_turns：{"limit":1-10}，返回得分最低的已答题。
+- search_turns：{"query?":string,"topic?":string,"min_score?":0-100,"max_score?":0-100,"limit":1-8}，按题干/回答片段或主题筛选。
+- get_turn：{"turn_id":string}，读取单题回答摘录；turn_id 必须来自已给摘要。
+- search_knowledge：{"query":string,"topic?":string,"top_k":1-6}，检索标准讲解参考。
+
+硬规则：
+1. 证据不足时先调用工具；证据足够就提交 final，不要为凑轮次继续调用。
+2. 不得编造工具结果；status=empty 表示真实无命中，应在报告中说明证据不足。
+3. 单次结果可能 truncated=true；此时只能基于已返回部分判断，不得假设被截断内容。
+4. 每次 final 都必须遵守上一节的字段与长度约束。`
+
+// ReportToolUser renders the user message for the autonomous loop. The
+// deterministic overview is inlined so the model does not spend its first call
+// re-reading what the system already collected.
+func ReportToolUser(in ReportInput, overviewJSON string) string {
+	return ReportUser(in) + "\n\n<session_overview_json>\n" + overviewJSON +
+		"\n</session_overview_json>\n\n" +
+		"请按工具动作协议：需要补充证据就输出一个 tool 动作，证据足够就输出 final。" +
+		"回合上限 6 轮、工具调用上限 12 次、总耗时上限 20 秒；到上限后必须直接 final。"
+}
+
+// ReportToolResultMessage wraps a tool envelope for the next model round.
+func ReportToolResultMessage(tool string, result string) string {
+	return "<tool_result tool=\"" + tool + "\">\n" + result + "\n</tool_result>\n" +
+		"请继续：需要更多证据就再输出一个 tool 动作，否则输出 final。"
+}
+
+// ReportToolInvalidActionMessage repairs a non-JSON or unknown action without
+// discarding the evidence already collected.
+func ReportToolInvalidActionMessage(reason string) string {
+	return "上一次输出不是合法的工具动作协议：" + reason +
+		"。请只输出一个 JSON 对象，action 必须是 tool 或 final。"
+}
+
+// ReportToolForceFinalMessage stops tool use and asks for the report.
+func ReportToolForceFinalMessage(reason string) string {
+	return "工具阶段已结束（" + reason + "）。不要再调用任何工具，" +
+		"请只输出 {\"action\":\"final\",\"report\":{...}}，并且只能使用已经返回的证据。"
+}

@@ -24,6 +24,16 @@ var (
 	ErrForbidden       = errors.New("tool access forbidden")
 	ErrBudgetExceeded  = errors.New("tool budget exceeded")
 	ErrTimeout         = errors.New("tool timeout")
+	ErrUnknownTool     = errors.New("tool unknown")
+)
+
+// Call statuses recorded for the autonomous loop and persisted in the report.
+const (
+	StatusOK      = "ok"
+	StatusEmpty   = "empty"
+	StatusTimeout = "timeout"
+	StatusDenied  = "denied"
+	StatusError   = "error"
 )
 
 const (
@@ -43,6 +53,14 @@ type Options struct {
 	// Rubric supplies dimension order, names and weights for the overview.
 	// Empty falls back to the default five-dimension rubric.
 	Rubric evaluation.Rubric
+	// ToolCalls overrides the per-tool cap. Missing tools use the catalog
+	// default, which is the documented limit.
+	ToolCalls map[string]int
+	// Searcher backs search_knowledge. Nil makes the tool return an explicit
+	// empty result instead of fabricating knowledge.
+	Searcher Searcher
+	// Round tags every call with the autonomous-loop round for audit.
+	Round func() int
 }
 
 func (o *Options) normalize() {
@@ -65,10 +83,13 @@ func (o *Options) normalize() {
 type CallRecord struct {
 	Tool         string `json:"tool"`
 	Args         string `json:"args,omitempty"`
+	Status       string `json:"status,omitempty"`
 	DurationMS   int64  `json:"duration_ms"`
 	ResultRunes  int    `json:"result_runes"`
+	ResultBytes  int    `json:"result_bytes"`
 	Truncated    bool   `json:"truncated"`
 	SectionLabel string `json:"section,omitempty"`
+	Round        int    `json:"round,omitempty"`
 }
 
 // Query is bound to one session. Callers cannot override the session id, which
@@ -82,12 +103,14 @@ type Query struct {
 	sectionOpen  bool
 	sectionLabel string
 	sectionCalls int
+	toolCalls    map[string]int
 	records      []CallRecord
+	overview     *Overview
 }
 
 func NewQuery(sessionID string, repos ports.Repositories, opts Options) *Query {
 	opts.normalize()
-	return &Query{sessionID: sessionID, repos: repos, opts: opts}
+	return &Query{sessionID: sessionID, repos: repos, opts: opts, toolCalls: map[string]int{}}
 }
 
 // BeginSection opens a new tool-call budget window. Report generation uses
@@ -234,25 +257,66 @@ func (q *Query) beginCall(ctx context.Context, tool, args string) (context.Conte
 	if q.calls >= q.opts.MaxCalls {
 		return nil, nil, time.Time{}, fmt.Errorf("%w: total calls reached %d", ErrBudgetExceeded, q.opts.MaxCalls)
 	}
+	if limit := q.toolLimit(tool); limit > 0 && q.toolCalls[tool] >= limit {
+		return nil, nil, time.Time{}, fmt.Errorf("%w: %s reached its %d-call limit", ErrBudgetExceeded, tool, limit)
+	}
 	if q.sectionOpen && q.sectionCalls >= q.opts.MaxSectionCalls {
 		return nil, nil, time.Time{}, fmt.Errorf("%w: section %q reached %d calls", ErrBudgetExceeded, q.sectionLabel, q.opts.MaxSectionCalls)
 	}
 	callCtx, cancel := context.WithTimeout(ctx, q.opts.Timeout)
 	q.calls++
+	q.toolCalls[tool]++
 	if q.sectionOpen {
 		q.sectionCalls++
 	}
 	return callCtx, cancel, time.Now(), nil
 }
 
+// toolLimit returns the signed per-tool cap. Zero means the tool is not in the
+// catalog and receives no special cap.
+func (q *Query) toolLimit(tool string) int {
+	if limit, ok := q.opts.ToolCalls[tool]; ok {
+		return limit
+	}
+	return ToolCap(tool)
+}
+
+// noteRejected records a denied attempt (unknown tool, invalid arguments or an
+// out-of-scope turn) so the report audit shows what the model tried to do.
+func (q *Query) noteRejected(ctx context.Context, tool, args, status, note string) {
+	q.calls++
+	q.toolCalls[tool]++
+	if q.sectionOpen {
+		q.sectionCalls++
+	}
+	q.records = append(q.records, CallRecord{
+		Tool: tool, Args: args, Status: status, SectionLabel: q.sectionLabel, Round: q.round(),
+	})
+	slog.Default().Info("tool call rejected", append(reqctx.Attrs(ctx),
+		"tool", tool, "status", status, "reason", note,
+	)...)
+}
+
+func (q *Query) round() int {
+	if q.opts.Round == nil {
+		return 0
+	}
+	return q.opts.Round()
+}
+
 func (q *Query) endCall(ctx context.Context, tool, args string, start time.Time, resultRunes int, truncated bool) {
 	record := CallRecord{
 		Tool:         tool,
 		Args:         args,
+		Status:       StatusOK,
 		DurationMS:   time.Since(start).Milliseconds(),
 		ResultRunes:  resultRunes,
 		Truncated:    truncated,
 		SectionLabel: q.sectionLabel,
+		Round:        q.round(),
+	}
+	if resultRunes == 0 {
+		record.Status = StatusEmpty
 	}
 	q.records = append(q.records, record)
 	slog.Default().Info("tool call", append(reqctx.Attrs(ctx),
@@ -395,8 +459,13 @@ func (q *Query) SessionOverview(ctx context.Context) (Overview, error) {
 		overview.Turns = limitTurns(overview.Turns, 20)
 	}
 	q.endCall(ctx, "get_session_overview", q.sessionID, start, minInt(resultRunes, q.opts.MaxResultRunes), truncated)
+	q.overview = &overview
 	return overview, nil
 }
+
+// CachedOverview returns the overview loaded earlier in the same run. It lets
+// the autonomous loop inject the summary without spending a second call.
+func (q *Query) CachedOverview() *Overview { return q.overview }
 
 // ListWeakTurns returns the lowest-scoring answered turns. Degraded records are
 // excluded because they carry no comparable score.
