@@ -27,6 +27,10 @@ const (
 	EnvOpenAIModel  = "OPENAI_MODEL"
 	EnvModelTimeout = "MODEL_TIMEOUT"
 	EnvMaxRetries   = "MODEL_MAX_RETRIES"
+	// Price per one million prompt/completion tokens in CNY. Unset keeps
+	// stored cost at 0, which is correct for local models.
+	EnvPriceInputCNYPerM  = "MODEL_PRICE_INPUT_CNY_PER_MTOK"
+	EnvPriceOutputCNYPerM = "MODEL_PRICE_OUTPUT_CNY_PER_MTOK"
 )
 
 // Defaults target DeepSeek's OpenAI-compatible endpoint. DeepSeek retired
@@ -47,6 +51,8 @@ type ProviderConfig struct {
 	Model      string
 	Timeout    time.Duration
 	MaxRetries int
+	PriceIn    float64
+	PriceOut   float64
 }
 
 // ProviderInfo describes the client that was actually built, for startup logs
@@ -98,6 +104,23 @@ func LoadProviderConfig() (ProviderConfig, error) {
 			return ProviderConfig{}, fmt.Errorf("%s must be an integer in [0,5], got %q", EnvMaxRetries, raw)
 		}
 		cfg.MaxRetries = n
+	}
+	for _, item := range []struct {
+		name string
+		dst  *float64
+	}{
+		{EnvPriceInputCNYPerM, &cfg.PriceIn},
+		{EnvPriceOutputCNYPerM, &cfg.PriceOut},
+	} {
+		raw := strings.TrimSpace(os.Getenv(item.name))
+		if raw == "" {
+			continue
+		}
+		v, err := strconv.ParseFloat(raw, 64)
+		if err != nil || v < 0 {
+			return ProviderConfig{}, fmt.Errorf("%s must be a non-negative number, got %q", item.name, raw)
+		}
+		*item.dst = v
 	}
 	return cfg, nil
 }

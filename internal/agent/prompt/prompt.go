@@ -207,6 +207,11 @@ type QuestionInput struct {
 	FollowupTarget string
 	LastQuestion   string
 	Answer         string
+	// MemorySummary and MemoryRecentTurns are the layered memory context.
+	// Both are already bounded by the memory builder: summary <= 600 runes and
+	// the recent window is the last N turns only.
+	MemorySummary     string
+	MemoryRecentTurns []string
 }
 
 // QuestionSystem returns the system message for the requested question kind.
@@ -234,6 +239,19 @@ func QuestionUser(in QuestionInput) string {
 	}
 	if len(in.ExpectedPoints) > 0 {
 		fmt.Fprintf(&b, "<expected_points>%s</expected_points>\n", strings.Join(in.ExpectedPoints, "；"))
+	}
+	if in.MemorySummary != "" || len(in.MemoryRecentTurns) > 0 {
+		b.WriteString("<memory>\n")
+		if in.MemorySummary != "" {
+			fmt.Fprintf(&b, "较早问答摘要：%s\n", truncate(in.MemorySummary, 600))
+		}
+		if len(in.MemoryRecentTurns) > 0 {
+			b.WriteString("最近问答：\n")
+			for _, turn := range in.MemoryRecentTurns {
+				fmt.Fprintf(&b, "- %s\n", truncate(turn, 420))
+			}
+		}
+		b.WriteString("</memory>\n")
 	}
 	if len(in.History) > 0 {
 		start := 0

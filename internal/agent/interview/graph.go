@@ -73,6 +73,13 @@ type TurnSnapshot struct {
 	// sessions without history.
 	TopicHistory *followup.TopicHistory `json:"topic_history,omitempty"`
 
+	// MemorySummary and MemoryRecentTurns are the layered prompt context:
+	// compressed older turns plus the last few answered turns verbatim. Both
+	// are empty when memory is disabled, and both stay out of the persisted
+	// snapshot JSON for sessions without memory.
+	MemorySummary     string   `json:"memory_summary,omitempty"`
+	MemoryRecentTurns []string `json:"memory_recent_turns,omitempty"`
+
 	StartedAt time.Time     `json:"started_at"`
 	Elapsed   time.Duration `json:"elapsed"`
 	Now       time.Time     `json:"now"`

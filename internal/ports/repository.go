@@ -54,6 +54,9 @@ type RunRepository interface {
 	// GetRunningBySession enforces the invariant that a session has at most
 	// one running run at a time.
 	GetRunningBySession(ctx context.Context, sessionID string) (*session.Run, error)
+	// AddUsage accumulates model usage for the run. costMicros is in
+	// micro-CNY; 0 means no price was configured.
+	AddUsage(ctx context.Context, id string, prompt, completion, calls int, costMicros int64) error
 	SetLastStep(ctx context.Context, id, step string) error
 	MarkRunning(ctx context.Context, id string, attempt int, at time.Time) error
 	MarkFinished(ctx context.Context, id string, status session.RunStatus, errorCode string, at time.Time) error
@@ -88,6 +91,8 @@ type StepRepository interface {
 	ListByRun(ctx context.Context, runID string) ([]session.RunStep, error)
 	Start(ctx context.Context, step *session.RunStep) error
 	Complete(ctx context.Context, runID, stepName string, output []byte, at time.Time) error
+	// RecordUsage stores the model spend attributed to one step.
+	RecordUsage(ctx context.Context, runID, stepName string, prompt, completion, calls int, costMicros int64) error
 	Fail(ctx context.Context, runID, stepName, errorCode string, at time.Time) error
 }
 

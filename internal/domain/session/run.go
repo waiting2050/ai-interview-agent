@@ -52,9 +52,15 @@ type Run struct {
 	LastError      string
 	LastErrorClass string
 	DeadAt         *time.Time
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	FinishedAt     *time.Time
+	// Model usage is aggregated from the run's steps. CostMicros is in
+	// micro-CNY; 0 means no price was configured for the provider.
+	PromptTokens     int
+	CompletionTokens int
+	ModelCalls       int
+	CostMicros       int64
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	FinishedAt       *time.Time
 }
 
 type StepStatus string
@@ -77,4 +83,10 @@ type RunStep struct {
 	ErrorCode  string
 	StartedAt  time.Time
 	FinishedAt *time.Time
+	// Usage is the model spend attributed to this node. CostMicros is in
+	// micro-CNY and is 0 when no price is configured.
+	PromptTokens     int
+	CompletionTokens int
+	ModelCalls       int
+	CostMicros       int64
 }

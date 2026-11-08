@@ -3,6 +3,7 @@ package interview
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/waiting2050/ai-interview-agent/internal/agent/llm"
@@ -93,6 +94,40 @@ func TestHeuristicQuestionIsUnique(t *testing.T) {
 	if out.Degraded || out.Text == "" || out.Text == history[0] {
 		t.Fatalf("outcome = %+v", out)
 	}
+}
+
+func TestQuestionPromptCarriesLayeredMemory(t *testing.T) {
+	client := &capturingClient{reply: `{"question":"你刚才说选 PostgreSQL 是为了 SKIP LOCKED，请说明长事务下这个方案的边界。"}`}
+	generator := NewQuestionGenerator(client, "m")
+
+	out, err := generator.Generate(context.Background(), QuestionInput{
+		Kind:              "primary",
+		Topic:             "数据库选型",
+		MemorySummary:     "第 2 轮：数据库选 PostgreSQL，因为需要 SKIP LOCKED 的队列语义。",
+		MemoryRecentTurns: []string{"问：为什么不用 MySQL？答：需要 SKIP LOCKED。"},
+	})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if out.Degraded {
+		t.Fatalf("unexpected degradation: %+v", out)
+	}
+	if !strings.Contains(client.req.User, "<memory>") || !strings.Contains(client.req.User, "SKIP LOCKED") {
+		t.Fatalf("memory block missing from prompt:\n%s", client.req.User)
+	}
+	if !strings.Contains(client.req.User, "最近问答") || !strings.Contains(client.req.User, "</memory>") {
+		t.Fatalf("recent turns missing from prompt:\n%s", client.req.User)
+	}
+}
+
+type capturingClient struct {
+	req   llm.Request
+	reply string
+}
+
+func (c *capturingClient) Generate(_ context.Context, req llm.Request) (llm.Response, error) {
+	c.req = req
+	return llm.Response{Text: c.reply, Model: "m", PromptTokens: 1, CompletionTokens: 1}, nil
 }
 
 type failingClient struct{}

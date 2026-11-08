@@ -94,7 +94,7 @@
 
 - `RAG_MODE=off|bm25|hybrid|auto`
 - `REPORT_TOOL_MODE=deterministic|autonomous`
-- `MEMORY_MODE=off|recent|auto`
+- `MEMORY_MODE=off|auto`
 
 ---
 
@@ -445,15 +445,15 @@ CREATE TABLE session_memories (
 
 ### 5.3 触发阈值：按轮数，不按 token
 
-- **阈值**：已答题数 ≥ 6，且 `latest_seq - upto_seq ≥ 5`；即第 6、11、16…题各一次，**不每轮调用**。
+- **阈值**：已答题数 ≥ 6，且 `(answered-1) % 5 == 0`；即第 6、11、16…题各一次，**不每轮调用**。参数为 `MEMORY_SUMMARY_EVERY=5`（默认），最近窗口 `MEMORY_RECENT_TURNS=4`。
 - **为什么按轮数而不是 token**：
   - token 数依赖 provider 分词器，换模型阈值就漂移；轮数是稳定、可测的业务单位。
-  - 每轮答案已截断到 1200 字、题干 120 字，5 轮输入上限可算：旧摘要 600 字 + 5×(120+200) ≈ 2200 字 ≈ 2200–3000 token；输出 ≤600 字。成本有上界。
+  - 每轮答案已截断到 6000 字（入 prompt 的最近轮次再截到 300 字），5 轮输入上限可算：旧摘要 600 字 + 5×(题 200 + 答 300) ≈ 3100 字；输出 ≤600 字。成本有上界。
   - 按 token 触发需要额外分词与计数，收益只是更省一点 token，不值得引入 provider 依赖。
-- **摘要范围**：`[upto_seq+1, latest_seq-4]`，最近 4 轮保留原文。
-- **失败**：保留旧摘要，`degraded=true`，下个阈值再试；不每轮重试。
+- **摘要范围**：`[upto_seq+1, answered-4]`，最近 4 轮保留原文。
+- **失败**：保留旧摘要，`degraded=true`，下个阈值再试；不每轮重试；摘要失败不阻断作答。
 - **刷新**：`prompt_version` 变化时下次阈值重算；会话 aborted/failed 后不再生成。
-- **无 key**：`MEMORY_MODE=auto/recent` 只注入最近 4 轮 + 结构化状态，不生成摘要。
+- **无可用模型**：`MEMORY_MODE=auto` 仍生成摘要，但走确定性 digest（`memory-v1-fallback`），不调用模型；这样无 key 演示也能有第二层。
 
 ### 5.4 摘要 prompt 与上限
 
@@ -464,40 +464,26 @@ CREATE TABLE session_memories (
 ### 5.5 注入
 
 ```go
-MemorySummary string      // ≤600 字
-RecentTurns   []TurnPair  // 最近 4 轮，答案截断 300 字
-SessionBrief  string      // ≤300 字
+MemorySummary     string   // ≤600 字
+MemoryRecentTurns []string // 最近 4 轮，题 120 字 + 答 300 字
 ```
 
-- `QuestionUser` 只新增 `<memory>` / `<recent_turns>` 块，原有 `topic / objective / expected_points / history` 顺序不变。
-- 总记忆块 ≤2000 字；超限按「摘要 → 结构化 → 最近轮次」优先级截断。
-- 不改状态机、不改 `Answer` 幂等键、不改 `run_steps`；记忆读取失败等同空记忆。
+- `QuestionUser` 只新增 `<memory>` 块（内含「较早问答摘要」与「最近问答」），原有 `topic / objective / expected_points / history` 顺序不变。
+- 记忆块由 builder 先限长：摘要 ≤600 字，每轮 ≤420 字，最多 4 轮；`QuestionUser` 再做一次同口径截断。
+- 记忆在 snapshot 阶段读入并冻结进 `run_steps`，重放看到的是同一份上下文。
+- 不改状态机、不改 `Answer` 幂等键；记忆读取失败等同空记忆；摘要在答案提交后 best-effort 触发，失败只记日志。
 
-### 5.6 有效性验证（硬验收）
+### 5.6 验证状态：已实现、未验证（2026-11-08）
 
-**多轮一致性用例**（固定脚本，进仓库）：
+**已实现**：`memory.Builder` 接入 `app.Runner`；snapshot 读入摘要 + 最近 4 轮并冻结进 `run_steps`；答案提交后按 5 轮阈值 best-effort 摘要；`QuestionUser` 注入 `<memory>` 块；摘要失败只记日志、不阻断作答。
 
-- 第 1 轮候选人明确说：「项目用 PostgreSQL 做唯一事实源，Redis 只做锁与限流，不承担正确性。」
-- 之后正常进行到第 10 轮；第 9 轮触发摘要（6/11 阈值之间的验证点可另设 11 轮）。
-- 第 10 轮的追问必须还能引用「Redis 只做锁与限流」这个早期事实，而不是重新问「你的 Redis 用来做什么」。
-- **判定**：捕获第 9/10 轮实际 prompt，断言 `<memory>` 或 `<recent_turns>` 中包含该事实；同时断言摘要输出含 `covered` 中的该考点。
-- **可重复**：用 fake model 记录 prompt 的测试 `TestMemoryMultiTurnConsistency`；可选真实模型脚本 `cmd/memorycheck`，输出 pass/fail 与 token。
+**已验证（单测，确定性）**：
 
-**信息丢失检查**：
+- `TestQuestionPromptCarriesLayeredMemory`：摘要与最近轮次进入 prompt 的 `<memory>` 块。
+- `TestAnswerSnapshotCarriesLayeredMemory`：第 2 次作答的 snapshot 带摘要 + 最近 1 轮原文。
+- `TestMemoryFailureDoesNotFailAnswerRun`：记忆存储失败时作答仍成功、面试继续。
 
-- 固定 3 个关键事实（PostgreSQL 事实源、Redis 只做锁/限流、幂等三重保障）。
-- 每次摘要后检查：3 个事实必须仍出现在「摘要 + 最近 4 轮」中；缺失即失败。
-- 记录压缩比 `输出字数 / 输入字数` 与事实保留率 `3/3`，写入测试日志。
-
-**测试名**
-
-- `TestMemoryThresholdByTurns`
-- `TestMemoryNoSummaryBeforeThreshold`
-- `TestMemorySummaryFailureKeepsPrevious`
-- `TestMemoryMultiTurnConsistency`
-- `TestMemoryFactRetention`
-- `TestMemoryPromptBudget`
-- `TestMemoryNoKeyRecentOnly`
+**未验证**：真实模型下的多轮事实保留率与 token 对比。按当前排期优先级不做该实验；没有本地可用的对话模型时也不以确定性替身冒充真实结论。若要补，用例固定为：第 1 轮埋「PostgreSQL 唯一事实源、Redis 只做锁与限流」，跑到第 10 轮，断言第 10 轮 prompt 的 `<memory>` 仍包含该事实；开/关记忆各跑一次，比较引用正确率与 prompt token。届时须记录模型名、轮次、prompt token。
 
 ### 5.7 可讲的技术要点（分层记忆）
 
@@ -517,7 +503,7 @@ SessionBrief  string      // ≤300 字
 | --- | --- | --- | --- |
 | RAG | 追问题干、报告点评、`search_knowledge` | 否 | `auto`（无 key → bm25） |
 | 工具自主 | 报告证据采集 | 否 | `deterministic` |
-| 分层记忆 | 出题/追问 prompt | 否 | `auto`（无 key → recent） |
+| 分层记忆 | 出题/追问 prompt | 否 | `auto`（无可用模型 → 确定性 digest） |
 
 - 评估器、`rubric.go`、60 条回归集、`DefaultThresholds`、证据锚点零改动。
 - 报告 fallback、追问 10 级门、状态机、幂等三重保障零改动。
@@ -614,3 +600,95 @@ go test -tags=eval ./internal/agent/eval
 6. **小模型对照**：用 `quentinz/bge-small-zh-v1.5`（第三方 namespace，48 MB）作为 bge-m3 的对照；若你更信任官方模型，可改用其他 ≤200 MB 中文 embedding。是否接受？
 
 > 参考：[Ollama Windows 文档](https://docs.ollama.com/windows)、[bge-m3 模型页](https://ollama.com/library/bge-m3)、[bge-small-zh-v1.5 模型页](https://ollama.com/quentinz/bge-small-zh-v1.5)。
+
+---
+
+## 11. M20 三臂消融（2026-11-08）
+
+**目的**：用同一批题、同一模型比较「单次 LLM」「LLM+RAG」「当前完整方案（规则裁决 + 证据校验）」，看多花的 token 换来了什么。
+
+**设置**：
+
+- 数据：`internal/agent/eval/testdata/regression.json`，sha256 写入结果文件；子集 10 条（Go high-05/09/01/02、AI high-01/03、mid-01、ai-mid-03、low-01、ai-low-01）。
+- 模型：本地 Ollama `qwen2.5:1.5b`，OpenAI 兼容端点 `http://127.0.0.1:11434/v1`，`temperature=0`（完整臂沿用生产 evaluator 的 0.1）。
+- 调用：3 臂 × 10 题 = 30 次；实际花费 ¥0。
+- 三条臂的差别：
+  - 单次 LLM：只给题目 + 回答，直接让模型给 0-100 总分；band 用统一阈值映射。
+  - LLM+RAG：同一 prompt 再加 BM25 top3 参考块。
+  - 完整方案：维度分 → `ComputeScore` 确定性算分，输出过 schema 与证据校验。
+
+**结果**（`docs/eval-results/ablation-m20.json`）：
+
+| 臂 | band 命中 | MAE | 平均 prompt token | 平均 completion token | 平均耗时 |
+| --- | --- | --- | --- | --- | --- |
+| 单次 LLM | 50.0%（5/10） | 21.40 | 287.4 | 9.0 | 162 ms |
+| LLM+RAG | 60.0%（6/10） | 20.10 | 959.5 | 8.9 | 155 ms |
+| 完整方案 | 30.0%（3/10） | 18.50 | 1,247.4 | 470.7 | 2,941 ms |
+
+**读法与限制**：
+
+- RAG 臂比单次多约 672 prompt token，band +1 条、MAE −1.3；10 条样本上不能当显著结论。
+- 完整臂 MAE 最好，但 band 命中最低：1.5b 的维度分整体偏低，high 档落在 60 分附近，再映射到 5 档就被放大；这不是「完整方案更差」，而是「小模型的维度打分不可信 + band 粒度粗」。
+- token 与耗时差异是稳定的：完整臂 prompt 约为单次的 4.3 倍、耗时约 18 倍。
+- 复现命令（PowerShell）：
+
+```powershell
+$env:MODEL_PROVIDER='openai'; $env:OPENAI_BASE_URL='http://127.0.0.1:11434/v1';
+$env:OPENAI_API_KEY='ollama'; $env:OPENAI_MODEL='qwen2.5:1.5b'; $env:MODEL_TIMEOUT='120s';
+go run ./cmd/ablation
+```
+
+## 12. run 级 token 与成本落库
+
+**迁移**：`0015_run_usage.sql` 给 `run_steps` 与 `runs` 加 `prompt_tokens / completion_tokens / model_calls / cost_micros`。
+
+**归属方式**：`app.runner` 在每个节点执行前后各取一次 `obs.UsageTracker.Snapshot(session_id)`，差值记到该 `run_steps` 行并累加到 `runs`；重放命中已完成步骤时差值为 0，不写库。这样不用把 step 名塞进 llm client，也不会把并发 run 的用量串行记混（同一会话的 run 本身串行）。
+
+**成本**：`cost_micros = prompt_tokens × MODEL_PRICE_INPUT_CNY_PER_MTOK + completion_tokens × MODEL_PRICE_OUTPUT_CNY_PER_MTOK`（单位微元）；未配置价格时为 0，本地模型天然为 0。`trace_id` 已在 `runs.trace_id`，`runDTO` 也一并返回，日志、节点、模型调用可用同一个 trace 串起来。
+
+**直接回答「这一轮多少钱、花在哪一步」**：
+
+```sql
+SELECT step_name, prompt_tokens, completion_tokens, model_calls,
+       cost_micros / 1000000.0 AS cost_cny
+FROM run_steps WHERE run_id = $1 ORDER BY started_at;
+
+SELECT trace_id, prompt_tokens, completion_tokens, cost_micros / 1000000.0 AS cost_cny
+FROM runs WHERE id = $1;
+```
+
+**测试**：`TestRunUsageIsPersistedPerStep` 用 1,000/200 token、2/8 元每百万的价格断言 run 与 step 都是 3,600 微元，且 `model_calls=1`。
+
+## 13. 原生 Function Calling 与 JSON 动作协议
+
+**选择**：保留现有的 JSON 动作协议（`{"action":"tool","tool":...}` / `{"action":"final","report":...}`），不新增原生 function-call 路径。
+
+**为什么**：
+
+- **可移植**：协议只要求模型输出 JSON，DeepSeek、任意 OpenAI 兼容端点、本地 Ollama 都能跑；原生 tool schema 各家的字段、并行调用、流式增量格式并不一致，换 provider 要重写调用层。
+- **校验在应用层**：工具白名单、参数形状、单轮/总调用上限、越权 `turn_id` 拒绝、结果截断都由代码判定；原生 FC 的参数仍要校验，等于多了一套 provider 适配而没有减少校验责任。
+- **可测**：JSON 动作是纯文本输入输出，失败路径（非法 JSON、未知工具、超预算、超时）全部能用脚本客户端复现；原生路径要模拟不同 provider 的 tool-call 结构。
+- **开销可接受**：现有实测每轮动作 JSON 只花 16–19 个 completion token（见 `tool-mode-compare-v2.json` 的 `round_traces`），相对一次报告 1,330 token 不是瓶颈。
+
+**代价与边界**：
+
+- 原生 FC 的优势场景是「多工具并行、低时延、模型原生决定调用顺序」。当前只有 3 个只读工具、一次会话通常 2 次调用，串行 JSON 足够；若工具数增长到 6+、需要并行检索，或 provider 提供稳定的原生并行调用，应该补一条 FC 路径做 A/B，而不是继续加 JSON 轮次。
+- 原生 FC 也无法替代证据校验：模型仍可能调用不存在的工具或传错参数，拦截逻辑必须保留。
+- 面试表述：不是「不会 FC」，而是「当前规模下自研协议更可移植、更可测；FC 的收益在并行多工具，等工具数量或时延成为瓶颈再切换」。
+
+## 14. 分层记忆：面试三问
+
+**分了几层、各存什么**：
+
+1. 结构化事实层（PostgreSQL）：`sessions` / `turns` / `evaluations` / `scores`，存题目、答案、维度分、状态；这是事实源，不压缩、不丢。
+2. 摘要层（`session_memories`，迁移 `0014`）：较早轮次的压缩摘要，≤600 字，每 5 个新答题轮重算一次（第 6/11/16…题），存 `covered_turns`、`prompt_version`、`degraded`。
+3. 最近原文层（prompt 内，不落库）：最近 4 个已答题轮，题 200 字 / 答 300 字截断，进 `<memory>` 块。
+
+**怎么防止上下文无限膨胀**：
+
+- 只保留最近 4 轮原文；更早的进摘要，摘要每次**替换**而不是追加；
+- 摘要 ≤600 字、每轮 ≤420 字、记忆块总长有上界（约 2,300 字）；
+- 摘要按轮数触发，不按每轮触发，失败保留旧摘要、`degraded=true`；
+- snapshot 冻结进 `run_steps`，重放不会重新膨胀。
+
+**关掉记忆后差多少**：**未验证，没有数字**。已实现并有确定性单测（摘要/最近轮次进入 prompt、存储失败不阻断作答），但真实模型下的多轮事实保留率与 token 对比按当前排期没有跑；不使用确定性替身冒充真实结论。面试时只能说「机制已接通、单测覆盖注入与降级；效果待真实模型多轮实验」，不能说「提升 X%」。

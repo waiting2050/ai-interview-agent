@@ -35,6 +35,10 @@ type QuestionInput struct {
 	FollowupTarget string
 	LastQuestion   string
 	Answer         string
+	// MemorySummary and MemoryRecentTurns carry the layered memory context.
+	// Empty means memory is off, which is the pre-M20 behaviour.
+	MemorySummary     string
+	MemoryRecentTurns []string
 }
 
 // QuestionOutcome is always usable: on transport failure or repeated invalid
@@ -87,18 +91,20 @@ func (g *QuestionGenerator) Generate(ctx context.Context, in QuestionInput) (Que
 		kind = prompt.QuestionKindPrimary
 	}
 	promptIn := prompt.QuestionInput{
-		Kind:           kind,
-		TargetRole:     in.TargetRole,
-		Difficulty:     in.Difficulty,
-		JDText:         in.JDText,
-		ProfileText:    in.Profile.Text(),
-		Topic:          in.Topic,
-		Objective:      in.Objective,
-		ExpectedPoints: in.ExpectedPoints,
-		History:        in.History,
-		FollowupTarget: in.FollowupTarget,
-		LastQuestion:   in.LastQuestion,
-		Answer:         in.Answer,
+		Kind:              kind,
+		TargetRole:        in.TargetRole,
+		Difficulty:        in.Difficulty,
+		JDText:            in.JDText,
+		ProfileText:       in.Profile.Text(),
+		Topic:             in.Topic,
+		Objective:         in.Objective,
+		ExpectedPoints:    in.ExpectedPoints,
+		History:           in.History,
+		FollowupTarget:    in.FollowupTarget,
+		LastQuestion:      in.LastQuestion,
+		Answer:            in.Answer,
+		MemorySummary:     in.MemorySummary,
+		MemoryRecentTurns: in.MemoryRecentTurns,
 	}
 	user := prompt.QuestionUser(promptIn)
 

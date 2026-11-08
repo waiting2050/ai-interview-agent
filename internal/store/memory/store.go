@@ -266,6 +266,20 @@ func (r *runRepo) GetRunningBySession(_ context.Context, sessionID string) (*ses
 	return nil, ports.ErrNotFound
 }
 
+func (r *runRepo) AddUsage(_ context.Context, id string, prompt, completion, calls int, costMicros int64) error {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	run, ok := r.s.runs[id]
+	if !ok {
+		return ports.ErrNotFound
+	}
+	run.PromptTokens += prompt
+	run.CompletionTokens += completion
+	run.ModelCalls += calls
+	run.CostMicros += costMicros
+	return nil
+}
+
 func (r *runRepo) SetLastStep(_ context.Context, id, step string) error {
 	r.s.mu.Lock()
 	defer r.s.mu.Unlock()
@@ -573,6 +587,20 @@ func (r *stepRepo) Start(_ context.Context, in *session.RunStep) error {
 	cp.ErrorCode = ""
 	cp.FinishedAt = nil
 	r.s.steps[stepKey(in.RunID, in.StepName)] = &cp
+	return nil
+}
+
+func (r *stepRepo) RecordUsage(_ context.Context, runID, stepName string, prompt, completion, calls int, costMicros int64) error {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	step, ok := r.s.steps[stepKey(runID, stepName)]
+	if !ok {
+		return ports.ErrNotFound
+	}
+	step.PromptTokens += prompt
+	step.CompletionTokens += completion
+	step.ModelCalls += calls
+	step.CostMicros += costMicros
 	return nil
 }
 

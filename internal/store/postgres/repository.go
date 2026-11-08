@@ -162,7 +162,8 @@ type runRepository struct{ q querier }
 
 const runColumns = `runs.id, runs.session_id, runs.kind, runs.status, runs.idempotency_key, runs.request_hash, runs.trace_id,
 	runs.input_json, runs.attempt, runs.error_code, runs.last_step, runs.created_at, runs.updated_at, runs.finished_at,
-	runs.lease_id, runs.lease_worker, runs.lease_expires_at, runs.failure_count, runs.last_error, runs.last_error_class, runs.dead_at`
+	runs.lease_id, runs.lease_worker, runs.lease_expires_at, runs.failure_count, runs.last_error, runs.last_error_class, runs.dead_at,
+	runs.prompt_tokens, runs.completion_tokens, runs.model_calls, runs.cost_micros`
 
 func (r *runRepository) Create(ctx context.Context, run *session.Run) (bool, *session.Run, error) {
 	input := run.Input
@@ -231,6 +232,19 @@ func (r *runRepository) GetRunningBySession(ctx context.Context, sessionID strin
 		return nil, fmt.Errorf("get running run: %w", err)
 	}
 	return run, nil
+}
+
+func (r *runRepository) AddUsage(ctx context.Context, id string, prompt, completion, calls int, costMicros int64) error {
+	_, err := r.q.Exec(ctx, `
+		UPDATE runs
+		SET prompt_tokens = prompt_tokens + $2, completion_tokens = completion_tokens + $3,
+		    model_calls = model_calls + $4, cost_micros = cost_micros + $5
+		WHERE id = $1`,
+		id, prompt, completion, calls, costMicros)
+	if err != nil {
+		return fmt.Errorf("add run usage: %w", err)
+	}
+	return nil
 }
 
 func (r *runRepository) SetLastStep(ctx context.Context, id, step string) error {
@@ -512,6 +526,7 @@ func scanRun(row pgx.Row) (*session.Run, error) {
 		&run.Input, &run.Attempt, &run.ErrorCode, &run.LastStep, &run.CreatedAt, &run.UpdatedAt, &run.FinishedAt,
 		&run.LeaseID, &run.LeaseWorker, &run.LeaseExpiresAt, &run.FailureCount,
 		&run.LastError, &run.LastErrorClass, &run.DeadAt,
+		&run.PromptTokens, &run.CompletionTokens, &run.ModelCalls, &run.CostMicros,
 	); err != nil {
 		return nil, err
 	}
@@ -524,7 +539,8 @@ type stepRepository struct{ q querier }
 
 func (r *stepRepository) Get(ctx context.Context, runID, stepName string) (*session.RunStep, error) {
 	row := r.q.QueryRow(ctx, `
-		SELECT run_id, step_name, status, attempt, input_hash, output_json, error_code, started_at, finished_at
+		SELECT run_id, step_name, status, attempt, input_hash, output_json, error_code, started_at, finished_at,
+		       prompt_tokens, completion_tokens, model_calls, cost_micros
 		FROM run_steps WHERE run_id = $1 AND step_name = $2`, runID, stepName)
 	step, err := scanStep(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -538,7 +554,8 @@ func (r *stepRepository) Get(ctx context.Context, runID, stepName string) (*sess
 
 func (r *stepRepository) ListByRun(ctx context.Context, runID string) ([]session.RunStep, error) {
 	rows, err := r.q.Query(ctx, `
-		SELECT run_id, step_name, status, attempt, input_hash, output_json, error_code, started_at, finished_at
+		SELECT run_id, step_name, status, attempt, input_hash, output_json, error_code, started_at, finished_at,
+		       prompt_tokens, completion_tokens, model_calls, cost_micros
 		FROM run_steps WHERE run_id = $1 ORDER BY started_at`, runID)
 	if err != nil {
 		return nil, fmt.Errorf("list run steps: %w", err)
@@ -569,6 +586,22 @@ func (r *stepRepository) Start(ctx context.Context, step *session.RunStep) error
 		step.RunID, step.StepName, string(step.Status), step.Attempt, step.InputHash, step.StartedAt)
 	if err != nil {
 		return fmt.Errorf("start run step: %w", err)
+	}
+	return nil
+}
+
+func (r *stepRepository) RecordUsage(ctx context.Context, runID, stepName string, prompt, completion, calls int, costMicros int64) error {
+	tag, err := r.q.Exec(ctx, `
+		UPDATE run_steps
+		SET prompt_tokens = prompt_tokens + $3, completion_tokens = completion_tokens + $4,
+		    model_calls = model_calls + $5, cost_micros = cost_micros + $6
+		WHERE run_id = $1 AND step_name = $2`,
+		runID, stepName, prompt, completion, calls, costMicros)
+	if err != nil {
+		return fmt.Errorf("record step usage: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ports.ErrNotFound
 	}
 	return nil
 }
@@ -608,6 +641,7 @@ func scanStep(row pgx.Row) (*session.RunStep, error) {
 	if err := row.Scan(
 		&step.RunID, &step.StepName, &status, &step.Attempt, &step.InputHash,
 		&step.Output, &step.ErrorCode, &step.StartedAt, &step.FinishedAt,
+		&step.PromptTokens, &step.CompletionTokens, &step.ModelCalls, &step.CostMicros,
 	); err != nil {
 		return nil, err
 	}

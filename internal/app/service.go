@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/waiting2050/ai-interview-agent/internal/agent/interview"
+	agentmemory "github.com/waiting2050/ai-interview-agent/internal/agent/memory"
 	"github.com/waiting2050/ai-interview-agent/internal/agent/report"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/domainpack"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/resume"
@@ -76,6 +77,14 @@ type Options struct {
 	// ReportTool switches the report evidence path. Empty or "deterministic"
 	// keeps the fixed plan; "autonomous" lets the model choose tools.
 	ReportTool ReportToolOptions
+	// Memory builds the layered prompt context (recent verbatim turns plus a
+	// compressed summary of older ones). Nil keeps the pre-M20 behaviour and
+	// is the default in unit tests.
+	Memory *agentmemory.Builder
+	// PriceInCNYPerM and PriceOutCNYPerM price one million prompt/completion
+	// tokens. Zero keeps stored cost at 0 (for example a local model).
+	PriceInCNYPerM  float64
+	PriceOutCNYPerM float64
 	// Locker serialises session commands. The server injects the Redis
 	// implementation; nil falls back to the process-local test double.
 	Locker ports.Locker
@@ -169,6 +178,9 @@ func New(store ports.Store, opts Options) *Service {
 	runner := NewRunner(store, opts.Steps, answerSteps, answerGraph, opts.ReportGenerator,
 		opts.Now, opts.Logger, opts.Metrics, opts.Usage, opts.Tracer, opts.MaxRunFailures)
 	runner.reportTool = opts.ReportTool
+	runner.memory = opts.Memory
+	runner.priceInCNYPerM = opts.PriceInCNYPerM
+	runner.priceOutCNYPerM = opts.PriceOutCNYPerM
 
 	return &Service{
 		store:       store,

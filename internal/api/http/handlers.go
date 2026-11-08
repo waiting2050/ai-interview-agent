@@ -371,40 +371,50 @@ func (h *handlers) retryRun(w http.ResponseWriter, r *http.Request) {
 }
 
 type runDTO struct {
-	RunID        string     `json:"run_id"`
-	SessionID    string     `json:"session_id"`
-	Kind         string     `json:"kind"`
-	Status       string     `json:"status"`
-	Attempt      int        `json:"attempt"`
-	FailureCount int        `json:"failure_count"`
-	ErrorCode    string     `json:"error_code,omitempty"`
-	ErrorClass   string     `json:"error_class,omitempty"`
-	LastError    string     `json:"last_error,omitempty"`
-	LastStep     string     `json:"last_step,omitempty"`
-	LeaseWorker  string     `json:"lease_worker,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
-	FinishedAt   *time.Time `json:"finished_at,omitempty"`
-	DeadAt       *time.Time `json:"dead_at,omitempty"`
+	RunID            string     `json:"run_id"`
+	SessionID        string     `json:"session_id"`
+	Kind             string     `json:"kind"`
+	Status           string     `json:"status"`
+	Attempt          int        `json:"attempt"`
+	FailureCount     int        `json:"failure_count"`
+	ErrorCode        string     `json:"error_code,omitempty"`
+	ErrorClass       string     `json:"error_class,omitempty"`
+	LastError        string     `json:"last_error,omitempty"`
+	LastStep         string     `json:"last_step,omitempty"`
+	LeaseWorker      string     `json:"lease_worker,omitempty"`
+	TraceID          string     `json:"trace_id,omitempty"`
+	PromptTokens     int        `json:"prompt_tokens"`
+	CompletionTokens int        `json:"completion_tokens"`
+	ModelCalls       int        `json:"model_calls"`
+	CostMicros       int64      `json:"cost_micros"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+	FinishedAt       *time.Time `json:"finished_at,omitempty"`
+	DeadAt           *time.Time `json:"dead_at,omitempty"`
 }
 
 func toRunDTO(run session.Run) runDTO {
 	return runDTO{
-		RunID:        run.ID,
-		SessionID:    run.SessionID,
-		Kind:         string(run.Kind),
-		Status:       string(run.Status),
-		Attempt:      run.Attempt,
-		FailureCount: run.FailureCount,
-		ErrorCode:    run.ErrorCode,
-		ErrorClass:   run.LastErrorClass,
-		LastError:    run.LastError,
-		LastStep:     run.LastStep,
-		LeaseWorker:  run.LeaseWorker,
-		CreatedAt:    run.CreatedAt,
-		UpdatedAt:    run.UpdatedAt,
-		FinishedAt:   run.FinishedAt,
-		DeadAt:       run.DeadAt,
+		RunID:            run.ID,
+		SessionID:        run.SessionID,
+		Kind:             string(run.Kind),
+		Status:           string(run.Status),
+		Attempt:          run.Attempt,
+		FailureCount:     run.FailureCount,
+		ErrorCode:        run.ErrorCode,
+		ErrorClass:       run.LastErrorClass,
+		LastError:        run.LastError,
+		LastStep:         run.LastStep,
+		LeaseWorker:      run.LeaseWorker,
+		TraceID:          run.TraceID,
+		PromptTokens:     run.PromptTokens,
+		CompletionTokens: run.CompletionTokens,
+		ModelCalls:       run.ModelCalls,
+		CostMicros:       run.CostMicros,
+		CreatedAt:        run.CreatedAt,
+		UpdatedAt:        run.UpdatedAt,
+		FinishedAt:       run.FinishedAt,
+		DeadAt:           run.DeadAt,
 	}
 }
 

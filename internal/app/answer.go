@@ -30,6 +30,10 @@ const (
 // context. Longer answers are truncated and the event records it.
 const maxAnswerRunes = 6000
 
+// memorySummaryTimeout bounds the best-effort summary call after a committed
+// answer. It never runs on every turn, only when the builder threshold is hit.
+const memorySummaryTimeout = 20 * time.Second
+
 // AnswerInput is the persisted command payload of an answer run.
 type AnswerInput struct {
 	TurnID string `json:"turn_id"`
@@ -88,18 +92,20 @@ func DefaultAnswerSteps(evaluator Evaluator, generator *interview.QuestionGenera
 				objective = "回答中未覆盖的关键点"
 			}
 			outcome, err := generator.Generate(ctx, interview.QuestionInput{
-				Kind:           "followup",
-				TargetRole:     snap.TargetRole,
-				Difficulty:     snap.Difficulty,
-				JDText:         snap.JDText,
-				Profile:        snap.Profile,
-				Topic:          snap.Topic,
-				Objective:      objective,
-				ExpectedPoints: points,
-				History:        snap.AskedQuestions,
-				FollowupTarget: objective,
-				LastQuestion:   snap.Question,
-				Answer:         snap.Answer,
+				Kind:              "followup",
+				TargetRole:        snap.TargetRole,
+				Difficulty:        snap.Difficulty,
+				JDText:            snap.JDText,
+				Profile:           snap.Profile,
+				Topic:             snap.Topic,
+				Objective:         objective,
+				ExpectedPoints:    points,
+				History:           snap.AskedQuestions,
+				FollowupTarget:    objective,
+				LastQuestion:      snap.Question,
+				Answer:            snap.Answer,
+				MemorySummary:     snap.MemorySummary,
+				MemoryRecentTurns: snap.MemoryRecentTurns,
 			})
 			if err != nil {
 				return interview.Question{}, err
@@ -115,15 +121,17 @@ func DefaultAnswerSteps(evaluator Evaluator, generator *interview.QuestionGenera
 		},
 		AskNext: func(ctx context.Context, snap AnswerSnapshot, item interview.PlanItemView) (interview.Question, error) {
 			outcome, err := generator.Generate(ctx, interview.QuestionInput{
-				Kind:           "primary",
-				TargetRole:     snap.TargetRole,
-				Difficulty:     snap.Difficulty,
-				JDText:         snap.JDText,
-				Profile:        snap.Profile,
-				Topic:          item.Topic,
-				Objective:      item.Objective,
-				ExpectedPoints: item.ExpectedPoints,
-				History:        snap.AskedQuestions,
+				Kind:              "primary",
+				TargetRole:        snap.TargetRole,
+				Difficulty:        snap.Difficulty,
+				JDText:            snap.JDText,
+				Profile:           snap.Profile,
+				Topic:             item.Topic,
+				Objective:         item.Objective,
+				ExpectedPoints:    item.ExpectedPoints,
+				History:           snap.AskedQuestions,
+				MemorySummary:     snap.MemorySummary,
+				MemoryRecentTurns: snap.MemoryRecentTurns,
 			})
 			if err != nil {
 				return interview.Question{}, err
@@ -177,6 +185,8 @@ func (r *Runner) executeAnswer(ctx context.Context, run *session.Run) error {
 		return err
 	}
 
+	r.updateMemory(ctx, run.SessionID)
+
 	r.logger(ctx).Info("run succeeded", "action", string(state.Decision.Action),
 		"reason", state.Decision.Reason)
 	return nil
@@ -187,12 +197,12 @@ func (r *Runner) executeAnswer(ctx context.Context, run *session.Run) error {
 func (r *Runner) answerDeps(run *session.Run) interview.AnswerDeps {
 	return interview.AnswerDeps{
 		Snapshot: func(ctx context.Context) (AnswerSnapshot, error) {
-			return recordStep(ctx, r.store, r.log, r.now, run.ID, stepSnapshot, func(ctx context.Context) (AnswerSnapshot, error) {
+			return runRecordStep(r, ctx, run.ID, stepSnapshot, func(ctx context.Context) (AnswerSnapshot, error) {
 				return r.buildSnapshot(ctx, run)
 			})
 		},
 		Evaluate: func(ctx context.Context, snap AnswerSnapshot) (interview.Outcome, error) {
-			return recordStep(ctx, r.store, r.log, r.now, run.ID, stepEvaluate, func(ctx context.Context) (interview.Outcome, error) {
+			return runRecordStep(r, ctx, run.ID, stepEvaluate, func(ctx context.Context) (interview.Outcome, error) {
 				out, err := r.answerSteps.Evaluate(ctx, snap)
 				if err == nil && out.Degraded {
 					r.metrics.IncEvaluationDegraded(out.ErrorCode)
@@ -201,12 +211,12 @@ func (r *Runner) answerDeps(run *session.Run) interview.AnswerDeps {
 			})
 		},
 		Decide: func(ctx context.Context, snap AnswerSnapshot, out interview.Outcome) (followup.Decision, error) {
-			return recordStep(ctx, r.store, r.log, r.now, run.ID, stepDecide, func(context.Context) (followup.Decision, error) {
+			return runRecordStep(r, ctx, run.ID, stepDecide, func(context.Context) (followup.Decision, error) {
 				return decideAnswer(snap, out)
 			})
 		},
 		AskFollowup: func(ctx context.Context, snap AnswerSnapshot, out interview.Outcome, decision followup.Decision) (interview.Question, error) {
-			question, err := recordStep(ctx, r.store, r.log, r.now, run.ID, stepAskNext, func(ctx context.Context) (interview.Question, error) {
+			question, err := runRecordStep(r, ctx, run.ID, stepAskNext, func(ctx context.Context) (interview.Question, error) {
 				return r.answerSteps.AskFollowup(ctx, snap, out, decision)
 			})
 			if err != nil {
@@ -215,7 +225,7 @@ func (r *Runner) answerDeps(run *session.Run) interview.AnswerDeps {
 			return question, nil
 		},
 		AskNext: func(ctx context.Context, snap AnswerSnapshot, item interview.PlanItemView) (interview.Question, error) {
-			question, err := recordStep(ctx, r.store, r.log, r.now, run.ID, stepAskNext, func(ctx context.Context) (interview.Question, error) {
+			question, err := runRecordStep(r, ctx, run.ID, stepAskNext, func(ctx context.Context) (interview.Question, error) {
 				return r.answerSteps.AskNext(ctx, snap, item)
 			})
 			if err != nil {
@@ -286,6 +296,18 @@ func (r *Runner) buildSnapshot(ctx context.Context, run *session.Run) (AnswerSna
 		}
 	}
 
+	// The layered memory slice is resolved per run and frozen into the snapshot
+	// (and therefore into run_steps), so a replay uses exactly the same context
+	// the model saw. A store failure degrades to recent-turns-only or nothing.
+	var memorySummary string
+	var memoryRecentTurns []string
+	if r.memory != nil {
+		if prompt := r.memory.Context(ctx, sess.ID, turns); !prompt.Empty() {
+			memorySummary = prompt.Summary
+			memoryRecentTurns = prompt.RecentTurns
+		}
+	}
+
 	evals, err := repos.Evaluations.ListBySession(ctx, sess.ID)
 	if err != nil {
 		return AnswerSnapshot{}, err
@@ -325,6 +347,8 @@ func (r *Runner) buildSnapshot(ctx context.Context, run *session.Run) (AnswerSna
 		NextSeq:               nextSeq,
 		AskedQuestions:        asked,
 		TopicHistory:          history,
+		MemorySummary:         memorySummary,
+		MemoryRecentTurns:     memoryRecentTurns,
 		StartedAt:             startedAt,
 		Elapsed:               elapsed,
 		Now:                   now,
@@ -336,6 +360,33 @@ func (r *Runner) buildSnapshot(ctx context.Context, run *session.Run) (AnswerSna
 		JDText:                sess.JDText,
 		Config:                sess.Config,
 	}, nil
+}
+
+// updateMemory compresses older turns after a committed answer. The trigger
+// lives in the memory builder (every N answered turns), so most answers are a
+// cheap no-op. It is best-effort by design: a failed summary is logged and
+// never fails the answer run.
+func (r *Runner) updateMemory(ctx context.Context, sessionID string) {
+	if r.memory == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), memorySummaryTimeout)
+	defer cancel()
+
+	turns, err := r.store.Repos().Turns.ListBySession(ctx, sessionID)
+	if err != nil {
+		r.logger(ctx).Warn("session memory skipped: list turns failed", "session_id", sessionID, "error", err)
+		return
+	}
+	state, fired, err := r.memory.Update(ctx, sessionID, turns)
+	if err != nil {
+		r.logger(ctx).Warn("session memory update failed, answer kept", "session_id", sessionID, "error", err)
+		return
+	}
+	if fired {
+		r.logger(ctx).Info("session memory summarized", "session_id", sessionID,
+			"covered_turns", state.CoveredTurns, "degraded", state.Degraded)
+	}
 }
 
 type scoredTurn struct {

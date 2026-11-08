@@ -10,6 +10,7 @@ import (
 
 	"github.com/waiting2050/ai-interview-agent/internal/agent/interview"
 	"github.com/waiting2050/ai-interview-agent/internal/agent/llm"
+	agentmemory "github.com/waiting2050/ai-interview-agent/internal/agent/memory"
 	"github.com/waiting2050/ai-interview-agent/internal/agent/report"
 	"github.com/waiting2050/ai-interview-agent/internal/agent/tools"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/session"
@@ -32,12 +33,17 @@ type Runner struct {
 	answerGraph *interview.AnswerGraph
 	reports     report.Generator
 	reportTool  ReportToolOptions
+	memory      *agentmemory.Builder
 	now         func() time.Time
 	log         *slog.Logger
 	metrics     *obs.Metrics
 	usage       *obs.UsageTracker
 	tracer      *trace.Tracer
 	maxFailures int
+	// priceInCNYPerM and priceOutCNYPerM convert tokens to micro-CNY when
+	// persisting usage. Zero means pricing is not configured and cost stays 0.
+	priceInCNYPerM  float64
+	priceOutCNYPerM float64
 }
 
 // ReportToolOptions carries the autonomous-report switch and limits. The
@@ -159,7 +165,7 @@ func (r *Runner) executeStart(ctx context.Context, run *session.Run) error {
 		Config:     sess.Config,
 	}
 
-	plan, err := recordStep(ctx, r.store, r.log, r.now, run.ID, stepPlan, func(ctx context.Context) (PlanResult, error) {
+	plan, err := runRecordStep(r, ctx, run.ID, stepPlan, func(ctx context.Context) (PlanResult, error) {
 		return r.steps.Plan(ctx, in)
 	})
 	if err != nil {
@@ -167,7 +173,7 @@ func (r *Runner) executeStart(ctx context.Context, run *session.Run) error {
 		return err
 	}
 
-	ask, err := recordStep(ctx, r.store, r.log, r.now, run.ID, stepAsk, func(ctx context.Context) (AskResult, error) {
+	ask, err := runRecordStep(r, ctx, run.ID, stepAsk, func(ctx context.Context) (AskResult, error) {
 		return r.steps.Ask(ctx, in, plan)
 	})
 	if err != nil {
@@ -350,6 +356,45 @@ func lockErrorClass(err error) string {
 	default:
 		return "internal"
 	}
+}
+
+// recordStep wraps recordStep and attributes the model spend of this node.
+// The delta comes from the session usage tracker, so no step name has to be
+// threaded through the llm client. Replayed steps spend nothing and write
+// nothing.
+func runRecordStep[T any](r *Runner, ctx context.Context, runID, name string, fn func(context.Context) (T, error)) (T, error) {
+	sessionID := reqctx.SessionID(ctx)
+	before := r.usage.Snapshot(sessionID)
+	out, err := recordStep(ctx, r.store, r.log, r.now, runID, name, fn)
+	after := r.usage.Snapshot(sessionID)
+
+	prompt := after.PromptTokens - before.PromptTokens
+	completion := after.CompletionTokens - before.CompletionTokens
+	calls := after.ModelCalls - before.ModelCalls
+	if prompt <= 0 && completion <= 0 && calls <= 0 {
+		return out, err
+	}
+
+	cost := r.costMicros(prompt, completion)
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if usageErr := r.store.Repos().Steps.RecordUsage(writeCtx, runID, name, prompt, completion, calls, cost); usageErr != nil {
+		loggerWith(r.log, ctx).Warn("record step usage", "step_name", name, "error", usageErr)
+	}
+	if usageErr := r.store.Repos().Runs.AddUsage(writeCtx, runID, prompt, completion, calls, cost); usageErr != nil {
+		loggerWith(r.log, ctx).Warn("aggregate run usage", "step_name", name, "error", usageErr)
+	}
+	return out, err
+}
+
+// costMicros converts tokens to micro-CNY. Price is CNY per million tokens,
+// so tokens*price already yields micro-CNY.
+func (r *Runner) costMicros(prompt, completion int) int64 {
+	value := float64(prompt)*r.priceInCNYPerM + float64(completion)*r.priceOutCNYPerM
+	if value <= 0 {
+		return 0
+	}
+	return int64(value + 0.5)
 }
 
 // recordStep implements node-level recovery: a succeeded step is decoded and

@@ -278,7 +278,7 @@ func (r *Runner) executeReport(ctx context.Context, run *session.Run) error {
 				r.logger(ctx).Warn("report tool event failed", "event", ev.Type, "error", err)
 			}
 		}
-		outcome, err = recordStep(ctx, r.store, r.log, r.now, run.ID, stepGenerate, func(ctx context.Context) (report.Outcome, error) {
+		outcome, err = runRecordStep(r, ctx, run.ID, stepGenerate, func(ctx context.Context) (report.Outcome, error) {
 			out, genErr := ag.GenerateWithTools(ctx, run.SessionID, dimKeys, modelQuery, assemblyQuery, sink)
 			if genErr == nil && out.Degraded {
 				r.metrics.IncReportDegraded(out.ErrorCode)
@@ -290,14 +290,14 @@ func (r *Runner) executeReport(ctx context.Context, run *session.Run) error {
 			r.logger(ctx).Warn("report tool mode autonomous requested but the generator has no tool loop; using deterministic")
 		}
 		var evidence tools.Bundle
-		evidence, err = recordStep(ctx, r.store, r.log, r.now, run.ID, stepCollect, func(ctx context.Context) (tools.Bundle, error) {
+		evidence, err = runRecordStep(r, ctx, run.ID, stepCollect, func(ctx context.Context) (tools.Bundle, error) {
 			return tools.NewQuery(run.SessionID, r.store.Repos(), opts).Collect(ctx)
 		})
 		if err != nil {
 			r.failRun(ctx, run, stepCollect, err)
 			return err
 		}
-		outcome, err = recordStep(ctx, r.store, r.log, r.now, run.ID, stepGenerate, func(ctx context.Context) (report.Outcome, error) {
+		outcome, err = runRecordStep(r, ctx, run.ID, stepGenerate, func(ctx context.Context) (report.Outcome, error) {
 			out, genErr := r.reports.Generate(ctx, evidence)
 			if genErr == nil && out.Degraded {
 				r.metrics.IncReportDegraded(out.ErrorCode)
