@@ -363,3 +363,5 @@ v3 基线中 6 条 high 5→3 的归因见 `docs/eval-calibration.md`：4 条标
 - **换行符与 CI**：CI 在 Linux 上跑 `gofmt -l .`，判定基准是 LF。Windows 工作区默认以 CRLF 检出时，`gofmt -l` 会把大量文件误报为未格式化，掩盖真正的格式问题。仓库用 `.gitattributes` 固定 `*.go text eol=lf`，本地必须按 LF 复现 CI 结果；这是实际踩过的坑。
 - **gofmt 失败先看 diff**：CI 的 gofmt 步骤在失败时先执行 `gofmt -d .` 打印差异再退出，避免只看到一个文件名却不知道差在哪。
 - **复现 CI 的环境变量**：单测与 heuristic 回归显式设置 `MODEL_PROVIDER=heuristic`、`OPENAI_API_KEY=""`、`OPENAI_BASE_URL=""`；集成测试用本地 Docker 的 PostgreSQL（宿主 5433）与 Redis（宿主 6380），映射到工作流里的 5432 / 6379 服务名。
+- **本地四命令不等于 CI（实际事故）**：一段时间里每轮只跑 `gofmt -l .`、`go vet ./...`、`go test ./...`、`go test -tags=eval ./...` 就宣布“全绿”，但 GitHub Actions 的 integration job 连续失败。原因是本地四命令都不带 `-tags=integration`，集成测试根本没执行；CI 里它跑在带 service container 的 job 上，一加 `0013_rag.sql`（`CREATE EXTENSION vector`）就暴露了服务镜像仍是 `postgres:16-alpine`、不含 pgvector 的问题。教训：**验证以 CI 的真实 run 为准**，本地四命令只是下限；涉及存储、迁移、service container 的改动，必须在本地跑 `-tags=integration` 或直接看 CI 结果，不能凭“本地绿”下结论。
+- **集成测试的服务镜像与迁移必须同步**：`deploy/docker-compose.yml` 用 `pgvector/pgvector:pg16`，CI 的 service image 也必须一致；迁移里出现新扩展时，先检查所有运行环境（compose、CI、本地 Docker）是否都有该扩展。
