@@ -340,6 +340,24 @@ v3 基线中 6 条 high 5→3 的归因见 `docs/eval-calibration.md`：4 条标
 
 ---
 
+## 18. 相关工作与差异化
+
+**事实**：公开仓库 `wangzhongyang00/go-ai-eino-mianshiba`（<https://github.com/wangzhongyang00/go-ai-eino-mianshiba>）与本地项目同做 AI 模拟面试，同样使用 `cloudwego/eino` 组织 Agent；该仓库公开时间为 2026-05-13，早于本地首次提交（2026-11-06）。
+
+**代码来源**：本地未使用该仓库的代码或文字。比对口径与结果：连续 5 行代码块 0 命中（去空白、去注释/import/package 后比较，窗口 ≥120 字符）；Go 注释 0 命中（≥16 字符）；Markdown 整行 0 命中（≥25 字符）；18 条单行重合均为 `truncate`、`httptest.NewServer`、`HashPassword`、`clampScore` 一类通用样板，同名函数实现也不同（例如 `clampScore` 在参考项目里夹到 1-10，在本地夹到 0-100）。完整比对见 `docs/reference-comparison.md`。
+
+**设计取向差异**（只列技术判断，不列功能清单）：
+
+- **追问终裁的位置**：本地把「是否继续、是否换题」放在 `internal/domain/followup` 的规则链，模型只给建议；参考项目由评分结果驱动 `deepen/continue/lower/switch` 分支。前者可单测、预算可预测，后者更依赖模型判断。
+- **评分与表达的分离**：本地的维度分、加减分、总分由 `internal/domain/evaluation` 计算，模型只写证据与点评；参考项目的评估 agent 直接产出维度分。这决定了报告分数是否可复算。
+- **事实源与恢复粒度**：本地以 PostgreSQL 为唯一事实源，turn/run/run_step 落库，恢复粒度到 step；参考项目的面试会话在进程内 map，对话在评估后落库。前者多一层写入成本，换的是崩溃后可恢复。
+- **队列与锁的归属**：本地的任务队列、租约、fencing 与死信都在 PostgreSQL 内，和业务数据同库；参考项目用 Redis Stream 做队列、生成锁独立于 MySQL。前者少一个中间件，后者把队列负载从主库移走。
+- **评测的可复核性**：本地是 60 条回归集 + 5 个门槛 + 结果 JSON，可按同一口径复跑；参考项目仓库的评测脚本带 4 条样本，`trulens_report.json` 未写入分数，真实指标无法复核。
+
+**边界**：本地没有做得比参考项目更多的部分主要是前端规模与商业化能力（完整 SPA、支付/订阅、用户中心、OAuth 等），本文不展开。
+
+---
+
 ## 附录：开发环境注意事项
 
 - **换行符与 CI**：CI 在 Linux 上跑 `gofmt -l .`，判定基准是 LF。Windows 工作区默认以 CRLF 检出时，`gofmt -l` 会把大量文件误报为未格式化，掩盖真正的格式问题。仓库用 `.gitattributes` 固定 `*.go text eol=lf`，本地必须按 LF 复现 CI 结果；这是实际踩过的坑。
