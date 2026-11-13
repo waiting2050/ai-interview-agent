@@ -14,6 +14,7 @@ import (
 	"github.com/waiting2050/ai-interview-agent/internal/agent/interview"
 	"github.com/waiting2050/ai-interview-agent/internal/agent/knowledge"
 	"github.com/waiting2050/ai-interview-agent/internal/agent/llm"
+	agentmemory "github.com/waiting2050/ai-interview-agent/internal/agent/memory"
 	"github.com/waiting2050/ai-interview-agent/internal/agent/report"
 	httpapi "github.com/waiting2050/ai-interview-agent/internal/api/http"
 	"github.com/waiting2050/ai-interview-agent/internal/app"
@@ -84,6 +85,10 @@ func run() error {
 	modelClient, provider, err := llm.NewClientFromEnv(ctx, interview.NewHeuristicClient(), logger)
 	if err != nil {
 		return fmt.Errorf("assemble model client: %w", err)
+	}
+	modelCfg, err := llm.LoadProviderConfig()
+	if err != nil {
+		return err
 	}
 	if provider.Fallback {
 		logger.Warn("model provider degraded", "provider", provider.Provider,
@@ -162,6 +167,28 @@ func run() error {
 			"timeout", cfg.M20.ReportToolTimeout)
 	}
 
+	// Layered memory: structured state stays in sessions/turns/evaluations; this
+	// only adds the last N verbatim turns and a compressed summary of older
+	// ones. With a heuristic provider the summary degrades to a deterministic
+	// digest, so a no-key demo still has a bounded second layer.
+	var memoryBuilder *agentmemory.Builder
+	if cfg.M20.MemoryMode == config.MemoryModeAuto {
+		memoryBuilder = agentmemory.NewBuilder(
+			postgres.NewSessionMemory(store.Pool()),
+			llm.NewInstrumentedClient(modelClient, provider.Provider, provider.Model, "memory", metrics, usage),
+			agentmemory.Options{
+				Recent:  cfg.M20.MemoryRecentTurns,
+				Every:   cfg.M20.MemorySummaryEvery,
+				Model:   provider.Model,
+				ModelOK: !provider.Fallback,
+				Logger:  logger,
+			})
+		logger.Info("session memory enabled", "recent_turns", cfg.M20.MemoryRecentTurns,
+			"summary_every", cfg.M20.MemorySummaryEvery, "model_available", !provider.Fallback)
+	} else {
+		logger.Info("session memory disabled", "mode", cfg.M20.MemoryMode)
+	}
+
 	// The session lock must be shared across instances. Without a reachable
 	// Redis the process falls back to its in-process lock, which keeps a single
 	// instance correct but does NOT protect concurrent writers in a cluster.
@@ -205,6 +232,9 @@ func run() error {
 			Timeout:   cfg.M20.ReportToolTimeout,
 			Searcher:  retriever,
 		},
+		Memory:            memoryBuilder,
+		PriceInCNYPerM:    modelCfg.PriceIn,
+		PriceOutCNYPerM:   modelCfg.PriceOut,
 		Locker:            locker,
 		LockRenewInterval: cfg.LockTTL / 3,
 		Metrics:           metrics,

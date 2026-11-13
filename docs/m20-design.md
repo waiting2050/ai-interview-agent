@@ -473,7 +473,7 @@ MemoryRecentTurns []string // 最近 4 轮，题 120 字 + 答 300 字
 - 记忆在 snapshot 阶段读入并冻结进 `run_steps`，重放看到的是同一份上下文。
 - 不改状态机、不改 `Answer` 幂等键；记忆读取失败等同空记忆；摘要在答案提交后 best-effort 触发，失败只记日志。
 
-### 5.6 验证状态：已实现、未验证（2026-11-08）
+### 5.6 验证状态：已实现，已补真实模型对照（2026-11-08）
 
 **已实现**：`memory.Builder` 接入 `app.Runner`；snapshot 读入摘要 + 最近 4 轮并冻结进 `run_steps`；答案提交后按 5 轮阈值 best-effort 摘要；`QuestionUser` 注入 `<memory>` 块；摘要失败只记日志、不阻断作答。
 
@@ -483,7 +483,13 @@ MemoryRecentTurns []string // 最近 4 轮，题 120 字 + 答 300 字
 - `TestAnswerSnapshotCarriesLayeredMemory`：第 2 次作答的 snapshot 带摘要 + 最近 1 轮原文。
 - `TestMemoryFailureDoesNotFailAnswerRun`：记忆存储失败时作答仍成功、面试继续。
 
-**未验证**：真实模型下的多轮事实保留率与 token 对比。按当前排期优先级不做该实验；没有本地可用的对话模型时也不以确定性替身冒充真实结论。若要补，用例固定为：第 1 轮埋「PostgreSQL 唯一事实源、Redis 只做锁与限流」，跑到第 10 轮，断言第 10 轮 prompt 的 `<memory>` 仍包含该事实；开/关记忆各跑一次，比较引用正确率与 prompt token。届时须记录模型名、轮次、prompt token。
+**真实模型对照（`cmd/memorycompare`，原始数据 `docs/eval-results/memory-gap.json`）**：
+
+- 同一会话 10 轮、同一模型 `deepseek-flash`、temperature=0；第 2 题埋事实「选 PostgreSQL 弃 MySQL，因为需要 SKIP LOCKED 做任务队列；Redis 只做锁和限流」；第 6 题答完后摘要触发，覆盖第 1–2 题；第 10 题后提同一个回忆问题。
+- 关记忆：输出 `{"answer":"不知道"}`，prompt 154 token，引用 0/1。
+- 开记忆：输出 `{"answer":"选 PostgreSQL，因需 SKIP LOCKED 支持 worker 并发领取任务并跳过被锁行；放弃 MySQL，因其行锁在长事务下易互相阻塞。"}`，prompt 632 token，引用 1/1。
+- 摘要层 token 427/199，未降级；prompt token 差 **+478**；本次花费 **$0.00038（≈¥0.0027）**。
+- 限制：开/关各一次，不做显著性；提问是专门的事实回忆题，不是生产出题 prompt；摘要原文被客户端 JSON 模式包成 `{"type":"json_object","content":"..."}`，事实仍在 600 字上限内保留。复现命令见 §14。
 
 ### 5.7 可讲的技术要点（分层记忆）
 
@@ -603,39 +609,71 @@ go test -tags=eval ./internal/agent/eval
 
 ---
 
-## 11. M20 三臂消融（2026-11-08）
+## 11. M20 三臂消融（2026-11-08，DeepSeek 真实模型，60 题全集）
 
 **目的**：用同一批题、同一模型比较「单次 LLM」「LLM+RAG」「当前完整方案（规则裁决 + 证据校验）」，看多花的 token 换来了什么。
 
 **设置**：
 
-- 数据：`internal/agent/eval/testdata/regression.json`，sha256 写入结果文件；子集 10 条（Go high-05/09/01/02、AI high-01/03、mid-01、ai-mid-03、low-01、ai-low-01）。
-- 模型：本地 Ollama `qwen2.5:1.5b`，OpenAI 兼容端点 `http://127.0.0.1:11434/v1`，`temperature=0`（完整臂沿用生产 evaluator 的 0.1）。
-- 调用：3 臂 × 10 题 = 30 次；实际花费 ¥0。
+- 数据：`internal/agent/eval/testdata/regression.json` **全集 60 条**（Go 35 / AI 25），sha256 `62c4c9cf…` 写入结果文件。不用 10 条子集，避免事后挑题。
+- 模型：DeepSeek 官方 OpenAI 兼容端点 `https://api.deepseek.com/v1`，`deepseek-flash`，`temperature=0`（完整臂沿用生产 evaluator 的 0.1）。
+- 调用：首轮 3 臂 × 60 题 = **180 次**；额度对齐重跑 2 臂 × 60 题 = **120 次**；合计 300 次。
+- 花费：首轮 $0.1059（≈¥0.76），对齐重跑 $0.0268（≈¥0.19），合计 **≈¥0.96**（预算 ¥5）。
+- 单价来源：[DeepSeek 官方定价页](https://api-docs.deepseek.com/quick_start/pricing)，2026-11-08 为周日、全时段 off-peak：输入 cache-miss **$0.15/M**、输出 **$0.60/M**；按 1 USD = 7.2 CNY 折算。
 - 三条臂的差别：
   - 单次 LLM：只给题目 + 回答，直接让模型给 0-100 总分；band 用统一阈值映射。
   - LLM+RAG：同一 prompt 再加 BM25 top3 参考块。
   - 完整方案：维度分 → `ComputeScore` 确定性算分，输出过 schema 与证据校验。
 
-**结果**（`docs/eval-results/ablation-m20.json`）：
+**额度对齐修正（方法学记录）**：首轮三个臂的 `MaxTokens` 不一致——完整臂 2000，两个基线臂 400。结果是单次 LLM 与 RAG 各有 10 条 completion 恰好 400、JSON 未产出而失败，基线被输出预算掐断。为消除这个瑕疵，只重跑两个基线臂（60 题、同题同模型同 prompt，仅把 `MaxTokens` 提到 2000），完整臂沿用首轮结果不重跑。首轮落 `docs/eval-results/ablation-m20.json`，对齐重跑落 `docs/eval-results/ablation-m20-token2000.json`。
 
-| 臂 | band 命中 | MAE | 平均 prompt token | 平均 completion token | 平均耗时 |
-| --- | --- | --- | --- | --- | --- |
-| 单次 LLM | 50.0%（5/10） | 21.40 | 287.4 | 9.0 | 162 ms |
-| LLM+RAG | 60.0%（6/10） | 20.10 | 959.5 | 8.9 | 155 ms |
-| 完整方案 | 30.0%（3/10） | 18.50 | 1,247.4 | 470.7 | 2,941 ms |
+**结果（额度对齐后，完整臂沿用首轮）**：
 
-**读法与限制**：
+| 臂 | band 命中 | MAE（0-100） | 平均 prompt | 平均 completion | 平均耗时 | 失败 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 单次 LLM | 65.0%（39/60） | 14.78 | 266.8 | 208.5 | 2,289 ms | 0 |
+| LLM+RAG | 76.7%（46/60） | 13.70 | 867.1 | 253.7 | 2,568 ms | 0 |
+| 完整方案 | 71.2%（42/59；按 60 计 70.0%） | 7.86 | 1,016.9 | 1,899.6 | 12,702 ms | 1 |
 
-- RAG 臂比单次多约 672 prompt token，band +1 条、MAE −1.3；10 条样本上不能当显著结论。
-- 完整臂 MAE 最好，但 band 命中最低：1.5b 的维度分整体偏低，high 档落在 60 分附近，再映射到 5 档就被放大；这不是「完整方案更差」，而是「小模型的维度打分不可信 + band 粒度粗」。
-- token 与耗时差异是稳定的：完整臂 prompt 约为单次的 4.3 倍、耗时约 18 倍。
+**判定结论：成立**。重跑前冻结的判据是「额度对齐后，完整方案在 band 命中率与 MAE 上均不劣于单次 LLM 则结论成立」——71.2% > 65.0%，MAE 7.86 < 14.78，两项均不劣于单次 LLM，写进简历素材。
+
+**稳健性（三种口径同向）**：
+
+| 口径 | 单次 LLM | 完整方案 |
+| --- | --- | --- |
+| 默认（失败剔出分母） | 65.0%（39/60） | 71.2%（42/59） |
+| 失败计为未命中 | 65.0%（39/60） | 70.0%（42/60） |
+| 共同成功 59 题 | 64.4% / MAE 14.95 | 71.2% / MAE 7.86 |
+
+**分档位看（必须一起写）**：
+
+| 期望档位 | 单次 LLM | LLM+RAG | 完整方案 |
+| --- | --- | --- | --- |
+| 1（23 条） | 19/23 | 19/23 | 23/23 |
+| 3（23 条） | 6/23 | 18/23 | 17/23 |
+| 5（13–14 条） | 14/14 | 9/14 | 2/13 |
+
+- 完整方案的总体优势集中在档 1 与档 3；**高分回答明显偏弱**（档 5 只命中 2/13）。原因是维度打分整体偏低，把优质回答压到档 3——属于模型维度打分偏差，不是规则门误伤。汇报时不能概括成「完整方案各项最优」。
+- band 最高的是 **LLM+RAG（76.7%）**；完整方案的优势主要在总分误差（MAE 低约 47%）。
+
+**首轮基线截断的影响**：把 `MaxTokens` 从 400 提到 2000 后，单次 LLM 从 66.0% / 15.12 变为 65.0% / 14.78——命中率略降、MAE 略降，没有发生结论翻转。也就是说，截断确实让 10 条基线失败，但把它们剔出分母反而略微抬高了基线的命中率；结论不是截断造成的假象。
+
+- 完整方案的代价是稳定的：prompt 约 3.8 倍、耗时约 5.5 倍于单次 LLM。
+- 上一版「10 题 / qwen2.5:1.5b」的消融表已作废，不再引用。
+
+**过程记录**：首轮后台任务在上一轮会话报告「12/60」后被截断，没有交回收尾输出；结果文件的 `generated_at`（10:38:46Z）与 180 次调用计数证明任务其实跑完并正常写盘，只是会话侧没收到最终打印。对齐重跑独立执行、正常收尾。
+
 - 复现命令（PowerShell）：
 
 ```powershell
-$env:MODEL_PROVIDER='openai'; $env:OPENAI_BASE_URL='http://127.0.0.1:11434/v1';
-$env:OPENAI_API_KEY='ollama'; $env:OPENAI_MODEL='qwen2.5:1.5b'; $env:MODEL_TIMEOUT='120s';
-go run ./cmd/ablation
+$env:MODEL_PROVIDER='openai'; $env:OPENAI_BASE_URL='https://api.deepseek.com/v1';
+$env:OPENAI_API_KEY='<key>'; $env:OPENAI_MODEL='deepseek-flash'; $env:MODEL_TIMEOUT='240s';
+# 首轮三臂（基线 MaxTokens=400，已完成）
+go run ./cmd/ablation -cases all -price-in-usd 0.15 -price-out-usd 0.60 -usd-cny 7.2
+# 额度对齐：只重跑两个基线臂，MaxTokens=2000
+go run ./cmd/ablation -cases all -arms 'single-llm,llm+rag' -direct-max-tokens 2000 `
+  -out docs/eval-results/ablation-m20-token2000.json `
+  -price-in-usd 0.15 -price-out-usd 0.60 -usd-cny 7.2
 ```
 
 ## 12. run 级 token 与成本落库
@@ -691,4 +729,19 @@ FROM runs WHERE id = $1;
 - 摘要按轮数触发，不按每轮触发，失败保留旧摘要、`degraded=true`；
 - snapshot 冻结进 `run_steps`，重放不会重新膨胀。
 
-**关掉记忆后差多少**：**未验证，没有数字**。已实现并有确定性单测（摘要/最近轮次进入 prompt、存储失败不阻断作答），但真实模型下的多轮事实保留率与 token 对比按当前排期没有跑；不使用确定性替身冒充真实结论。面试时只能说「机制已接通、单测覆盖注入与降级；效果待真实模型多轮实验」，不能说「提升 X%」。
+**关掉记忆后差多少**（2026-11-08，`cmd/memorycompare`，原始数据 `docs/eval-results/memory-gap.json`）：
+
+| 组 | 第 10 题后引用第 2 题事实 | prompt token | completion token |
+| --- | --- | --- | --- |
+| 关记忆 | 否（回答「不知道」） | 154 | 46 |
+| 开记忆 | 是（PostgreSQL + SKIP LOCKED，弃 MySQL 原因正确） | 632 | 84 |
+
+- 差 **+478 prompt token**，引用从 0/1 到 1/1；摘要层在第 6 题后触发、覆盖第 1–2 题，token 427/199，未降级。
+- 只跑一次开/关，不做显著性；提问是专门的事实回忆题，结论只说明「事实能活着进入第 10 轮的上下文并被模型正确引用」，不等于生产出题 prompt 下的效果。
+- 复现命令（PowerShell）：
+
+```powershell
+$env:MODEL_PROVIDER='openai'; $env:OPENAI_BASE_URL='https://api.deepseek.com/v1';
+$env:OPENAI_API_KEY='<key>'; $env:OPENAI_MODEL='deepseek-flash'; $env:MODEL_TIMEOUT='180s';
+go run ./cmd/memorycompare -price-in-usd 0.15 -price-out-usd 0.60 -usd-cny 7.2
+```

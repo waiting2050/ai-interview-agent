@@ -68,16 +68,22 @@ type armReport struct {
 }
 
 type report struct {
-	GeneratedAt   string      `json:"generated_at"`
-	Provider      string      `json:"provider"`
-	Model         string      `json:"model"`
-	BaseURL       string      `json:"base_url"`
-	DatasetPath   string      `json:"dataset_path"`
-	DatasetSHA256 string      `json:"dataset_sha256"`
-	Cases         int         `json:"cases"`
-	TotalCalls    int         `json:"total_calls"`
-	Arms          []armReport `json:"arms"`
-	Note          string      `json:"note"`
+	GeneratedAt     string      `json:"generated_at"`
+	Provider        string      `json:"provider"`
+	Model           string      `json:"model"`
+	BaseURL         string      `json:"base_url"`
+	DatasetPath     string      `json:"dataset_path"`
+	DatasetSHA256   string      `json:"dataset_sha256"`
+	Cases           int         `json:"cases"`
+	DirectMaxTok    int         `json:"direct_max_tokens"`
+	TotalCalls      int         `json:"total_calls"`
+	TotalPrompt     int         `json:"total_prompt_tokens"`
+	TotalCompletion int         `json:"total_completion_tokens"`
+	CostUSD         float64     `json:"cost_usd"`
+	CostCNY         float64     `json:"cost_cny"`
+	PriceNote       string      `json:"price_note"`
+	Arms            []armReport `json:"arms"`
+	Note            string      `json:"note"`
 }
 
 type scoreReply struct {
@@ -94,27 +100,35 @@ func main() {
 func run() error {
 	setPath := flag.String("set", defaultSet, "regression set path")
 	outPath := flag.String("out", defaultOut, "result JSON path")
-	casesFlag := flag.String("cases", strings.Join(defaultCases, ","), "comma-separated case ids")
+	casesFlag := flag.String("cases", "all", "comma-separated case ids, or all")
+	armsFlag := flag.String("arms", "all", "comma-separated arms: "+armSingle+","+armRAG+","+armFull+", or all")
+	directMaxTok := flag.Int("direct-max-tokens", 400, "MaxTokens for the two direct arms")
+	priceIn := flag.Float64("price-in-usd", 0.15, "USD per 1M prompt tokens")
+	priceOut := flag.Float64("price-out-usd", 0.60, "USD per 1M completion tokens")
+	usdCNY := flag.Float64("usd-cny", 7.2, "USD to CNY rate for reporting")
 	flag.Parse()
 
 	ds, err := eval.LoadDataset(*setPath)
 	if err != nil {
 		return err
 	}
-	want := map[string]bool{}
-	for _, id := range strings.Split(*casesFlag, ",") {
-		if id = strings.TrimSpace(id); id != "" {
-			want[id] = true
+	selected := ds.Cases
+	if *casesFlag != "all" {
+		want := map[string]bool{}
+		for _, id := range strings.Split(*casesFlag, ",") {
+			if id = strings.TrimSpace(id); id != "" {
+				want[id] = true
+			}
 		}
-	}
-	selected := make([]eval.Case, 0, len(want))
-	for _, c := range ds.Cases {
-		if want[c.CaseID] {
-			selected = append(selected, c)
+		selected = make([]eval.Case, 0, len(want))
+		for _, c := range ds.Cases {
+			if want[c.CaseID] {
+				selected = append(selected, c)
+			}
 		}
-	}
-	if len(selected) != len(want) {
-		return fmt.Errorf("selected %d cases but requested %d", len(selected), len(want))
+		if len(selected) != len(want) {
+			return fmt.Errorf("selected %d cases but requested %d", len(selected), len(want))
+		}
 	}
 
 	corpus, err := knowledge.BuildCorpus(knowledge.CorpusSources{
@@ -145,6 +159,23 @@ func run() error {
 		armFull:   {Arm: armFull},
 	}
 	order := []string{armSingle, armRAG, armFull}
+	if *armsFlag != "all" {
+		want := map[string]bool{}
+		for _, name := range strings.Split(*armsFlag, ",") {
+			if name = strings.TrimSpace(name); name != "" {
+				if _, ok := arms[name]; !ok {
+					return fmt.Errorf("unknown arm %q", name)
+				}
+				want[name] = true
+			}
+		}
+		order = order[:0]
+		for _, name := range []string{armSingle, armRAG, armFull} {
+			if want[name] {
+				order = append(order, name)
+			}
+		}
+	}
 
 	totalCalls := 0
 	for _, c := range selected {
@@ -170,19 +201,17 @@ func run() error {
 			start := time.Now()
 			switch arm {
 			case armSingle:
-				res = scoreDirect(context.Background(), client, c, "", res)
+				res = scoreDirect(context.Background(), client, c, "", *directMaxTok, res)
 			case armRAG:
-				res = scoreDirect(context.Background(), client, c, refs, res)
+				res = scoreDirect(context.Background(), client, c, refs, *directMaxTok, res)
 			case armFull:
 				res = scoreFull(context.Background(), client, info.Model, c, rubric, res)
 			}
 			res.LatencyMS = time.Since(start).Milliseconds()
 			totalCalls++
-			if arm == armFull || arm == armRAG || arm == armSingle {
-				arms[arm].Cases = append(arms[arm].Cases, res)
-			}
+			arms[arm].Cases = append(arms[arm].Cases, res)
 		}
-		fmt.Fprintf(os.Stderr, "case %s done (%d/%d)\n", c.CaseID, totalCalls/3, len(selected))
+		fmt.Fprintf(os.Stderr, "case %s done (%d/%d)\n", c.CaseID, totalCalls/len(order), len(selected))
 	}
 
 	for _, arm := range order {
@@ -218,16 +247,32 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	totalPrompt, totalCompletion := 0, 0
+	for _, arm := range order {
+		for _, c := range arms[arm].Cases {
+			totalPrompt += c.PromptTokens
+			totalCompletion += c.Completion
+		}
+	}
+	costUSD := float64(totalPrompt)/1e6*(*priceIn) + float64(totalCompletion)/1e6*(*priceOut)
+	costCNY := costUSD * (*usdCNY)
 	out := report{
-		GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
-		Provider:      info.Provider,
-		Model:         info.Model,
-		BaseURL:       info.BaseURL,
-		DatasetPath:   *setPath,
-		DatasetSHA256: digest,
-		Cases:         len(selected),
-		TotalCalls:    totalCalls,
-		Note:          "同一子集、同一模型、temperature=0（完整臂沿用生产 evaluator 的 0.1）；单次 LLM 与 LLM+RAG 直接给总分，band 由统一阈值映射；完整臂走维度分→ComputeScore→Band 并做 schema/证据校验。",
+		GeneratedAt:     time.Now().UTC().Format(time.RFC3339),
+		Provider:        info.Provider,
+		Model:           info.Model,
+		BaseURL:         info.BaseURL,
+		DatasetPath:     *setPath,
+		DatasetSHA256:   digest,
+		Cases:           len(selected),
+		DirectMaxTok:    *directMaxTok,
+		TotalCalls:      totalCalls,
+		TotalPrompt:     totalPrompt,
+		TotalCompletion: totalCompletion,
+		CostUSD:         costUSD,
+		CostCNY:         costCNY,
+		PriceNote: fmt.Sprintf("DeepSeek 官方定价（https://api-docs.deepseek.com/quick_start/pricing）：输入 cache-miss $%.2f/M、输出 $%.2f/M；2026-11-08 为周日全时段 off-peak；按 1 USD=%.1f CNY 折算。",
+			*priceIn, *priceOut, *usdCNY),
+		Note: fmt.Sprintf("完整回归集、同一模型、temperature=0（完整臂沿用生产 evaluator 的 0.1）；单次 LLM 与 LLM+RAG 直接给总分（MaxTokens=%d），band 由统一阈值映射；完整臂走维度分→ComputeScore→Band 并做 schema/证据校验（MaxTokens=2000）。", *directMaxTok),
 	}
 	for _, arm := range order {
 		out.Arms = append(out.Arms, *arms[arm])
@@ -246,11 +291,13 @@ func run() error {
 		fmt.Printf("%-22s %7.1f%% %8.2f %8d %10.1f %10.1f %8.0f\n",
 			a.Arm, a.BandHitRate*100, a.MAE, a.Errors, a.AvgPromptTokens, a.AvgCompletionTokens, a.AvgLatencyMS)
 	}
-	fmt.Printf("\nresult_file: %s\n", *outPath)
+	fmt.Printf("\ntotal: prompt=%d completion=%d cost=%.4f USD / %.4f CNY\n",
+		totalPrompt, totalCompletion, costUSD, costCNY)
+	fmt.Printf("result_file: %s\n", *outPath)
 	return nil
 }
 
-func scoreDirect(ctx context.Context, client llm.Client, c eval.Case, refs string, res caseResult) caseResult {
+func scoreDirect(ctx context.Context, client llm.Client, c eval.Case, refs string, maxTokens int, res caseResult) caseResult {
 	user := fmt.Sprintf("题目主题：%s\n题目：%s\n\n候选人回答：\n%s", c.Topic, c.Question, truncate(c.Answer, 2000))
 	if refs != "" {
 		user += "\n\n<reference>\n" + refs + "\n</reference>"
@@ -259,7 +306,7 @@ func scoreDirect(ctx context.Context, client llm.Client, c eval.Case, refs strin
 		System:      directSystem,
 		User:        user,
 		Temperature: 0,
-		MaxTokens:   400,
+		MaxTokens:   maxTokens,
 	})
 	res.PromptTokens += resp.PromptTokens
 	res.Completion += resp.CompletionTokens

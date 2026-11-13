@@ -1,0 +1,140 @@
+{
+  "generated_at": "2026-11-08T10:22:43Z",
+  "provider": "openai",
+  "model": "deepseek-flash",
+  "base_url": "https://api.deepseek.com/v1",
+  "session_id": "memory-gap-demo",
+  "turns": 10,
+  "fact_turn": 2,
+  "check_turn": 10,
+  "fact": "第 2 题答：选 PostgreSQL 而非 MySQL，因为需要 SKIP LOCKED 做任务队列；Redis 只做锁和限流，不承担正确性。",
+  "update_events": [
+    {
+      "after_answered": 1,
+      "fired": false,
+      "covered_turns": 0,
+      "degraded": false,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "summary": ""
+    },
+    {
+      "after_answered": 2,
+      "fired": false,
+      "covered_turns": 0,
+      "degraded": false,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "summary": ""
+    },
+    {
+      "after_answered": 3,
+      "fired": false,
+      "covered_turns": 0,
+      "degraded": false,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "summary": ""
+    },
+    {
+      "after_answered": 4,
+      "fired": false,
+      "covered_turns": 0,
+      "degraded": false,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "summary": ""
+    },
+    {
+      "after_answered": 5,
+      "fired": false,
+      "covered_turns": 0,
+      "degraded": false,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "summary": ""
+    },
+    {
+      "after_answered": 6,
+      "fired": true,
+      "covered_turns": 2,
+      "degraded": false,
+      "prompt_tokens": 427,
+      "completion_tokens": 199,
+      "summary": "{\"type\":\"json_object\",\"content\":\"候选人具备 Go 服务调优与任务队列存储选型经验。GC 停顿问题定位思路：先看 GC 频率与堆增长曲线，用 pprof 定位分配热点；对短生命周期对象优先减少逃逸与对象复用，再把 GOGC 从默认值上调，观察 P99 是否下降，并用一周监控对比基线。存储选型上，其项目最终选 PostgreSQL 而非 MySQL，原因是需要 SKIP LOCKED 支持 worker 并发领取任务、跳过被锁行；Redis 只做锁和限流，不承担正确性。其判断 MySQL 行锁在长事务下易互相阻塞，代价是 PostgreSQL 写入吞吐低于 MySQL，因此队列表按状态分区并定期归档。已问题目主题：Go 垃圾回收与任务队列持久化选型，均为追问 0 层，尚无深入追问记录，薄弱点未暴露。\"}"
+    },
+    {
+      "after_answered": 7,
+      "fired": false,
+      "covered_turns": 0,
+      "degraded": false,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "summary": ""
+    },
+    {
+      "after_answered": 8,
+      "fired": false,
+      "covered_turns": 0,
+      "degraded": false,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "summary": ""
+    },
+    {
+      "after_answered": 9,
+      "fired": false,
+      "covered_turns": 0,
+      "degraded": false,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "summary": ""
+    },
+    {
+      "after_answered": 10,
+      "fired": false,
+      "covered_turns": 0,
+      "degraded": false,
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "summary": ""
+    }
+  ],
+  "memory_summary": "{\"type\":\"json_object\",\"content\":\"候选人具备 Go 服务调优与任务队列存储选型经验。GC 停顿问题定位思路：先看 GC 频率与堆增长曲线，用 pprof 定位分配热点；对短生命周期对象优先减少逃逸与对象复用，再把 GOGC 从默认值上调，观察 P99 是否下降，并用一周监控对比基线。存储选型上，其项目最终选 PostgreSQL 而非 MySQL，原因是需要 SKIP LOCKED 支持 worker 并发领取任务、跳过被锁行；Redis 只做锁和限流，不承担正确性。其判断 MySQL 行锁在长事务下易互相阻塞，代价是 PostgreSQL 写入吞吐低于 MySQL，因此队列表按状态分区并定期归档。已问题目主题：Go 垃圾回收与任务队列持久化选型，均为追问 0 层，尚无深入追问记录，薄弱点未暴露。\"}",
+  "memory_degraded": false,
+  "memory_prompt_tokens": 427,
+  "memory_completion_tokens": 199,
+  "recall_question": "我在本场面试第 2 题里最终选择了哪种任务队列存储方案？为什么放弃另一种？",
+  "no_memory": {
+    "with_memory": false,
+    "user_prompt": "问题：我在本场面试第 2 题里最终选择了哪种任务队列存储方案？为什么放弃另一种？",
+    "prompt_tokens": 154,
+    "completion_tokens": 46,
+    "latency_ms": 915,
+    "output": "{\"answer\":\"不知道\"}",
+    "cited": false,
+    "mentions_postgresql": false,
+    "mentions_skip_locked": false,
+    "mentions_mysql": false,
+    "says_unknown": true
+  },
+  "with_memory": {
+    "with_memory": true,
+    "user_prompt": "\u003cmemory\u003e\n较早问答摘要：{\"type\":\"json_object\",\"content\":\"候选人具备 Go 服务调优与任务队列存储选型经验。GC 停顿问题定位思路：先看 GC 频率与堆增长曲线，用 pprof 定位分配热点；对短生命周期对象优先减少逃逸与对象复用，再把 GOGC 从默认值上调，观察 P99 是否下降，并用一周监控对比基线。存储选型上，其项目最终选 PostgreSQL 而非 MySQL，原因是需要 SKIP LOCKED 支持 worker 并发领取任务、跳过被锁行；Redis 只做锁和限流，不承担正确性。其判断 MySQL 行锁在长事务下易互相阻塞，代价是 PostgreSQL 写入吞吐低于 MySQL，因此队列表按状态分区并定期归档。已问题目主题：Go 垃圾回收与任务队列持久化选型，均为追问 0 层，尚无深入追问记录，薄弱点未暴露。\"}\n最近问答：\n- 问：下游接口超时，熔断与降级如何设计？\n答：熔断按错误率和慢调用比例触发，半开状态放少量流量探测。降级要准备静态兜底数据，边界是熔断期间不能把流量直接打到数据库，否则会雪崩。\n- 问：RAG 检索召回率低，你会从哪些环节排查？\n答：先看切块是否把考点拆散，再看 BM25 与向量的融合权重。我们做过对照：只用 BM25 时专业名词命中高，但同义表述漏召；加向量后召回提升，代价是延迟增加约 80ms。\n- 问：向量数据库选型要考虑哪些因素？\n答：选型看维度、过滤能力、持久化和运维成本。我们对比过 pgvector 与专用向量库，数据量在百万级时 pgvector 足够，且能和业务表 join；代价是超大规模下索引构建更慢。\n- 问：灰度发布出问题，如何快速回滚？\n答：灰度按流量比例和用户白名单放量，回滚用保留的旧版本镜像加配置开关。边界是数据库迁移不可回滚，所以迁移必须双写兼容；验证看错误率和核心接口 P99。\n\u003c/memory\u003e\n\n问题：我在本场面试第 2 题里最终选择了哪种任务队列存储方案？为什么放弃另一种？",
+    "prompt_tokens": 632,
+    "completion_tokens": 84,
+    "latency_ms": 801,
+    "output": "{\"answer\":\"选 PostgreSQL，因需 SKIP LOCKED 支持 worker 并发领取任务并跳过被锁行；放弃 MySQL，因其行锁在长事务下易互相阻塞。\"}",
+    "cited": true,
+    "mentions_postgresql": true,
+    "mentions_skip_locked": true,
+    "mentions_mysql": true,
+    "says_unknown": false
+  },
+  "prompt_token_delta": 478,
+  "citation_delta": 1,
+  "cost_usd": 0.00037935,
+  "cost_cny": 0.0027313199999999998,
+  "price_note": "DeepSeek 官方定价（https://api-docs.deepseek.com/quick_start/pricing）：输入 cache-miss $0.15/M、输出 $0.60/M；2026-11-08 为周日全时段 off-peak；按 1 USD=7.2 CNY 折算。",
+  "note": "同一会话、同一模型、temperature=0；第 2 题埋事实，第 10 题后提问。开记忆=摘要层（覆盖第 1-2 题）+ 最近 4 轮原文；关记忆=两者都不注入。引用正确判定：输出含 PostgreSQL，且含 SKIP LOCKED 或「队列」。"
+}
