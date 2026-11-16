@@ -36,6 +36,12 @@ type SessionRepository interface {
 	// UpdateState must compare StateVersion and increment it atomically.
 	// On success it writes the new version back into s.StateVersion.
 	UpdateState(ctx context.Context, s *session.Session, expectedVersion uint64) error
+	// ListByUser returns one owner-scoped page ordered by created_at DESC, id
+	// DESC. A zero before means the first page; before+beforeID is the keyset
+	// cursor for the next page, which keeps pagination stable while new
+	// sessions are being created. Each row carries the newest report, if any,
+	// from the same query (LEFT JOIN LATERAL), never a per-row lookup.
+	ListByUser(ctx context.Context, userID string, before time.Time, beforeID string, limit int) ([]session.Summary, error)
 }
 
 type EventRepository interface {
@@ -160,6 +166,29 @@ type Reviewer interface {
 	AnswerVariant(ctx context.Context, userID, id string, in review.VariantAnswerInput) (*review.VariantAnswerResult, error)
 }
 
+// Budget scopes for model spend admission control.
+const (
+	BudgetScopeUser    = "user"
+	BudgetScopeSession = "session"
+)
+
+// BudgetRepository stores token limits and reads spend from the existing runs
+// ledger. Limits are the only thing persisted here: spend is always derived
+// from runs.prompt_tokens + runs.completion_tokens so the aggregate cannot
+// drift from the per-run truth.
+type BudgetRepository interface {
+	// SetLimit upserts the token limit for one scope.
+	SetLimit(ctx context.Context, scope, scopeID string, limitTokens int64) error
+	// GetLimit reports whether a limit is configured for the scope. A missing
+	// row means "no limit", not zero.
+	GetLimit(ctx context.Context, scope, scopeID string) (int64, bool, error)
+	// UserSpendTokens sums prompt+completion tokens across every run whose
+	// session belongs to userID.
+	UserSpendTokens(ctx context.Context, userID string) (int64, error)
+	// SessionSpendTokens sums prompt+completion tokens for one session.
+	SessionSpendTokens(ctx context.Context, sessionID string) (int64, error)
+}
+
 // Repositories is the set of repositories bound to either the pool or an
 // active transaction.
 type Repositories struct {
@@ -174,6 +203,7 @@ type Repositories struct {
 	Reports     ReportRepository
 	JDs         JDRepository
 	Reviews     ReviewRepository
+	Budgets     BudgetRepository
 }
 
 // Store is the runtime persistence boundary. Repos returns repositories bound

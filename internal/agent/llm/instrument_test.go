@@ -37,6 +37,9 @@ func TestInstrumentedClientRecordsCallsTokensAndSessionUsage(t *testing.T) {
 	if got := metrics.ModelCallTotal("test-provider", "test-model", "success"); got != 1 {
 		t.Fatalf("success calls = %d", got)
 	}
+	if got := metrics.ModelCallDurationCount("test-provider", "test-model", "success"); got != 1 {
+		t.Fatalf("duration observations = %d", got)
+	}
 	if got := metrics.TokenTotal("test-provider", "test-model", "input"); got != 200 {
 		t.Fatalf("input tokens = %d", got)
 	}

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/waiting2050/ai-interview-agent/internal/agent/interview"
 	"github.com/waiting2050/ai-interview-agent/internal/agent/knowledge"
 	"github.com/waiting2050/ai-interview-agent/internal/app"
 	"github.com/waiting2050/ai-interview-agent/internal/auth"
@@ -38,6 +39,8 @@ type Deps struct {
 	JDAnalyzer ports.JDAnalyzer
 	// Reviewer backs the M11 spaced-repetition routes. Nil disables them with 503.
 	Reviewer ports.Reviewer
+	// Predictor backs POST /v1/predictions. Nil disables the route with 503.
+	Predictor *interview.Predictor
 	// RateLimiter backs the three per-user command quotas. Nil disables them.
 	RateLimiter ports.RateLimiter
 	// RateLimits holds the per-command quotas (demo accounts are stricter).
@@ -81,6 +84,7 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("POST /v1/auth/demo", h.demoLogin)
 	mux.HandleFunc("POST /v1/resume/parse", h.parseResume)
 	mux.HandleFunc("POST /v1/resume/analyze", h.analyzeResume)
+	mux.HandleFunc("POST /v1/predictions", h.predictQuestions)
 	mux.HandleFunc("POST /v1/jd/analyze", h.analyzeJD)
 	mux.HandleFunc("GET /v1/jd/{id}", h.getJD)
 	mux.HandleFunc("POST /v1/jd/{id}/kit", h.generateApplyKit)
@@ -93,6 +97,7 @@ func NewRouter(deps Deps) http.Handler {
 	mux.HandleFunc("POST /v1/review/{id}/grade", h.gradeReview)
 	mux.HandleFunc("GET /v1/domains", h.listDomains)
 	mux.HandleFunc("POST /v1/sessions", h.createSession)
+	mux.HandleFunc("GET /v1/sessions", h.listSessions)
 	mux.HandleFunc("GET /v1/sessions/{id}", h.getSession)
 	mux.HandleFunc("POST /v1/sessions/{id}/start", h.startSession)
 	mux.HandleFunc("POST /v1/sessions/{id}/answers", h.submitAnswer)

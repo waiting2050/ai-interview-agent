@@ -21,6 +21,7 @@ import (
 	"github.com/waiting2050/ai-interview-agent/internal/auth"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/jd"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/review"
+	"github.com/waiting2050/ai-interview-agent/internal/platform/alert"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/config"
 	"github.com/waiting2050/ai-interview-agent/internal/platform/jobfetch"
 	platformlock "github.com/waiting2050/ai-interview-agent/internal/platform/lock"
@@ -268,6 +269,21 @@ func run() error {
 	logger.Info("worker pool started", "concurrency", cfg.WorkerConcurrency,
 		"lease_ttl", cfg.WorkerLeaseTTL, "heartbeat", cfg.WorkerHeartbeatInterval)
 
+	// In-process alert rules over the same counters /metrics exposes. No
+	// Alertmanager: the first sample only seeds state, so a restart does not
+	// replay historical dead letters, and each rule carries its own cooldown.
+	go alert.Run(ctx, alert.New(alert.DefaultRules()), func() alert.Snapshot {
+		return alert.Snapshot{
+			DeadLetters:      metrics.DeadLetterCount(),
+			BudgetRejections: metrics.BudgetRejectionCount(),
+			StaleRuns:        metrics.StaleRunDetectedTotal(),
+		}
+	}, func(a alert.Alert) {
+		logger.Warn("alert fired",
+			"rule", a.Rule, "severity", a.Severity, "signal", a.Signal,
+			"value", a.Value, "message", a.Message)
+	}, 15*time.Second)
+
 	// One fetcher instance keeps the per-host rate limiter and robots cache
 	// shared across requests, so frequent analyses cannot exceed the limit.
 	jobFetcher := jobfetch.NewHTTPFetcher(jobfetch.Options{})
@@ -328,6 +344,7 @@ func run() error {
 				return jd.Fetched{URL: result.URL, Text: result.Text, FetchedAt: result.FetchedAt}, nil
 			}),
 			Reviewer:       reviewer,
+			Predictor:      interview.NewPredictor(generator),
 			EvalResultsDir: cfg.EvalResultsDir,
 			Tracer:         tracer,
 		}),

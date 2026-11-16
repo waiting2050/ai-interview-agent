@@ -14,6 +14,9 @@ func TestMetricsCountersAndRendering(t *testing.T) {
 	m.IncModelCall("openai", "gpt-test", "success")
 	m.IncModelCall("openai", "gpt-test", "error")
 	m.IncModelCallFailure("openai", "gpt-test", "timeout")
+	m.ObserveModelCall("openai", "gpt-test", "success", 120*time.Millisecond)
+	m.ObserveModelCall("openai", "gpt-test", "error", 3*time.Second)
+	m.IncSessionTransition("active", "awaiting_answer")
 	m.AddModelTokens("openai", "gpt-test", 120, 30)
 	m.IncEvaluationDegraded("model_output_invalid")
 	m.IncReportDegraded("model_unavailable")
@@ -54,6 +57,12 @@ func TestMetricsCountersAndRendering(t *testing.T) {
 	if got := m.ModelCallFailureTotal("openai", "gpt-test", "timeout"); got != 1 {
 		t.Fatalf("model failures by class = %d", got)
 	}
+	if got := m.ModelCallDurationCount("openai", "gpt-test", "success"); got != 1 {
+		t.Fatalf("model duration observations = %d", got)
+	}
+	if got := m.SessionTransitionTotal("active", "awaiting_answer"); got != 1 {
+		t.Fatalf("session transitions = %d", got)
+	}
 	if got := m.LeaseRenewAttemptTotal(); got != 2 {
 		t.Fatalf("lease renew attempts = %d", got)
 	}
@@ -89,6 +98,10 @@ func TestMetricsCountersAndRendering(t *testing.T) {
 		"ai_interview_sse_reconnects_total 1",
 		"ai_interview_sse_connections 0",
 		`ai_interview_run_failures_total{class="timeout",kind="answer"} 1`,
+		"# TYPE ai_interview_model_call_seconds histogram",
+		`ai_interview_model_call_seconds_count{model="gpt-test",provider="openai",result="success"} 1`,
+		`ai_interview_model_call_seconds_bucket{le="0.5",model="gpt-test",provider="openai",result="success"} 1`,
+		`ai_interview_session_transitions_total{phase="awaiting_answer",status="active"} 1`,
 		"# TYPE ai_interview_sse_event_delivery_seconds histogram",
 		"ai_interview_sse_event_delivery_seconds_count 1",
 	} {

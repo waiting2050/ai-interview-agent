@@ -317,6 +317,22 @@ func TestAnswerDegradesOnInvalidModelOutput(t *testing.T) {
 	}
 }
 
+func TestSessionTransitionMetricTracksSuccessfulStateWrites(t *testing.T) {
+	metrics := obs.NewMetrics()
+	svc, _ := newTestService(t, Options{
+		Metrics:   metrics,
+		Evaluator: &stubEvaluator{outcome: outcomeFor("回答", 3, false)},
+	})
+	sess := createSession(t, svc)
+	startAndGetTurn(t, svc, sess)
+
+	status := string(session.StatusActive)
+	phase := string(session.PhaseAwaitingAnswer)
+	if got := metrics.SessionTransitionTotal(status, phase); got != 1 {
+		t.Fatalf("transition %s/%s = %d, want 1", status, phase, got)
+	}
+}
+
 func TestAnswerIsIdempotent(t *testing.T) {
 	answer := "我用分片加本地缓存，热点 key 做二级缓存并设置随机过期。"
 	stub := &stubEvaluator{outcome: outcomeFor(answer, 4, false)}

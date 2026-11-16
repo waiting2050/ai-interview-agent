@@ -104,5 +104,6 @@ func newRepositories(q querier) ports.Repositories {
 		Reports:     &reportRepository{q: q},
 		JDs:         &jdRepository{q: q},
 		Reviews:     &reviewRepository{q: q},
+		Budgets:     &budgetRepository{q: q},
 	}
 }

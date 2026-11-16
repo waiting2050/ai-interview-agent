@@ -57,6 +57,16 @@ func (h *handlers) writeError(w http.ResponseWriter, r *http.Request, err error)
 		body.Message = err.Error()
 		writeJSON(w, http.StatusBadRequest, body)
 
+	case errors.Is(err, app.ErrUserBudgetExceeded):
+		body.Code = "user_budget_exceeded"
+		body.Message = "用户模型额度已用完，请联系管理员调整额度"
+		writeJSON(w, http.StatusTooManyRequests, body)
+
+	case errors.Is(err, app.ErrSessionBudgetExceeded):
+		body.Code = "session_budget_exceeded"
+		body.Message = "本次面试的模型额度已用完，请新建会话"
+		writeJSON(w, http.StatusTooManyRequests, body)
+
 	case errors.Is(err, app.ErrReportNotReady):
 		body.Code = "report_not_ready"
 		body.Message = "报告尚未生成，请先调用 finish 或 report"

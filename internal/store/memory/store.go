@@ -37,6 +37,7 @@ type Store struct {
 	jdListings map[string]*jd.Listing          // listing id
 	reviewKeys map[string]string               // sessionID|turnID|topic -> cardID
 	reviews    map[string]*review.Card         // card id
+	budgets    map[string]int64                // scope|scopeID -> limit tokens
 	subs       map[string]map[chan struct{}]struct{}
 
 	eventSeq int64
@@ -63,6 +64,7 @@ func New() *Store {
 		jdListings: map[string]*jd.Listing{},
 		reviewKeys: map[string]string{},
 		reviews:    map[string]*review.Card{},
+		budgets:    map[string]int64{},
 		subs:       map[string]map[chan struct{}]struct{}{},
 	}
 	s.repos = ports.Repositories{
@@ -77,6 +79,7 @@ func New() *Store {
 		Reports:     &reportRepo{s: s},
 		JDs:         &jdRepo{s: s},
 		Reviews:     &reviewRepo{s: s},
+		Budgets:     &budgetRepo{s: s},
 	}
 	return s
 }
@@ -209,6 +212,52 @@ func (r *sessionRepo) UpdateState(_ context.Context, in *session.Session, expect
 	r.s.sessions[in.ID] = &cp
 	in.StateVersion = cp.StateVersion
 	return nil
+}
+
+func (r *sessionRepo) ListByUser(_ context.Context, userID string, before time.Time, beforeID string, limit int) ([]session.Summary, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	r.s.mu.RLock()
+	defer r.s.mu.RUnlock()
+
+	page := make([]session.Summary, 0, limit)
+	for _, s := range r.s.sessions {
+		if s.OwnerID != userID {
+			continue
+		}
+		if !before.IsZero() {
+			if s.CreatedAt.After(before) {
+				continue
+			}
+			if s.CreatedAt.Equal(before) && s.ID >= beforeID {
+				continue
+			}
+		}
+		summary := session.Summary{Session: *s}
+		if rec, ok := r.s.reports[s.ID]; ok {
+			generated := rec.Report.GeneratedAt
+			if generated.IsZero() {
+				generated = rec.CreatedAt
+			}
+			summary.LatestReport = &session.LatestReport{
+				TotalScore:  rec.Report.OverallScore,
+				ScoreBand:   domainreport.Band(rec.Report.OverallScore),
+				GeneratedAt: generated,
+			}
+		}
+		page = append(page, summary)
+	}
+	sort.Slice(page, func(i, j int) bool {
+		if page[i].CreatedAt.Equal(page[j].CreatedAt) {
+			return page[i].ID > page[j].ID
+		}
+		return page[i].CreatedAt.After(page[j].CreatedAt)
+	})
+	if len(page) > limit {
+		page = page[:limit]
+	}
+	return page, nil
 }
 
 type runRepo struct{ s *Store }
@@ -915,6 +964,51 @@ func (r *reviewRepo) Update(_ context.Context, card *review.Card) error {
 	}
 	r.s.reviews[card.ID] = cloneReviewCard(card)
 	return nil
+}
+
+type budgetRepo struct{ s *Store }
+
+func budgetKey(scope, scopeID string) string { return scope + "|" + scopeID }
+
+func (r *budgetRepo) SetLimit(_ context.Context, scope, scopeID string, limitTokens int64) error {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	r.s.budgets[budgetKey(scope, scopeID)] = limitTokens
+	return nil
+}
+
+func (r *budgetRepo) GetLimit(_ context.Context, scope, scopeID string) (int64, bool, error) {
+	r.s.mu.RLock()
+	defer r.s.mu.RUnlock()
+	limit, ok := r.s.budgets[budgetKey(scope, scopeID)]
+	return limit, ok, nil
+}
+
+func (r *budgetRepo) UserSpendTokens(_ context.Context, userID string) (int64, error) {
+	r.s.mu.RLock()
+	defer r.s.mu.RUnlock()
+	var spent int64
+	for _, run := range r.s.runs {
+		sess, ok := r.s.sessions[run.SessionID]
+		if !ok || sess.OwnerID != userID {
+			continue
+		}
+		spent += int64(run.PromptTokens + run.CompletionTokens)
+	}
+	return spent, nil
+}
+
+func (r *budgetRepo) SessionSpendTokens(_ context.Context, sessionID string) (int64, error) {
+	r.s.mu.RLock()
+	defer r.s.mu.RUnlock()
+	var spent int64
+	for _, run := range r.s.runs {
+		if run.SessionID != sessionID {
+			continue
+		}
+		spent += int64(run.PromptTokens + run.CompletionTokens)
+	}
+	return spent, nil
 }
 
 func cloneReviewCard(card *review.Card) *review.Card {

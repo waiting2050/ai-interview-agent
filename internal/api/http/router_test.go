@@ -67,6 +67,7 @@ func newTestRouter(t *testing.T) (*httptest.Server, *app.Service, *obs.Metrics) 
 		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Metrics:    metrics,
 		JDAnalyzer: jd.New(store.Repos().JDs, nil),
+		Predictor:  interview.NewPredictor(interview.NewQuestionGenerator(interview.NewHeuristicClient(), "fake-heuristic")),
 	}), token))
 	t.Cleanup(srv.Close)
 	return srv, svc, metrics

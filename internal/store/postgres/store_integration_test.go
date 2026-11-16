@@ -1006,3 +1006,235 @@ func TestJDRepositoryCachesListing(t *testing.T) {
 		t.Fatalf("missing err = %v", err)
 	}
 }
+
+// TestSessionListByUserKeysetPagination exercises the real SQL: owner scoping,
+// created_at DESC ordering and the (created_at, id) tuple cursor. The unit
+// tests use the memory store, which could hide a wrong ORDER BY or a missing
+// user_id predicate.
+func TestSessionListByUserKeysetPagination(t *testing.T) {
+	store := openStore(t)
+	ctx := context.Background()
+	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
+
+	ids := []string{"sess-list-a0", "sess-list-a1", "sess-list-a2", "sess-list-b0"}
+	owners := []string{"usr_a", "usr_a", "usr_a", "usr_b"}
+	for i := range ids {
+		created := base.Add(time.Duration(i) * time.Minute)
+		sess := &session.Session{
+			ID:         ids[i],
+			OwnerID:    owners[i],
+			TargetRole: "Go 后端",
+			ResumeText: "resume",
+			JDText:     "jd",
+			Config:     session.DefaultConfig(),
+			Status:     session.StatusCreated,
+			CreatedAt:  created,
+			UpdatedAt:  created,
+		}
+		if err := store.Repos().Sessions.Create(ctx, sess); err != nil {
+			t.Fatalf("create %s: %v", ids[i], err)
+		}
+	}
+
+	first, err := store.Repos().Sessions.ListByUser(ctx, "usr_a", time.Time{}, "", 2)
+	if err != nil {
+		t.Fatalf("first page: %v", err)
+	}
+	if len(first) != 2 || first[0].ID != "sess-list-a2" || first[1].ID != "sess-list-a1" {
+		t.Fatalf("first page = %+v", first)
+	}
+
+	second, err := store.Repos().Sessions.ListByUser(ctx, "usr_a", first[1].CreatedAt, first[1].ID, 2)
+	if err != nil {
+		t.Fatalf("second page: %v", err)
+	}
+	if len(second) != 1 || second[0].ID != "sess-list-a0" {
+		t.Fatalf("second page = %+v", second)
+	}
+
+	other, err := store.Repos().Sessions.ListByUser(ctx, "usr_b", time.Time{}, "", 10)
+	if err != nil {
+		t.Fatalf("other owner: %v", err)
+	}
+	if len(other) != 1 || other[0].ID != "sess-list-b0" {
+		t.Fatalf("owner leak: %+v", other)
+	}
+}
+
+// TestBudgetRepositoryReadsRunsLedger proves limits are persisted while spend
+// stays derived from runs, including the user-level aggregate that joins
+// sessions on the owner.
+func TestBudgetRepositoryReadsRunsLedger(t *testing.T) {
+	store := openStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+
+	mkSession := func(id, owner string) {
+		if err := store.Repos().Sessions.Create(ctx, &session.Session{
+			ID:         id,
+			OwnerID:    owner,
+			TargetRole: "Go 后端",
+			ResumeText: "resume",
+			JDText:     "jd",
+			Config:     session.DefaultConfig(),
+			Status:     session.StatusCreated,
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		}); err != nil {
+			t.Fatalf("create session %s: %v", id, err)
+		}
+	}
+	mkRun := func(id, sessionID string, prompt, completion int) {
+		if _, _, err := store.Repos().Runs.Create(ctx, &session.Run{
+			ID:             id,
+			SessionID:      sessionID,
+			Kind:           session.RunKindAnswer,
+			Status:         session.RunStatusSucceeded,
+			IdempotencyKey: id,
+			RequestHash:    "hash",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		}); err != nil {
+			t.Fatalf("create run %s: %v", id, err)
+		}
+		if err := store.Repos().Runs.AddUsage(ctx, id, prompt, completion, 1, 0); err != nil {
+			t.Fatalf("add usage %s: %v", id, err)
+		}
+	}
+
+	mkSession("sess-budget-a", "usr_budget_a")
+	mkSession("sess-budget-b", "usr_budget_b")
+	mkRun("run-budget-a1", "sess-budget-a", 10, 5)
+	mkRun("run-budget-a2", "sess-budget-a", 20, 5)
+	mkRun("run-budget-b1", "sess-budget-b", 7, 3)
+
+	userSpent, err := store.Repos().Budgets.UserSpendTokens(ctx, "usr_budget_a")
+	if err != nil {
+		t.Fatalf("user spend: %v", err)
+	}
+	if userSpent != 40 {
+		t.Fatalf("user spend = %d, want 40", userSpent)
+	}
+	sessionSpent, err := store.Repos().Budgets.SessionSpendTokens(ctx, "sess-budget-a")
+	if err != nil {
+		t.Fatalf("session spend: %v", err)
+	}
+	if sessionSpent != 40 {
+		t.Fatalf("session spend = %d, want 40", sessionSpent)
+	}
+	otherSpent, err := store.Repos().Budgets.SessionSpendTokens(ctx, "sess-budget-b")
+	if err != nil {
+		t.Fatalf("other session spend: %v", err)
+	}
+	if otherSpent != 10 {
+		t.Fatalf("other session spend = %d, want 10", otherSpent)
+	}
+
+	if _, ok, err := store.Repos().Budgets.GetLimit(ctx, "user", "usr_budget_a"); err != nil || ok {
+		t.Fatalf("unconfigured limit: ok=%v err=%v", ok, err)
+	}
+	if err := store.Repos().Budgets.SetLimit(ctx, "user", "usr_budget_a", 1000); err != nil {
+		t.Fatalf("set limit: %v", err)
+	}
+	if err := store.Repos().Budgets.SetLimit(ctx, "user", "usr_budget_a", 2000); err != nil {
+		t.Fatalf("upsert limit: %v", err)
+	}
+	limit, ok, err := store.Repos().Budgets.GetLimit(ctx, "user", "usr_budget_a")
+	if err != nil || !ok || limit != 2000 {
+		t.Fatalf("limit = %d ok=%v err=%v, want 2000", limit, ok, err)
+	}
+}
+
+// TestSessionListIncludesLatestReport covers the three list cases: no report,
+// one report, and several reports where only the newest may win.
+//
+// Production has UNIQUE(session_id) on reports, so "several" cannot be reached
+// through the API. The constraint is dropped for the duration of this test on
+// the disposable integration database and restored in a defer; the query under
+// test keeps ORDER BY created_at DESC LIMIT 1, which is exactly what this test
+// protects.
+func TestSessionListIncludesLatestReport(t *testing.T) {
+	store := openStore(t)
+	ctx := context.Background()
+	pool := store.Pool()
+
+	if _, err := pool.Exec(ctx, `ALTER TABLE reports DROP CONSTRAINT IF EXISTS reports_session_id_key`); err != nil {
+		t.Fatalf("drop constraint: %v", err)
+	}
+	constraintRestored := false
+	defer func() {
+		if constraintRestored {
+			return
+		}
+		if _, err := pool.Exec(ctx, `DELETE FROM reports WHERE id LIKE 'rep-history-%'`); err != nil {
+			t.Errorf("cleanup reports: %v", err)
+		}
+		if _, err := pool.Exec(ctx, `ALTER TABLE reports ADD CONSTRAINT reports_session_id_key UNIQUE (session_id)`); err != nil {
+			t.Errorf("restore constraint: %v", err)
+		}
+	}()
+
+	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
+	owners := map[string]string{"sess-report-none": "usr_history", "sess-report-one": "usr_history", "sess-report-many": "usr_history"}
+	ids := []string{"sess-report-none", "sess-report-one", "sess-report-many"}
+	for i, id := range ids {
+		created := base.Add(time.Duration(i) * time.Minute)
+		if err := store.Repos().Sessions.Create(ctx, &session.Session{
+			ID:         id,
+			OwnerID:    owners[id],
+			TargetRole: "Go 后端",
+			ResumeText: "resume",
+			JDText:     "jd",
+			Config:     session.DefaultConfig(),
+			Status:     session.StatusCompleted,
+			CreatedAt:  created,
+			UpdatedAt:  created,
+		}); err != nil {
+			t.Fatalf("create session %s: %v", id, err)
+		}
+	}
+
+	insertReport := func(id, sessionID string, score float64, at time.Time) {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO reports (id, session_id, user_id, structured, markdown, overall_score, created_at, updated_at)
+			VALUES ($1, $2, $3, '{}', '', $4, $5, $5)`,
+			id, sessionID, owners[sessionID], score, at); err != nil {
+			t.Fatalf("insert report %s: %v", id, err)
+		}
+	}
+	oneAt := base.Add(10 * time.Minute)
+	insertReport("rep-history-one", "sess-report-one", 70, oneAt)
+	oldAt := base.Add(11 * time.Minute)
+	newAt := base.Add(12 * time.Minute)
+	insertReport("rep-history-old", "sess-report-many", 60, oldAt)
+	insertReport("rep-history-new", "sess-report-many", 90, newAt)
+
+	summaries, err := store.Repos().Sessions.ListByUser(ctx, "usr_history", time.Time{}, "", 10)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	byID := map[string]session.Summary{}
+	for _, summary := range summaries {
+		byID[summary.ID] = summary
+	}
+
+	if got := byID["sess-report-none"].LatestReport; got != nil {
+		t.Fatalf("session without report = %+v, want nil", got)
+	}
+	one := byID["sess-report-one"].LatestReport
+	if one == nil || one.TotalScore != 70 || one.ScoreBand != domainreport.Band(70) || !one.GeneratedAt.Equal(oneAt) {
+		t.Fatalf("single report = %+v", one)
+	}
+	many := byID["sess-report-many"].LatestReport
+	if many == nil || many.TotalScore != 90 || !many.GeneratedAt.Equal(newAt) {
+		t.Fatalf("latest report = %+v, want score 90 at %s", many, newAt)
+	}
+
+	if _, err := pool.Exec(ctx, `DELETE FROM reports WHERE id LIKE 'rep-history-%'`); err != nil {
+		t.Fatalf("cleanup reports: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `ALTER TABLE reports ADD CONSTRAINT reports_session_id_key UNIQUE (session_id)`); err != nil {
+		t.Fatalf("restore constraint: %v", err)
+	}
+	constraintRestored = true
+}

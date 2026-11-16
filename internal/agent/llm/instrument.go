@@ -56,6 +56,7 @@ func (c *InstrumentedClient) Generate(ctx context.Context, req Request) (Respons
 	}
 
 	c.metrics.IncModelCall(c.provider, c.model, result)
+	c.metrics.ObserveModelCall(c.provider, c.model, result, latency)
 	if err != nil {
 		c.metrics.IncModelCallFailure(c.provider, c.model, class)
 	} else {

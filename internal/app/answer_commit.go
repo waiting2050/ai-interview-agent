@@ -218,6 +218,7 @@ func (r *Runner) commitAnswer(
 		if err := repos.Sessions.UpdateState(ctx, sess, expected); err != nil {
 			return fmt.Errorf("update session state: %w", err)
 		}
+		recordTransition(r.metrics, sess)
 
 		if err := appendEvent(ctx, r.logger(ctx), repos.Events, sess.ID, run.ID, session.EventSessionPhase, map[string]any{
 			"status":          string(sess.Status),

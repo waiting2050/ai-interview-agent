@@ -146,6 +146,27 @@
 
 **换一种做法会怎样**：只记录成功/失败，不记 token 和版本。系统照样能跑，但回归集无法解释指标变化，成本只能靠账单倒推；线上出现「变慢」时也分不清是模型慢、重试多，还是锁等待。用第三方 APM 全覆盖则引入额外依赖，且模型语义（prompt 版本、token）仍需自己补。
 
+### 8.1 设计点 → 观测信号映射
+
+口径：一行一个设计点；信号必须是 `/metrics` 已输出的指标名，或日志/事件里的真实字段。本轮只补了两处确实没有信号的指标（状态机迁移、模型调用耗时），其余设计点沿用已有指标，没有为了对齐参考项目新增空指标。
+
+| 设计点 | 观测信号（真实名称/字段） | 位置 | 怎么用 |
+| --- | --- | --- | --- |
+| 状态机迁移 | `ai_interview_session_transitions_total{status,phase}`（本轮新增）；`session_events(type=session.phase)` 的 `status/phase/state_version` | `internal/app`（`UpdateState` 成功后）与 `session_events` | 计数器看聚合迁移量；逐次迁移以事件为准，两者按 `status+phase` 对账 |
+| 模型调用 | `ai_interview_model_calls_total{provider,model,result}`；`ai_interview_model_call_failures_total{provider,model,class}`；`ai_interview_model_tokens_total{direction}`；`ai_interview_model_call_seconds{provider,model,result}`（本轮新增）；日志 `model call` 的 `purpose/latency_ms/error_class/prompt_tokens/completion_tokens` | `internal/agent/llm/instrument.go` | 失败率 = failures / calls；耗时取 histogram 的 `_sum/_count` 或分位；`trace_id/session_id/run_id` 随日志透传 |
+| 评估与报告降级 | `ai_interview_evaluation_degraded_total{reason}`；`ai_interview_report_degraded_total{reason}` | evaluator / report generator | `reason` 是错误码（如 `model_output_invalid`），不是自由文本 |
+| 用户/会话预算 | `ai_interview_model_budget_rejections_total{scope}`（`scope` 取 `user` 或 `session`）；429 响应 `code=user_budget_exceeded` / `session_budget_exceeded` | `internal/app/budget.go`、`internal/api/http/errors.go` | 先查用户级、命中即返回，所以同一请求只会记一次拒绝 |
+| 运行队列与租约 | `ai_interview_worker_claims_total`；`ai_interview_lease_renew_attempts_total`；`ai_interview_lease_renew_failures_total`；`ai_interview_run_failures_total{kind,class}` | `internal/app/worker.go`、`runner.go` | 续租失败率 = failures / attempts；`class` 覆盖 `timeout/state_conflict/lock_busy/...` |
+| 死信 | `ai_interview_dead_letters_total{kind,class}`；`runs.dead_at`、`runs.failure_count`；日志 `run failed` 的 `failure_count/max_failures/error_class` | `internal/app/runner.go`、`runs` 表 | 死信 = 连续失败达到阈值；告警规则直接接这个累计值 |
+| 崩溃恢复扫描 | `ai_interview_stale_runs_detected_total` | `Service.Reconcile` | 只计「发现」的 stale run，不把恢复成功混进同一口径 |
+| 会话锁 | `ai_interview_lock_attempts_total`；`ai_interview_lock_conflicts_total` | `internal/platform/lock` | 冲突率 = conflicts / attempts；锁后端错误归到 `run_failures{class="lock_backend"}` |
+| 限流 | `ai_interview_rate_limit_rejections_total{action}`；`ai_interview_rate_limit_degraded_total{action}` | HTTP middleware | `degraded` 表示限流后端不可用时的显式放行，必须单独看 |
+| SSE 数据面 | `ai_interview_sse_connections`；`ai_interview_sse_reconnects_total`；`ai_interview_sse_event_delivery_seconds` | `internal/api/http/handlers.go` | 重连率以连接数为分母；投递延迟包含断线补发，衡量的是写入客户端的时间 |
+| 告警 | 日志 `alert fired` 的 `rule/severity/signal/value/message`；规则名 `run_dead_letter`、`model_budget_rejection`、`stale_run_detected` | `internal/platform/alert` | 首采样只 seed，重启不重放历史；冷却期内同一规则只报一次 |
+| 报告与历史列表 | `reports.overall_score/created_at/status`；`GET /v1/sessions` 的 `latest_report` 字段（总分/档位/生成时间） | `internal/store/postgres`、`internal/api/http/session_list.go` | 单条 `LEFT JOIN LATERAL` 取最新报告，无 N+1；没有报告时字段为空 |
+
+验证入口：`internal/platform/obs/metrics_test.go`（指标文本与计数器）、`internal/agent/llm/instrument_test.go`（调用耗时埋点）、`internal/app/answer_test.go::TestSessionTransitionMetricTracksSuccessfulStateWrites`（迁移计数）。
+
 ---
 
 ## 9. depth 维度的可执行锚点

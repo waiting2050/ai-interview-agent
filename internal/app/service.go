@@ -49,6 +49,16 @@ func ownerOrLegacy(ownerID string) string {
 	return ownerID
 }
 
+// recordTransition counts one successful CAS state write. The per-transition
+// detail stays in the session.phase event; this counter is the aggregate
+// signal used by dashboards and tests.
+func recordTransition(metrics *obs.Metrics, s *session.Session) {
+	if metrics == nil {
+		return
+	}
+	metrics.IncSessionTransition(string(s.Status), string(s.Phase))
+}
+
 func (e *RunInProgressError) Error() string {
 	return fmt.Sprintf("%s: run %s", ErrRunInProgress, e.RunID)
 }
@@ -116,6 +126,8 @@ type Service struct {
 	workerMode  bool
 	wake        func()
 	metrics     *obs.Metrics
+	// budget is run-level admission control for model spend.
+	budget *BudgetGuard
 
 	locks ports.Locker
 	// lockRenew is the watchdog tick for inline runs; zero disables renewal.
@@ -190,6 +202,7 @@ func New(store ports.Store, opts Options) *Service {
 		staleAfter:  opts.RunStaleAfter,
 		synchronous: opts.Synchronous,
 		metrics:     opts.Metrics,
+		budget:      NewBudgetGuard(opts.Metrics),
 		locks:       opts.Locker,
 		lockRenew:   opts.LockRenewInterval,
 	}
@@ -276,6 +289,22 @@ func (s *Service) GetSession(ctx context.Context, id string) (*session.Session, 
 	return s.store.Repos().Sessions.Get(ctx, id)
 }
 
+// ListSessions returns one page of the caller's own sessions. before/beforeID
+// is the keyset cursor returned by the previous page; zero means the first
+// page. Ownership is pushed into SQL instead of filtered after the fact.
+func (s *Service) ListSessions(ctx context.Context, userID string, before time.Time, beforeID string, limit int) ([]session.Summary, error) {
+	if strings.TrimSpace(userID) == "" {
+		return nil, fmt.Errorf("%w: user is required", ErrInvalidArgument)
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	return s.store.Repos().Sessions.ListByUser(ctx, userID, before, beforeID, limit)
+}
+
 type StartCommand struct {
 	SessionID      string
 	IdempotencyKey string
@@ -328,6 +357,10 @@ func (s *Service) Start(ctx context.Context, cmd StartCommand) (StartResult, err
 		return StartResult{}, &RunInProgressError{RunID: running.ID}
 	} else if !errors.Is(err, ports.ErrNotFound) {
 		return StartResult{}, fmt.Errorf("check running run: %w", err)
+	}
+
+	if err := s.budget.Check(ctx, s.store.Repos(), sess.OwnerID, sess.ID); err != nil {
+		return StartResult{}, err
 	}
 
 	now := s.now().UTC()
@@ -454,6 +487,10 @@ func (s *Service) Answer(ctx context.Context, cmd AnswerCommand) (StartResult, e
 		return StartResult{}, fmt.Errorf("check running run: %w", err)
 	}
 
+	if err := s.budget.Check(ctx, s.store.Repos(), sess.OwnerID, sess.ID); err != nil {
+		return StartResult{}, err
+	}
+
 	now := s.now().UTC()
 	run := &session.Run{
 		ID:             idgen.New(),
@@ -526,6 +563,7 @@ func (s *Service) Abort(ctx context.Context, sessionID string) error {
 		if err := repos.Sessions.UpdateState(ctx, sess, expected); err != nil {
 			return err
 		}
+		recordTransition(s.metrics, sess)
 		if err := appendEvent(ctx, s.logger(ctx), repos.Events, sess.ID, "", session.EventSessionAborted, map[string]any{
 			"status": string(sess.Status),
 		}); err != nil {
@@ -627,6 +665,11 @@ func (s *Service) Reconcile(ctx context.Context) (int, error) {
 	}
 
 	resumed := 0
+	if len(runs) > 0 {
+		// The alert rule watches detections, not successful resumes: a stale
+		// run that loses the state-conflict race is still evidence of a crash.
+		s.metrics.AddStaleRunsDetected(len(runs))
+	}
 	for _, run := range runs {
 		if err := s.store.Repos().Runs.MarkInterrupted(ctx, run.ID, run.LastStep, s.now().UTC()); err != nil {
 			if errors.Is(err, ports.ErrStateConflict) {

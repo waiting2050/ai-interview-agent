@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
+	domainreport "github.com/waiting2050/ai-interview-agent/internal/domain/report"
 	"github.com/waiting2050/ai-interview-agent/internal/domain/session"
 	"github.com/waiting2050/ai-interview-agent/internal/ports"
 )
@@ -72,32 +74,165 @@ func (r *sessionRepository) UpdateState(ctx context.Context, s *session.Session,
 	return nil
 }
 
-func scanSession(row pgx.Row) (*session.Session, error) {
+func (r *sessionRepository) ListByUser(ctx context.Context, userID string, before time.Time, beforeID string, limit int) ([]session.Summary, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+
+	// One query for the page and its newest report. The lateral join is what
+	// keeps this from becoming N+1 if reports ever allow more than one row per
+	// session; today the unique(session_id) constraint means "newest" is also
+	// the only report.
+	const selectPage = `SELECT ` + sessionColumns + `, rep.report_score, rep.report_created_at
+		FROM sessions s
+		LEFT JOIN LATERAL (
+			SELECT overall_score AS report_score, created_at AS report_created_at
+			FROM reports
+			WHERE session_id = s.id
+			ORDER BY created_at DESC
+			LIMIT 1
+		) rep ON true
+		WHERE s.user_id = $1`
+
 	var (
-		s       session.Session
+		rows pgx.Rows
+		err  error
+	)
+	if before.IsZero() {
+		rows, err = r.q.Query(ctx, selectPage+`
+			ORDER BY s.created_at DESC, s.id DESC
+			LIMIT $2`, userID, limit)
+	} else {
+		// Tuple comparison is the keyset cursor: created_at alone is not unique
+		// when a request creates several sessions, so id breaks the tie.
+		rows, err = r.q.Query(ctx, selectPage+`
+			AND (s.created_at, s.id) < ($2, $3)
+			ORDER BY s.created_at DESC, s.id DESC
+			LIMIT $4`, userID, before, beforeID, limit)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list sessions by user: %w", err)
+	}
+	defer rows.Close()
+
+	summaries := make([]session.Summary, 0, limit)
+	for rows.Next() {
+		var (
+			summary   session.Summary
+			score     pgtype.Float8
+			generated pgtype.Timestamptz
+		)
+		if err := scanSessionInto(rows, &summary.Session, &score, &generated); err != nil {
+			return nil, fmt.Errorf("scan session: %w", err)
+		}
+		if score.Valid && generated.Valid {
+			summary.LatestReport = &session.LatestReport{
+				TotalScore:  score.Float64,
+				ScoreBand:   domainreport.Band(score.Float64),
+				GeneratedAt: generated.Time,
+			}
+		}
+		summaries = append(summaries, summary)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate sessions: %w", err)
+	}
+	return summaries, nil
+}
+
+func scanSession(row pgx.Row) (*session.Session, error) {
+	s := &session.Session{}
+	if err := scanSessionInto(row, s); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// scanSessionInto keeps one column order for both the plain session read and
+// the history page (which appends the report projection as extra targets).
+func scanSessionInto(row pgx.Row, s *session.Session, extra ...any) error {
+	var (
 		cfg     []byte
 		profile []byte
 		status  string
 		phase   string
 	)
-	if err := row.Scan(
+	dest := []any{
 		&s.ID, &s.CandidateName, &s.OwnerID, &s.TargetRole, &s.ResumeText, &profile, &s.JDText, &s.Domain, &cfg,
 		&status, &phase, &s.StateVersion, &s.PendingTurnID, &s.PlanCursor, &s.FollowupsUsed,
 		&s.StartedAt, &s.EndedAt, &s.CreatedAt, &s.UpdatedAt,
-	); err != nil {
-		return nil, err
+	}
+	dest = append(dest, extra...)
+	if err := row.Scan(dest...); err != nil {
+		return err
 	}
 	if err := json.Unmarshal(cfg, &s.Config); err != nil {
-		return nil, fmt.Errorf("unmarshal session config: %w", err)
+		return fmt.Errorf("unmarshal session config: %w", err)
 	}
 	if len(profile) > 0 {
 		if err := json.Unmarshal(profile, &s.ResumeProfile); err != nil {
-			return nil, fmt.Errorf("unmarshal resume profile: %w", err)
+			return fmt.Errorf("unmarshal resume profile: %w", err)
 		}
 	}
 	s.Status = session.Status(status)
 	s.Phase = session.Phase(phase)
-	return &s, nil
+	return nil
+}
+
+type budgetRepository struct{ q querier }
+
+func (r *budgetRepository) SetLimit(ctx context.Context, scope, scopeID string, limitTokens int64) error {
+	_, err := r.q.Exec(ctx, `
+		INSERT INTO model_budget_limits (scope, scope_id, limit_tokens, updated_at)
+		VALUES ($1, $2, $3, now())
+		ON CONFLICT (scope, scope_id)
+		DO UPDATE SET limit_tokens = EXCLUDED.limit_tokens, updated_at = now()`,
+		scope, scopeID, limitTokens)
+	if err != nil {
+		return fmt.Errorf("set model budget limit: %w", err)
+	}
+	return nil
+}
+
+func (r *budgetRepository) GetLimit(ctx context.Context, scope, scopeID string) (int64, bool, error) {
+	var limit int64
+	err := r.q.QueryRow(ctx, `
+		SELECT limit_tokens FROM model_budget_limits WHERE scope = $1 AND scope_id = $2`,
+		scope, scopeID).Scan(&limit)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("get model budget limit: %w", err)
+	}
+	return limit, true, nil
+}
+
+// UserSpendTokens sums the existing ledger. Joining sessions keeps runs the
+// only place tokens are written, so a user budget can never disagree with the
+// per-run usage shown in the run API.
+func (r *budgetRepository) UserSpendTokens(ctx context.Context, userID string) (int64, error) {
+	var spent int64
+	err := r.q.QueryRow(ctx, `
+		SELECT COALESCE(SUM(r.prompt_tokens + r.completion_tokens), 0)
+		FROM runs r
+		JOIN sessions s ON s.id = r.session_id
+		WHERE s.user_id = $1`, userID).Scan(&spent)
+	if err != nil {
+		return 0, fmt.Errorf("sum user spend: %w", err)
+	}
+	return spent, nil
+}
+
+func (r *budgetRepository) SessionSpendTokens(ctx context.Context, sessionID string) (int64, error) {
+	var spent int64
+	err := r.q.QueryRow(ctx, `
+		SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0)
+		FROM runs WHERE session_id = $1`, sessionID).Scan(&spent)
+	if err != nil {
+		return 0, fmt.Errorf("sum session spend: %w", err)
+	}
+	return spent, nil
 }
 
 type eventRepository struct{ q querier }

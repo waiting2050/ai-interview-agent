@@ -242,3 +242,101 @@
 - 未执行 `go test`、`go build`、`npm build`、`docker compose up`；因此「实现质量/能否跑通」只按代码与文档判断，不按运行结果判断。
 - 「无法确认」的典型项：参考的 OAuth/支付/ASR 真实联调、Milvus 集合内容、前端当前能否构建、Ragas/TruLens 真实分数；本地的真实模型评分稳定性、60 条回归之外的表现、demo 页在多浏览器下的一致性。
 - 机械比对脚本口径：Go 代码按行去首尾空白、压缩连续空白；排除 `//`、`/*`、`*`、`package`、`import` 开头行；5 行窗口拼接后长度 ≥120 才计入。Markdown 按 ≥25 字符整行精确匹配。符号按 `^type X` / `^func X(` 提取，大小写不敏感，排除 `.git/bin/tmp`。
+
+---
+
+## 7. 补齐计划：只补能撑住 3 分钟追问的能力
+
+筛选口径只有两条，不按数量：
+
+1. 补上之后，技术面能围绕它连续追问 3 分钟以上（有实现细节、有失败路径、有可验证结果）。
+2. 不依赖付费服务、外部账号或必须联网才能运行的组件。
+
+时间按「寒假实习投递前的可用周」估算，单位是人日。
+
+### 7.1 判定表
+
+| 缺失能力 | 面试价值 | 工作量 | 补/不补 | 一句话理由（可直接说出口） |
+| --- | --- | --- | --- | --- |
+| AI 预测题 | 高 | 0.5 人日 | **补** | 复用正式提问的同一生成器，降级、去重、长度校验只有一份实现，预测题不会变成第二套模型链路。 |
+| 面试历史列表 / 报告归档入口 | 中高 | 0.4 人日 | **补** | 已有 `sessions(user_id, created_at DESC)` 索引，补 keyset 分页和归属过滤就能讲清「多租户列表怎么做」。 |
+| Dockerfile + 单命令镜像 | 中 | 0.3 人日 | **补** | 多阶段构建 + 静态二进制 + 非 root，能在 CI 里真实构建一次，比口头说「能部署」可信。 |
+| 完整前端（面试页 + 报告页） | 高 | 5–8 人日 | 不补 | 前端只影响演示观感，不影响被追问的深度；半成品前端比没有更减分。 |
+| 找回密码 / 邮箱验证 | 低 | 0.5 人日 | 不补 | 找回密码要先接邮件服务商，那是运维配置，不是这个项目要证明的工程能力。 |
+| 用户级模型配置 / 配额 | 中 | 1 人日 | 不补 | 多租户密钥管理是平台工程；这个项目统一入口 + 限流，边界更清楚。 |
+| 校招 / 社招场景化 | 低 | 0.5 人日 | 不补 | 校招社招是 prompt 内容差异，难度和领域包已经覆盖了同一层。 |
+| ASR 语音输入 | 低 | 1 人日+ | 不补 | 语音输入依赖第三方计费接口，我优先保证评分链路离线可复现。 |
+| 支付 / 订阅 | 低 | 2 人日+ | 不补 | 没有支付是因为它不是产品，重点是让评分可复核。 |
+| 多 Agent 协作（adk Agent-as-Tool） | 低 | 2 人日+ | 不补 | 多 Agent 会让追问路径不可回放，我用确定性门链换可解释。 |
+| Milvus 独立向量库 | 低 | 1 人日 | 不补 | pgvector 和业务表同库同事务，语料规模没到需要独立向量库。 |
+| Redis Stream / MQ | 低 | 1 人日 | 不补 | PG 队列 + 租约能给出 `SKIP LOCKED` 和 fencing token 的证据，Redis Stream 反而说不清重复消费。 |
+| CozeLoop / 飞书告警 | 低 | 0.5 人日 | 不补 | 告警是部署环境的事，本地用 Prometheus 指标已经能定位。 |
+| 国际化 | 低 | 1 人日 | 不补 | 单语言不是缺陷，是范围；我没有把没做完的国际化包装成已完成。 |
+| 微信 OAuth / 小程序 | 低 | 1 人日 | 不补 | 微信登录需要企业主体和审核，个人项目接不了。 |
+| OCR / 图片简历 | 低 | 1 人日 | 不补 | OCR 成本高、准确率不可控；我宁可明确返回 `image_requires_ocr`。 |
+| Ragas / TruLens | 低 | 0.5 人日 | 不补 | 框架不产生分数；我的 60 条回归是可复现的，比占位报告更可信。 |
+| LiteLLM 模型网关 | 低 | 0.5 人日 | 不补 | 单模型 + OpenAI 兼容协议已经够用，多模型路由是平台需求。 |
+
+本次补的三项合计约 1.2 人日，低于 2 人日上限；三项都不新增付费依赖，也不需要任何外部账号。
+
+### 7.2 三处「选了不同方案」：把另一种取舍讲清楚
+
+这三处不是「没做」，是「在同一个问题上选了另一条路」。面试时先给参考方案，再给自己的约束和代价。
+
+| 问题 | 参考做法 | 本地做法 | 一句话口径 |
+| --- | --- | --- | --- |
+| 向量库 | Milvus 独立服务 + 自建 splitter/embedding/indexer/retriever | PostgreSQL + pgvector（HNSW），BM25 与向量融合 | 「Milvus 适合亿级向量和独立扩缩容；我的语料在万级，pgvector 让知识入库和会话数据同库同事务，少一个故障域。」 |
+| 异步队列 | Redis Stream 消费组 | PG `FOR UPDATE SKIP LOCKED` + 租约 + `lease_id` fencing + 死信 | 「Stream 的消费组解决分发，解决不了执行到一半崩了谁接手；我用租约到期、fencing token 和失败计数进死信，重复消费由幂等键兜底。」 |
+| 多 Agent | eino/adk，Host 调度两个子 Agent（Agent-as-Tool） | 单 Agent，固定 5 节点图 + 10 级确定性追问门 | 「多 Agent 适合开放式任务，面试追问需要可回放；我把决策做成纯函数，同样输入同样输出，报告里每个分数都能追到具体回合。」 |
+
+补充代价，避免只说优点：
+
+- pgvector 的边界是向量规模到千万级后，索引构建和内存会先成为瓶颈，届时再拆 Milvus 才是合理时机。
+- PG 队列的代价是轮询延迟（默认秒级），换来的是队列状态可直接用 SQL 查、能和业务状态同事务提交。
+- 单 Agent 的代价是复杂任务的探索能力弱，换来的是每条追问路径都能在 `run_steps` 里复盘。
+
+### 7.3 本次补的三项与验收证据
+
+#### A. AI 预测题
+
+- **接口**：`POST /v1/predictions`。请求字段 `target_role`（必填）、`difficulty`、`jd_text`、`domain`、`resume_text` 或 `resume_profile`（至少一个）、`count`（默认 5，夹取上限 10）；响应 `{domain, generator, model_called, degraded, questions[]}`，每题含 `topic/question/objective/expected_points/degraded`。
+- **复用而非另起链路**：`internal/agent/interview.Predictor` 直接调用正式提问用的 `QuestionGenerator`，降级、去重、长度校验只有一份实现；没有领域包时用简历技能/项目派生大纲。
+- **测试**：`TestPredictionReturnsDeterministicQuestions`、`TestPredictionValidation`、`TestPredictDegradesWhenModelFails`、`TestPredictClampsCount`、`TestPredictIsDeterministicAndDeduplicated`。
+- **命令**：`go test ./internal/agent/interview ./internal/api/http -run 'Predict|Prediction' -count=1`。
+
+#### B. 面试历史列表 + `latest_report`
+
+- **接口**：`GET /v1/sessions?limit=&before=&before_id=`；响应 `{sessions[], next_before, next_before_id}`，会话上新增可选字段 `latest_report: {total_score, score_band, generated_at}`。游标仍是 `(created_at, id)` 元组降序，语义未变；没有报告时字段缺省，不补 0。
+- **单次查询**：`LEFT JOIN LATERAL (SELECT overall_score, created_at FROM reports WHERE session_id = s.id ORDER BY created_at DESC LIMIT 1) rep ON true`，不逐条回查。
+- **测试**：`TestListSessionsIsOwnerScopedAndPaginated`、`TestListSessionsValidatesCursor`（HTTP 层，含无报告为 nil）；`TestSessionListByUserKeysetPagination`、`TestSessionListIncludesLatestReport`（集成层，覆盖有报告/无报告/多份报告取最新）。
+- **命令**：`go test ./internal/api/http -run ListSessions -count=1`；`DATABASE_URL=... go test -tags=integration ./internal/store/postgres -run 'TestSessionList' -count=1`。
+
+#### C. Dockerfile
+
+- **实现**：`golang:1.25.1-alpine` 构建、`CGO_ENABLED=0` 静态二进制、`alpine:3.20` 运行、非 root `uid 10001`、`EXPOSE 8080`；`.dockerignore` 排除 `.git`、`bin`、`tmp`、测试与文档。
+- **证据**：CI 新增 `docker` job，真实执行 `docker build -t ai-interview-agent:ci .`。本机 Docker daemon 未运行，因此以 CI 构建结果为准，不把「本地没跑」写成「已验证」。
+
+#### D. 用户级模型配额（追加）
+
+- **迁移**：`0016_model_budget.sql` 新建 `model_budget_limits(scope, scope_id, limit_tokens, updated_at)`，`scope ∈ {user, session}`；花费仍从 `runs` 账本聚合，不双写。
+- **判定顺序**：先查用户级总额，命中即拒绝并返回 `429 user_budget_exceeded`；用户级通过后再查会话级，超限返回 `429 session_budget_exceeded`；两者都通过才创建 run。未配置限额视为不限；读限额失败按 fail-closed 处理。
+- **指标**：`ai_interview_model_budget_rejections_total{scope}`，同一请求只计一次。
+- **测试**：`TestBudgetRejectsExhaustedUserEvenWhenSessionHasRoom`、`TestBudgetRejectsExhaustedSessionEvenWhenUserHasRoom`、`TestBudgetUserScopeWinsWhenBothAreExhausted`、`TestBudgetWithoutLimitsAllowsStart`、`TestStartRejectsExceededBudgetWith429`、`TestBudgetRepositoryReadsRunsLedger`。
+- **命令**：`go test ./internal/app ./internal/api/http -run Budget -count=1`。
+
+#### E. 轻量告警（追加）
+
+- **规则**（进程内，启动即生效，无外部依赖）：`run_dead_letter`（死信 delta ≥1，10 分钟冷却）、`model_budget_rejection`（预算拒绝 delta ≥5，15 分钟冷却）、`stale_run_detected`（stale run delta ≥1，10 分钟冷却）。
+- **触发与抑制**：按采样窗口对累计计数器取 delta；首次采样只 seed，重启不重放历史；同一规则在冷却期内只报一次；计数器重置按 0 delta 处理。
+- **出口**：结构化日志 `alert fired`，字段 `rule/severity/signal/value/message`。
+- **测试**：`TestFirstObservationOnlySeeds`、`TestDeadLetterFiresOncePerCooldown`、`TestBudgetRejectionNeedsThreshold`、`TestStaleRunFires`、`TestCounterResetDoesNotFire`。
+- **命令**：`go test ./internal/platform/alert -count=1`。
+
+#### F. 可观测性映射（追加）
+
+- 映射表见 `docs/design-rationale.md` §8.1，覆盖状态机迁移、模型调用耗时与失败率、降级、预算拒绝、死信、stale run、锁、限流、SSE、告警、报告列表。
+- 本轮只补两个确实缺失的指标：`ai_interview_session_transitions_total{status,phase}`、`ai_interview_model_call_seconds{provider,model,result}`；其余信号沿用已有指标或日志/事件字段，没有新增空指标。
+- **测试**：`TestMetricsCountersAndRendering`、`TestInstrumentedClientRecordsCallsTokensAndSessionUsage`、`TestSessionTransitionMetricTracksSuccessfulStateWrites`。
+- **命令**：`go test ./internal/platform/obs ./internal/agent/llm ./internal/app -count=1`。
+
+**CI**：`unit` / `integration` / `docker` 三个 job 的真实结果以 GitHub Actions run 为准（run id 见提交说明与最终回复）。

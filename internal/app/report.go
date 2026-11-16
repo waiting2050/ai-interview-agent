@@ -132,6 +132,11 @@ func (s *Service) startReport(ctx context.Context, cmd FinishCommand, allowAwait
 			return fmt.Errorf("load session for report: %w", err)
 		}
 
+		// Same admission order as start/answer: user total, then session.
+		if err := s.budget.Check(ctx, repos, sess.OwnerID, sess.ID); err != nil {
+			return err
+		}
+
 		transitioned := false
 		expected := sess.StateVersion
 		switch sess.Status {
@@ -151,6 +156,7 @@ func (s *Service) startReport(ctx context.Context, cmd FinishCommand, allowAwait
 			if err := repos.Sessions.UpdateState(ctx, sess, expected); err != nil {
 				return err
 			}
+			recordTransition(s.metrics, sess)
 			transitioned = true
 		case session.StatusReporting:
 			// A previous report run crashed after transitioning the session.
@@ -376,6 +382,7 @@ func (r *Runner) commitReport(ctx context.Context, run *session.Run, outcome rep
 		if err := repos.Sessions.UpdateState(ctx, sess, expected); err != nil {
 			return err
 		}
+		recordTransition(r.metrics, sess)
 
 		record := &domainreport.Record{
 			ID:        idgen.New(),

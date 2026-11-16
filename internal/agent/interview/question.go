@@ -65,6 +65,11 @@ type QuestionGenerator struct {
 	temperature float32
 }
 
+// ModelName reports which model backs this generator. The prediction API
+// returns it so "fake-heuristic" is visible to clients instead of being
+// mistaken for a live model call.
+func (g *QuestionGenerator) ModelName() string { return g.modelName }
+
 func NewQuestionGenerator(client llm.Client, modelName string) *QuestionGenerator {
 	return &QuestionGenerator{
 		client:      client,

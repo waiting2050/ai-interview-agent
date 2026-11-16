@@ -213,6 +213,7 @@ func (r *Runner) commitStart(ctx context.Context, run *session.Run, plan PlanRes
 			if err := repos.Sessions.UpdateState(ctx, sess, expected); err != nil {
 				return fmt.Errorf("update session state: %w", err)
 			}
+			recordTransition(r.metrics, sess)
 
 			items := make([]session.PlanItem, 0, len(plan.Items))
 			for i, item := range plan.Items {

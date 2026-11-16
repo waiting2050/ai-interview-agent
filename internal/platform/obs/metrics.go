@@ -37,6 +37,11 @@ type runFailureKey struct {
 	Class string
 }
 
+type transitionKey struct {
+	Status string
+	Phase  string
+}
+
 // Metrics is a concurrency-safe registry. The zero value is not usable; call
 // NewMetrics.
 type Metrics struct {
@@ -53,11 +58,15 @@ type Metrics struct {
 	deadLetters        map[runFailureKey]uint64
 	rateLimitRejected  map[string]uint64
 	rateLimitDegraded  map[string]uint64
+	budgetRejected     map[string]uint64
+	transitions        map[transitionKey]uint64
+	staleRunsDetected  uint64
 	workerClaims       uint64
 	leaseRenewAttempts uint64
 	leaseRenewFailures uint64
 	sseReconnects      uint64
 	delivery           histogram
+	modelDurations     map[modelCallKey]*histogram
 
 	sseConnections atomic.Int64
 }
@@ -74,7 +83,10 @@ func NewMetrics() *Metrics {
 		deadLetters:        map[runFailureKey]uint64{},
 		rateLimitRejected:  map[string]uint64{},
 		rateLimitDegraded:  map[string]uint64{},
+		budgetRejected:     map[string]uint64{},
+		transitions:        map[transitionKey]uint64{},
 		delivery:           newHistogram(),
+		modelDurations:     map[modelCallKey]*histogram{},
 	}
 }
 
@@ -98,6 +110,36 @@ func (m *Metrics) IncModelCallFailure(provider, model, class string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.modelCallFailures[modelFailureKey{Provider: provider, Model: model, Class: nonEmpty(class)}]++
+}
+
+// ObserveModelCall records one model invocation latency. result matches the
+// label set of IncModelCall so the histogram and the counter join cleanly.
+func (m *Metrics) ObserveModelCall(provider, model, result string, d time.Duration) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := modelCallKey{Provider: provider, Model: model, Result: nonEmpty(result)}
+	h, ok := m.modelDurations[key]
+	if !ok {
+		h = new(histogram)
+		*h = newHistogram()
+		m.modelDurations[key] = h
+	}
+	h.observe(d.Seconds())
+}
+
+// IncSessionTransition counts one successful session state write, labelled by
+// the resulting status and phase. Per-transition detail stays in
+// session_events; this counter is the aggregate signal for dashboards.
+func (m *Metrics) IncSessionTransition(status, phase string) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.transitions[transitionKey{Status: status, Phase: phase}]++
 }
 
 // IncLockAttempt counts one session lock acquisition attempt. The contention
@@ -245,6 +287,59 @@ func (m *Metrics) IncLeaseRenewFailure() {
 	m.leaseRenewFailures++
 }
 
+// AddStaleRunsDetected counts runs the crash-recovery scan found stale. The
+// alert rule uses this counter; it is cumulative so restarts do not lose the
+// signal (Observe seeds on the first sample, see package alert).
+func (m *Metrics) AddStaleRunsDetected(count int) {
+	if m == nil || count <= 0 {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.staleRunsDetected += uint64(count)
+}
+
+// DeadLetterCount sums every kind/class of dead-lettered runs.
+func (m *Metrics) DeadLetterCount() uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var total uint64
+	for _, v := range m.deadLetters {
+		total += v
+	}
+	return total
+}
+
+// BudgetRejectionCount sums user- and session-scope rejections.
+func (m *Metrics) BudgetRejectionCount() uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var total uint64
+	for _, v := range m.budgetRejected {
+		total += v
+	}
+	return total
+}
+
+// StaleRunDetectedTotal is an accessor used by tests.
+func (m *Metrics) StaleRunDetectedTotal() uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.staleRunsDetected
+}
+
+// IncBudgetRejection counts one run rejected before it could spend tokens.
+// scope is "user" or "session"; user is checked first, so a request that
+// exceeds both is only counted as a user rejection.
+func (m *Metrics) IncBudgetRejection(scope string) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.budgetRejected[nonEmpty(scope)]++
+}
+
 // IncRateLimitRejection counts one request rejected by the user rate limiter.
 func (m *Metrics) IncRateLimitRejection(action string) {
 	if m == nil {
@@ -379,6 +474,36 @@ func (m *Metrics) RateLimitRejectionTotal(action string) uint64 {
 	return m.rateLimitRejected[nonEmpty(action)]
 }
 
+// BudgetRejectionTotal is an accessor used by tests.
+func (m *Metrics) BudgetRejectionTotal(scope string) uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.budgetRejected[nonEmpty(scope)]
+}
+
+// ModelCallDurationCount is an accessor used by tests.
+func (m *Metrics) ModelCallDurationCount(provider, model, result string) uint64 {
+	if m == nil {
+		return 0
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if h, ok := m.modelDurations[modelCallKey{Provider: provider, Model: model, Result: result}]; ok {
+		return h.count
+	}
+	return 0
+}
+
+// SessionTransitionTotal is an accessor used by tests.
+func (m *Metrics) SessionTransitionTotal(status, phase string) uint64 {
+	if m == nil {
+		return 0
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.transitions[transitionKey{Status: status, Phase: phase}]
+}
+
 // RateLimitDegradedTotal is an accessor used by tests.
 func (m *Metrics) RateLimitDegradedTotal(action string) uint64 {
 	m.mu.Lock()
@@ -439,6 +564,30 @@ func (m *Metrics) WriteText(w io.Writer) error {
 	if err := writeFamily("ai_interview_model_tokens_total",
 		"Model token usage by direction.", "counter", tokenLines); err != nil {
 		return err
+	}
+
+	if _, err := fmt.Fprintf(w, "# HELP ai_interview_model_call_seconds Model invocation latency by provider, model and result.\n# TYPE ai_interview_model_call_seconds histogram\n"); err != nil {
+		return err
+	}
+	durationKeys := make([]modelCallKey, 0, len(m.modelDurations))
+	for k := range m.modelDurations {
+		durationKeys = append(durationKeys, k)
+	}
+	sort.Slice(durationKeys, func(i, j int) bool {
+		if durationKeys[i].Provider != durationKeys[j].Provider {
+			return durationKeys[i].Provider < durationKeys[j].Provider
+		}
+		if durationKeys[i].Model != durationKeys[j].Model {
+			return durationKeys[i].Model < durationKeys[j].Model
+		}
+		return durationKeys[i].Result < durationKeys[j].Result
+	})
+	for _, k := range durationKeys {
+		labels := fmt.Sprintf(`model="%s",provider="%s",result="%s"`,
+			escape(k.Model), escape(k.Provider), escape(k.Result))
+		if err := writeHistogramSeries(w, "ai_interview_model_call_seconds", labels, m.modelDurations[k]); err != nil {
+			return err
+		}
 	}
 
 	var evalLines []string
@@ -545,6 +694,33 @@ func (m *Metrics) WriteText(w io.Writer) error {
 		return err
 	}
 
+	var budgetLines []string
+	for scope, v := range m.budgetRejected {
+		budgetLines = append(budgetLines, fmt.Sprintf(
+			`ai_interview_model_budget_rejections_total{scope="%s"} %d`, escape(scope), v))
+	}
+	if err := writeFamily("ai_interview_model_budget_rejections_total",
+		"Runs rejected before spending tokens, by budget scope.", "counter", budgetLines); err != nil {
+		return err
+	}
+
+	var transitionLines []string
+	for k, v := range m.transitions {
+		transitionLines = append(transitionLines, fmt.Sprintf(
+			`ai_interview_session_transitions_total{phase="%s",status="%s"} %d`,
+			escape(k.Phase), escape(k.Status), v))
+	}
+	if err := writeFamily("ai_interview_session_transitions_total",
+		"Successful session state writes by resulting status and phase.", "counter", transitionLines); err != nil {
+		return err
+	}
+
+	if err := writeFamily("ai_interview_stale_runs_detected_total",
+		"Runs found stale by the crash-recovery scan since process start.",
+		"counter", []string{fmt.Sprintf("ai_interview_stale_runs_detected_total %d", m.staleRunsDetected)}); err != nil {
+		return err
+	}
+
 	return writeHistogram(w, "ai_interview_sse_event_delivery_seconds",
 		"Time from listing events to writing them to the SSE client.", &m.delivery)
 }
@@ -553,20 +729,43 @@ func writeHistogram(w io.Writer, name, help string, h *histogram) error {
 	if _, err := fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s histogram\n", name, help, name); err != nil {
 		return err
 	}
+	return writeHistogramSeries(w, name, "", h)
+}
+
+// writeHistogramSeries renders one series. labels is an already escaped
+// `k="v",k2="v2"` fragment; an empty string means an unlabelled series.
+func writeHistogramSeries(w io.Writer, name, labels string, h *histogram) error {
 	var cumulative uint64
 	for i, bound := range h.buckets {
 		cumulative += h.counts[i]
-		if _, err := fmt.Fprintf(w, "%s_bucket{le=\"%s\"} %d\n", name, bound.label, cumulative); err != nil {
+		if err := writeHistogramBucket(w, name, labels, bound.label, cumulative); err != nil {
 			return err
 		}
 	}
-	if _, err := fmt.Fprintf(w, "%s_bucket{le=\"+Inf\"} %d\n", name, h.count); err != nil {
+	if err := writeHistogramBucket(w, name, labels, "+Inf", h.count); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintf(w, "%s_sum %s\n", name, strconv.FormatFloat(h.sum, 'f', -1, 64)); err != nil {
+	sum := strconv.FormatFloat(h.sum, 'f', -1, 64)
+	if labels == "" {
+		if _, err := fmt.Fprintf(w, "%s_sum %s\n", name, sum); err != nil {
+			return err
+		}
+		_, err := fmt.Fprintf(w, "%s_count %d\n", name, h.count)
 		return err
 	}
-	_, err := fmt.Fprintf(w, "%s_count %d\n", name, h.count)
+	if _, err := fmt.Fprintf(w, "%s_sum{%s} %s\n", name, labels, sum); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintf(w, "%s_count{%s} %d\n", name, labels, h.count)
+	return err
+}
+
+func writeHistogramBucket(w io.Writer, name, labels, le string, value uint64) error {
+	fragment := fmt.Sprintf(`le="%s"`, le)
+	if labels != "" {
+		fragment = fragment + "," + labels
+	}
+	_, err := fmt.Fprintf(w, "%s_bucket{%s} %d\n", name, fragment, value)
 	return err
 }
 
